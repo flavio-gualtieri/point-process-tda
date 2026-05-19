@@ -11,7 +11,7 @@ class PointNetEncoder(Encoder):
         for h in hidden_dims:
             layers += [nn.Linear(prev, h), nn.ReLU()]
             prev = h
-        self.point_mlp = nn.Sequential(layers)
+        self.point_mlp = nn.Sequential(*layers)
 
         self.head = nn.Linear(hidden_dims[-1], embedding_dim)
 
