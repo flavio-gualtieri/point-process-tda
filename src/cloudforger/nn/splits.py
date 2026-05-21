@@ -1,4 +1,4 @@
-# src/pointforge/nn/splits.py
+# src/cloudforger/nn/splits.py
 import torch
 from torch.utils.data import Dataset, Subset, random_split
 
@@ -7,7 +7,7 @@ def train_val_test_split(
     fractions: tuple[float, float, float] = (0.7, 0.15, 0.15),
     seed: int = 0,
 ) -> tuple[Subset, Subset, Subset]:
-    """Split a dataset into train, validation, and test subsets.
+    """Split dataset into train, validation, and test subsets.
 
     Args:
         dataset:   any PyTorch Dataset.
