@@ -16,7 +16,7 @@ CONFIG = {
 }
 
 PROCESSES = {
-    "poisson": PoissonProcess(intensity=None),
+    "poisson": PoissonProcess(intensity=500),
     "matern": MaternHardCoreProcess(parent_intensity=1000, hardcore_radius=0.03),
     "thomas": ThomasProcess(parent_intensity=20, mean_offspring=25, cluster_scale=0.04),
 }

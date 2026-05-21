@@ -3,7 +3,6 @@ from typing import Any
 import numpy as np
 
 @dataclass
-
 class PointCloud:
     points: np.ndarray #shape (N, D)
     generator_name: str

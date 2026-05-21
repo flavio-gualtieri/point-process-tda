@@ -1,27 +1,49 @@
 # scripts/analyze_experiment_01.py
 import torch
-import numpy as np
-from sklearn.metrics import confusion_matrix, classification_report
 from pathlib import Path
 import matplotlib.pyplot as plt
-
 import pathlib
+
 torch.serialization.add_safe_globals([pathlib.PosixPath])
-results = torch.load("results/experiment_01/results.pt", weights_only=True)
-history = results["history"]
-label_names = results["label_names"]
 
-# Training curves
+# Each entry: (label, path-to-results.pt)
+RUNS = [
+    ("point cloud", Path("results/experiment_01/results.pt")),
+    ("persistence image", Path("results/experiment_01_pi/results.pt")),
+]
+
+# Load every run's results.
+loaded = []
+for name, path in RUNS:
+    res = torch.load(path, weights_only=True)
+    loaded.append((name, res))
+
+# Training curves — overlay all runs.
 fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-axes[0].plot(history["train_loss"], label="train")
-axes[0].plot(history["val_loss"], label="val")
-axes[0].set(xlabel="epoch", ylabel="loss", title="Loss")
-axes[0].legend()
-axes[1].plot(history["train_acc"], label="train")
-axes[1].plot(history["val_acc"], label="val")
-axes[1].set(xlabel="epoch", ylabel="accuracy", title="Accuracy")
-axes[1].legend()
-plt.tight_layout()
-plt.savefig("results/experiment_01/training_curves.png", dpi=150)
+colors = plt.cm.tab10.colors  # distinct color per run
 
-print(f"Final test accuracy: {results['test_acc']:.3f}")
+for i, (name, res) in enumerate(loaded):
+    history = res["history"]
+    c = colors[i]
+    # Loss: solid = train, dashed = val, same color per run.
+    axes[0].plot(history["train_loss"], color=c, linestyle="-",
+                 label=f"{name} (train)")
+    axes[0].plot(history["val_loss"], color=c, linestyle="--",
+                 label=f"{name} (val)")
+    axes[1].plot(history["train_acc"], color=c, linestyle="-",
+                 label=f"{name} (train)")
+    axes[1].plot(history["val_acc"], color=c, linestyle="--",
+                 label=f"{name} (val)")
+
+axes[0].set(xlabel="epoch", ylabel="loss", title="Loss")
+axes[0].legend(fontsize=8)
+axes[1].set(xlabel="epoch", ylabel="accuracy", title="Accuracy")
+axes[1].legend(fontsize=8)
+
+plt.tight_layout()
+plt.savefig("results/experiment_01/training_curves_comparison.png", dpi=150)
+
+# Test accuracies side by side.
+print("Test accuracy by run:")
+for name, res in loaded:
+    print(f"  {name:20s} {res['test_acc']:.3f}")

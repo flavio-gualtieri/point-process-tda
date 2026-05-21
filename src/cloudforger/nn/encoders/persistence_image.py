@@ -3,7 +3,7 @@ import torch.nn as nn
 from .base import Encoder
 
 class PIEncoder(Encoder):
-    def __init__(self, in_channels: int = 2, embedding_dim: int = 128, image_size: int = 50):
+    def __init__(self, in_channels: int = 2, embedding_dim: int = 128):
         super().__init__(embedding_dim=embedding_dim)
         self.in_channels = in_channels 
 
@@ -26,5 +26,5 @@ class PIEncoder(Encoder):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.conv(x)
-        h = h.flattedn(1)
+        h = h.flatten(1)
         return self.fc(h)
