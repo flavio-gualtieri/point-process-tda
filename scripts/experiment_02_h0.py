@@ -1,4 +1,4 @@
-# scripts/experiment_01_persistence_image.py
+# scripts/experiment_02_persistence_image.py
 import pickle
 import torch
 import torch.nn as nn
@@ -7,20 +7,20 @@ from pathlib import Path
 from cloudforger.nn.data import PersistenceImageDataset  # NOT YET BUILT — see note
 from cloudforger.nn.encoders.persistence_image import PIEncoder
 from cloudforger.nn.heads.classifier import ClassificationHead
-from cloudforger.nn.models.multi_modal import MultiModalModel
+from cloudforger.nn.models.single_modal import SingleModalModel
 from cloudforger.nn.train import train_one_epoch, evaluate
 from cloudforger.nn.splits import train_val_test_split
 
 # --- Config ---
 CONFIG = {
-    "dataset_path": Path("data/experiment_01/images.pkl"),
+    "dataset_path": Path("data/images.pkl"),
     "batch_size": 32,
-    "n_epochs": 200,
+    "n_epochs": 500,
     "lr": 1e-3,
     "embedding_dim": 128,
     "seed": 0,
-    "device": "cuda" if torch.cuda.is_available() else "cpu",
-    "output_dir": Path("results/experiment_01_pi"),
+    "device": "mps" if torch.backends.mps.is_available() else "cpu",
+    "output_dir": Path("results/experiment_02_pi"),
 }
 CONFIG["output_dir"].mkdir(parents=True, exist_ok=True)
 
@@ -35,26 +35,28 @@ images = data["images"]          # list of {0: (R,R) array, 1: (R,R) array}
 labels = data["labels"]
 label_names = data["label_names"]
 n_classes = len(label_names)
-dims = sorted(images[0].keys())  # e.g. [0, 1]
+dims = [0]  # e.g. [0, 1]
 print(f"Loaded {len(images)} samples, {n_classes} classes, homology dims {dims}")
 
-dataset = PersistenceImageDataset(images, labels)
+class _SingleDimDataset(torch.utils.data.Dataset):
+    """Extracts a single homology-dim tensor from a PersistenceImageDataset."""
+    def __init__(self, base, key: str):
+        self.base, self.key = base, key
+    def __len__(self): return len(self.base)
+    def __getitem__(self, i):
+        x, y = self.base[i]
+        return x[self.key], y
+
+dataset = _SingleDimDataset(PersistenceImageDataset(images, labels), key="h0")
 train_ds, val_ds, test_ds = train_val_test_split(dataset, seed=CONFIG["seed"])
 train_loader = DataLoader(train_ds, batch_size=CONFIG["batch_size"], shuffle=True)
 val_loader = DataLoader(val_ds, batch_size=CONFIG["batch_size"])
 test_loader = DataLoader(test_ds, batch_size=CONFIG["batch_size"])
 
-# --- Model: one PIEncoder per homology dimension, fused late ---
-encoders = {
-    f"h{d}": PIEncoder(in_channels=1, embedding_dim=CONFIG["embedding_dim"])
-    for d in dims
-}
-head = ClassificationHead(
-    # Late fusion: head sees concatenated embeddings, one per encoder.
-    embedding_dim=CONFIG["embedding_dim"] * len(encoders),
-    n_classes=n_classes,
-)
-model = MultiModalModel(encoders=encoders, head=head).to(CONFIG["device"])
+# --- Model ---
+encoder = PIEncoder(in_channels=1, embedding_dim=CONFIG["embedding_dim"])
+head = ClassificationHead(embedding_dim=CONFIG["embedding_dim"], n_classes=n_classes)
+model = SingleModalModel(encoder=encoder, head=head).to(CONFIG["device"])
 
 # --- Training setup ---
 optimizer = torch.optim.Adam(model.parameters(), lr=CONFIG["lr"])
@@ -96,4 +98,4 @@ torch.save({
     "config": CONFIG,
     "test_acc": test_acc,
     "label_names": label_names,
-}, CONFIG["output_dir"] / "results.pt")
+}, CONFIG["output_dir"] / "h0_results.pt")

@@ -7,6 +7,7 @@ __all__ = [
     "PointCloud",
     "Region",
     "Box",
+    "Torus",
     "PointProcess",
     "PoissonProcess",
 ]

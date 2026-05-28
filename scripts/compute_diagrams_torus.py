@@ -1,4 +1,4 @@
-# scripts/compute_diagrams.py
+# scripts/compute_diagrams_torus.py
 import pickle
 from pathlib import Path
 
@@ -10,7 +10,7 @@ FILTRATION = RipsFiltration(maxdim=1, thresh=None)
 
 
 def main():
-    with open(DATA_DIR / "clouds.pkl", "rb") as f:
+    with open(DATA_DIR / "clouds_torus.pkl", "rb") as f:
         data = pickle.load(f)
 
     clouds = data["clouds"]
@@ -22,7 +22,7 @@ def main():
     print()
 
     # Labels/names carried straight through, kept index-aligned with diagrams.
-    with open(DATA_DIR / "diagrams.pkl", "wb") as f:
+    with open(DATA_DIR / "diagrams_torus.pkl", "wb") as f:
         pickle.dump({
             "diagrams": diagrams,
             "labels": data["labels"],
@@ -30,7 +30,7 @@ def main():
             "filtration_params": FILTRATION.params,
         }, f)
 
-    print(f"Computed {len(diagrams)} diagrams -> {DATA_DIR / 'diagrams.pkl'}")
+    print(f"Computed {len(diagrams)} diagrams -> {DATA_DIR / 'diagrams_torus.pkl'}")
 
 
 if __name__ == "__main__":

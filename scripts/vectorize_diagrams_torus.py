@@ -38,7 +38,7 @@ def build_imagers(diagrams) -> MultiChannelImager:
 
 
 def main():
-    with open(DATA_DIR / "diagrams.pkl", "rb") as f:
+    with open(DATA_DIR / "diagrams_torus.pkl", "rb") as f:
         bundle = pickle.load(f)
 
     diagrams = bundle["diagrams"]
@@ -47,7 +47,7 @@ def main():
     # images[i] is {0: (R,R) array, 1: (R,R) array} for diagram i.
     images = [imager.transform(d) for d in diagrams]
 
-    with open(DATA_DIR / "images.pkl", "wb") as f:
+    with open(DATA_DIR / "images_torus.pkl", "wb") as f:
         pickle.dump({
             "images": images,
             "labels": bundle["labels"],
@@ -55,7 +55,7 @@ def main():
             "imager_params": imager.params,
         }, f)
 
-    print(f"Vectorized {len(images)} diagrams -> {DATA_DIR / 'images.pkl'}")
+    print(f"Vectorized {len(images)} diagrams -> {DATA_DIR / 'images_torus.pkl'}")
 
 
 if __name__ == "__main__":

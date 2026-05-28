@@ -33,4 +33,5 @@ class PointProcess(ABC):
             generator_name=self.name,
             generator_params=self.params,
             seed=seed,
+            region=region
         )
