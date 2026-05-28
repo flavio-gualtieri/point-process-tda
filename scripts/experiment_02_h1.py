@@ -1,12 +1,11 @@
-# scripts/experiment_01_pointcloud_only.py
+# scripts/experiment_02_persistence_image.py
 import pickle
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from pathlib import Path
-
-from cloudforger.nn.data import PointCloudDataset
-from cloudforger.nn.encoders.point_cloud import PointNetEncoder
+from cloudforger.nn.data import PersistenceImageDataset  # NOT YET BUILT — see note
+from cloudforger.nn.encoders.persistence_image import PIEncoder
 from cloudforger.nn.heads.classifier import ClassificationHead
 from cloudforger.nn.models.single_modal import SingleModalModel
 from cloudforger.nn.train import train_one_epoch, evaluate
@@ -14,16 +13,14 @@ from cloudforger.nn.splits import train_val_test_split
 
 # --- Config ---
 CONFIG = {
-    "dataset_path": Path("data/experiment_01/clouds.pkl"),
+    "dataset_path": Path("data/images.pkl"),
     "batch_size": 32,
-    "n_epochs": 200,
+    "n_epochs": 500,
     "lr": 1e-3,
-    "n_points": 256,
     "embedding_dim": 128,
-    "hidden_dims": (64, 128, 256),
     "seed": 0,
-    "device": "cuda" if torch.cuda.is_available() else "cpu",
-    "output_dir": Path("results/experiment_01"),
+    "device": "mps" if torch.backends.mps.is_available() else "cpu",
+    "output_dir": Path("results/experiment_02_pi"),
 }
 CONFIG["output_dir"].mkdir(parents=True, exist_ok=True)
 
@@ -33,36 +30,31 @@ torch.manual_seed(CONFIG["seed"])
 # --- Data ---
 with open(CONFIG["dataset_path"], "rb") as f:
     data = pickle.load(f)
-clouds = data["clouds"]
+
+images = data["images"]          # list of {0: (R,R) array, 1: (R,R) array}
 labels = data["labels"]
 label_names = data["label_names"]
 n_classes = len(label_names)
-dim = clouds[0].dimension
+dims = [1]  # e.g. [0, 1]
+print(f"Loaded {len(images)} samples, {n_classes} classes, homology dims {dims}")
 
-print(f"Loaded dataset with, {n_classes} classes, point dim {dim}")
+class _SingleDimDataset(torch.utils.data.Dataset):
+    def __init__(self, base, key: str):
+        self.base, self.key = base, key
+    def __len__(self): return len(self.base)
+    def __getitem__(self, i):
+        x, y = self.base[i]
+        return x[self.key], y
 
-dataset = PointCloudDataset(clouds, labels, n_points=CONFIG["n_points"])
-
-n = len(dataset)
-
-print(f"Dataset size: {n} samples")
-
+dataset = _SingleDimDataset(PersistenceImageDataset(images, labels), key="h1")
 train_ds, val_ds, test_ds = train_val_test_split(dataset, seed=CONFIG["seed"])
-
 train_loader = DataLoader(train_ds, batch_size=CONFIG["batch_size"], shuffle=True)
 val_loader = DataLoader(val_ds, batch_size=CONFIG["batch_size"])
 test_loader = DataLoader(test_ds, batch_size=CONFIG["batch_size"])
 
 # --- Model ---
-encoder = PointNetEncoder(
-    input_dim=dim,
-    embedding_dim=CONFIG["embedding_dim"],
-    hidden_dims=CONFIG["hidden_dims"],
-)
-head = ClassificationHead(
-    embedding_dim=CONFIG["embedding_dim"],
-    n_classes=n_classes,
-)
+encoder = PIEncoder(in_channels=1, embedding_dim=CONFIG["embedding_dim"])
+head = ClassificationHead(embedding_dim=CONFIG["embedding_dim"], n_classes=n_classes)
 model = SingleModalModel(encoder=encoder, head=head).to(CONFIG["device"])
 
 # --- Training setup ---
@@ -78,7 +70,6 @@ for epoch in range(1, CONFIG["n_epochs"] + 1):
         model, train_loader, optimizer, criterion, CONFIG["device"]
     )
     val_loss, val_acc = evaluate(model, val_loader, criterion, CONFIG["device"])
-
     history["train_loss"].append(train_loss)
     history["train_acc"].append(train_acc)
     history["val_loss"].append(val_loss)
@@ -94,7 +85,7 @@ for epoch in range(1, CONFIG["n_epochs"] + 1):
         f"val loss {val_loss:.4f} acc {val_acc:.3f}"
     )
 
-# --- Final test (with best validation model) ---
+# --- Final test (best-val checkpoint) ---
 model.load_state_dict(best_state)
 test_loss, test_acc = evaluate(model, test_loader, criterion, CONFIG["device"])
 print(f"\nTest accuracy (best-val checkpoint): {test_acc:.3f}")
@@ -106,4 +97,4 @@ torch.save({
     "config": CONFIG,
     "test_acc": test_acc,
     "label_names": label_names,
-}, CONFIG["output_dir"] / "results.pt")
+}, CONFIG["output_dir"] / "h1_results.pt")

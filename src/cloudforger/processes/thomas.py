@@ -39,15 +39,9 @@ class ThomasProcess(PointProcess):
     ) -> np.ndarray:
         # Edge correction: expand region by ~4 sigma in each direction
         # so offspring near boundaries have properly distributed parents
+        # Step 1: generate parent points in the expanded region
         pad = 4 * self.cluster_scale
-        if isinstance(region, Box):
-            expanded = Box(low=region.low - pad, high=region.high + pad)
-        else:
-            raise NotImplementedError(
-                "Thomas process currently only supports Box regions"
-            )
-
-        # Step 1: generate parents on expanded region
+        expanded = region.expanded(pad)
         n_parents = int(rng.poisson(self.parent_intensity * expanded.volume))
         parents = expanded.sample_uniform(n_parents, rng)
 

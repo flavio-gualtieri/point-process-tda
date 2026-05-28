@@ -1,6 +1,10 @@
+# cloudforger/tda/filtration/base.py
 from abc import ABC, abstractmethod
+from typing import Any
 from cloudforger.core.cloud import PointCloud
 from cloudforger.core.diagram import PersistenceDiagram
+
+import numpy as np
 
 class Filtration(ABC):
     def compute(self, cloud: PointCloud) -> PersistenceDiagram:
@@ -21,7 +25,7 @@ class Filtration(ABC):
 
     @property
     @abstractmethod
-    def params(self) -> dict[str, any]:
+    def params(self) -> dict[str, Any]:
         ...
 
     @abstractmethod

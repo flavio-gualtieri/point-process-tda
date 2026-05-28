@@ -1,4 +1,4 @@
-# scripts/analyze_experiment_01.py
+# scripts/analyze_experiments.py
 import torch
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -8,15 +8,22 @@ torch.serialization.add_safe_globals([pathlib.PosixPath])
 
 # Each entry: (label, path-to-results.pt)
 RUNS = [
-    ("point cloud", Path("results/experiment_01/results.pt")),
-    ("persistence image", Path("results/experiment_01_pi/results.pt")),
+    ("H0 persistence image", Path("results/experiment_04_torus/results_pc.pt")),
+    ("H1 persistence image", Path("results/experiment_04_torus/results_h1.pt")),
+    ("H0 + H1 persistence image", Path("results/experiment_04_torus/results_full_PI.pt")),
 ]
 
-# Load every run's results.
+# Load every run's results, skipping any that haven't been run yet.
 loaded = []
 for name, path in RUNS:
+    if not path.exists():
+        print(f"  [skip] {name}: no results at {path}")
+        continue
     res = torch.load(path, weights_only=True)
     loaded.append((name, res))
+
+if not loaded:
+    raise SystemExit("No results found — run at least one experiment first.")
 
 # Training curves — overlay all runs.
 fig, axes = plt.subplots(1, 2, figsize=(12, 4))
@@ -41,9 +48,9 @@ axes[1].set(xlabel="epoch", ylabel="accuracy", title="Accuracy")
 axes[1].legend(fontsize=8)
 
 plt.tight_layout()
-plt.savefig("results/experiment_01/training_curves_comparison.png", dpi=150)
+plt.savefig("results/torus_homology_comparison_h0.png", dpi=150)
 
 # Test accuracies side by side.
-print("Test accuracy by run:")
+print("\nTest accuracy by run:")
 for name, res in loaded:
     print(f"  {name:20s} {res['test_acc']:.3f}")

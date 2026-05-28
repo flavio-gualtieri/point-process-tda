@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 import numpy as np
+from .region import Region
 
 @dataclass
 class PointCloud:
@@ -8,6 +9,7 @@ class PointCloud:
     generator_name: str
     generator_params: dict[str, Any] = field(default_factory=dict)
     seed: int | None = None
+    region: Optional[Region] = None
 
     @property
     def n_points(self) -> int:
