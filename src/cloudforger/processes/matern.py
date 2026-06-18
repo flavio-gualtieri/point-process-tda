@@ -1,4 +1,5 @@
-# src/pointforge/processes/matern.py
+# src/cloudforger/processes/matern.py
+
 import numpy as np
 from scipy.spatial import cKDTree
 from ..core.base import PointProcess

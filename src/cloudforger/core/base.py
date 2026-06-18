@@ -1,4 +1,5 @@
-# src/pointforge/core/base.py
+# src/cloudforger/core/base.py
+
 from abc import ABC, abstractmethod
 from typing import Any
 import numpy as np

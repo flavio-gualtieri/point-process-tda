@@ -1,4 +1,5 @@
-# src/pointforge/processes/thomas.py
+# src/cloudforger/processes/thomas.py
+
 import numpy as np
 from ..core.base import PointProcess
 from ..core.region import Region, Box

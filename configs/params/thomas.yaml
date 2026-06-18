@@ -1,0 +1,16 @@
+task: classify
+process: thomas
+methods: [raw_pc, pairwise, pi_0, betti_0]
+
+# --- Path templates ({ambient_dim} is filled in per run) ---
+dataset_path_template: data/params/thomas
+output_dir_template:   results/params/thomas/{method}
+
+# --- Hyperparameters ---
+batch_size: 32
+n_epochs: 500
+lr: 0.001
+n_points: 500
+embedding_dim: 128
+hidden_dims: [64, 128, 256]
+seed: 0
