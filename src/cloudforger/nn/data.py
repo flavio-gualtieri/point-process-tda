@@ -25,9 +25,9 @@ class PersistenceImageDataset(Dataset):
 
 
 class PointCloudDataset(Dataset):
-    def __init__(self, clouds: list[PointCloud], labels: np.array, n_points: int | None = None):
+    def __init__(self, clouds: list[PointCloud], labels: np.array, n_points: int | None = None, dtype: torch.dtype = torch.long):
         self.clouds = clouds
-        self.labels = torch.as_tensor(labels, dtype=torch.long)
+        self.labels = torch.as_tensor(labels, dtype=dtype)
         self.n_points = n_points
         if len(self.clouds) != len(self.labels):
             raise ValueError("clouds and labels must have same length")

@@ -28,10 +28,12 @@ def train_one_epoch(model, loader: DataLoader, optimizer: torch.optim.Optimizer,
         optimizer.step()
 
         total_loss += loss.item() * n
-        total_correct += (logits.argmax(dim=-1) == labels).sum().item()
+        if labels.dim() == 1:
+            total_correct += (logits.argmax(dim=-1) == labels).sum().item()
         total_seen += n
 
-    return total_loss / total_seen, total_correct / total_seen
+    acc = total_correct / total_seen if total_seen > 0 else float("nan")
+    return total_loss / total_seen, acc
 
 
 @torch.no_grad()
@@ -47,7 +49,9 @@ def evaluate(model, loader: DataLoader, loss_fn: nn.Module, device: torch.device
         loss = loss_fn(logits, labels)
 
         total_loss += loss.item() * n
-        total_correct += (logits.argmax(dim=-1) == labels).sum().item()
+        if labels.dim() == 1:
+            total_correct += (logits.argmax(dim=-1) == labels).sum().item()
         total_seen += n
 
-    return total_loss / total_seen, total_correct / total_seen
+    acc = total_correct / total_seen if total_seen > 0 else float("nan")
+    return total_loss / total_seen, acc
