@@ -6,11 +6,9 @@ import numpy as np
 @dataclass
 class CorrelationFeatures:
     features: dict[str, np.ndarray]
-
     generator_name: str
     generator_params: dict[str, Any]
     seed: int | None = None
-
     statistic_params: dict[str, Any] = field(default_factory=dict)
 
     def names(self) -> list[str]:
