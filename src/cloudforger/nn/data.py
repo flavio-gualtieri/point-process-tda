@@ -5,9 +5,9 @@ from ..core.cloud import PointCloud
 from ..core.features import CorrelationFeatures
 
 class PersistenceImageDataset(Dataset):
-    def __init__(self, images: list[dict], labels: np.array):
+    def __init__(self, images: list[dict], labels: np.array, dtype: torch.dtype = torch.long):
         self.images = images
-        self.labels = torch.as_tensor(labels, dtype=torch.long)
+        self.labels = torch.as_tensor(labels, dtype=dtype)
         if len(self.images) != len(self.labels):
             raise ValueError("images and labels must have the same length")
         self.dims = sorted(images[0].keys())
@@ -48,15 +48,28 @@ class PointCloudDataset(Dataset):
 class CorrelationFeatureDataset(Dataset):
     def __init__(
         self,
-        features: list[CorrelationFeatures],
+        features: list[CorrelationFeatures | dict],
         labels: np.ndarray,
         statistic_names: list[str] | None = None,
+        dtype: torch.dtype = torch.long,
     ):
         if len(features) != len(labels):
             raise ValueError("features and labels must have same length")
-        self.features = features
-        self.labels = torch.as_tensor(labels, dtype=torch.long)
+        self.features = [self._coerce(f) for f in features]
+        self.labels = torch.as_tensor(labels, dtype=dtype)
         self.statistic_names = statistic_names
+
+    @staticmethod
+    def _coerce(f: CorrelationFeatures | dict) -> CorrelationFeatures:
+        if isinstance(f, CorrelationFeatures):
+            return f
+        return CorrelationFeatures(
+            features=f["features"],
+            generator_name=f.get("process", ""),
+            generator_params=f.get("params", {}),
+            seed=f.get("seed"),
+            statistic_params=f.get("statistic_params", {}),
+        )
 
     def __len__(self) -> int:
         return len(self.features)

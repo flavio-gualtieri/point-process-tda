@@ -1,11 +1,10 @@
+# configs/params/thomas.yaml
 task: classify
 process: thomas
-methods: [raw_pc, pairwise, pi_0, betti_0]
-
-# --- Path templates ({ambient_dim} is filled in per run) ---
-dataset_path_template: data/params/thomas
-output_dir_template:   results/params/thomas/{method}
-
+methods: [raw_pc]
+# --- Path templates ({method} and {process} are filled in per run) ---
+dataset_path_template: data/params/{process}
+output_dir_template:   results/params/{process}/{method}
 # --- Hyperparameters ---
 batch_size: 32
 n_epochs: 500

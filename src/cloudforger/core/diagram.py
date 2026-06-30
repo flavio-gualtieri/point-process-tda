@@ -11,8 +11,7 @@ class PersistenceDiagram:
     diagrams: dict[int, np.ndarray]
     generator_name: str
     generator_params: dict[str, Any]
-    seed: int | None = None
-    
+    seed: int | None = None 
     filtration_name: str = ""
     filtration_params: dict[str, Any] = field(default_factory=dict)
 

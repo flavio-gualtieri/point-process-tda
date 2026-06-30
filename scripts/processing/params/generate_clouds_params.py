@@ -1,34 +1,3 @@
-#!/usr/bin/env python3
-"""Generate a labelled series of point clouds for a parameter-estimation pipeline.
-
-Currently supports the Thomas cluster process in 2D. Every cloud produced is a
-``cloudforger.core.cloud.PointCloud``, which already records the generator name,
-the exact parameters it was sampled from, and its seed -- so each cloud in the
-saved collection is self-labelling; no separate label array is needed.
-
-Two design modes:
-  * ``random`` (default): draw ``--n-samples`` distinct parameter vectors from
-    continuous ranges. Best for estimation -- every cloud has its own label and
-    the parameter space is densely covered.
-  * ``grid``: sweep the discrete grid, ``--reps`` realisations per combination.
-
-Output: a pickle file containing a ``list[dict]`` (default). Each dict is
-labelled by its generating parameters under the ``"params"`` key:
-
-    {"points": (N, D) array, "params": {...}, "process": "thomas",
-     "seed": int, "n_points": int, "dimension": int, "region": {...}}
-
-These dicts hold only numpy arrays and built-ins, so the pickle reloads with
-numpy alone -- no need to import ``cloudforger``. Pass ``--format object`` to
-pickle ``PointCloud`` instances instead (which then requires the package).
-
-Examples
---------
-    python scripts/processing/generate_clouds_params.py                 # 500 distinct
-    python scripts/processing/generate_clouds_params.py --n-samples 100 --reps 5  # 100 settings x 5 seeds
-    python scripts/processing/generate_clouds_params.py --mode grid --reps 20
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -54,14 +23,6 @@ from cloudforger.processes.thomas import ThomasProcess  # noqa: E402
 
 ProcessBuilder = Callable[[dict[str, Any]], PointProcess]
 
-# --- process registry --------------------------------------------------------
-# Each process registers:
-#   build  : param dict -> PointProcess
-#   grid   : discrete values per parameter (used by --mode grid)
-#   ranges : (low, high, scale) per parameter, scale in {"log", "linear"}
-#            (used by --mode random)
-# To add a process later, register an entry here; the pipeline is otherwise
-# process-agnostic.
 PROCESS_REGISTRY: dict[str, dict[str, Any]] = {
     "thomas": {
         "build": lambda p: ThomasProcess(**p),
@@ -79,6 +40,7 @@ PROCESS_REGISTRY: dict[str, dict[str, Any]] = {
     },
 }
 
+# test on params not in training set.
 
 def iter_param_grid(grid: dict[str, list[Any]]) -> Iterator[dict[str, Any]]:
     """Yield each combination of parameters in `grid` as a dict."""

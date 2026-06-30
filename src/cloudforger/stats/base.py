@@ -8,7 +8,6 @@ from ..core.cloud import PointCloud
 
 
 class CloudStatistic(ABC):
-
     def __init__(self, n_samples: int, grid_size: int):
         self._n_samples = n_samples
         self._grid_size = grid_size
