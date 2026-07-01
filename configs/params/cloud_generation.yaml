@@ -1,0 +1,44 @@
+# configs/params/cloud_generation.yaml
+
+process: thomas
+dimension: 2
+seed: 0
+format: dict
+n_hint: 0
+
+design:
+  mode: grid 
+  reps: 8
+
+  # train/test ~= 620 * 8 = 4,960 clouds
+  # adversarial ~= 109 * 8 = 872 clouds
+  grid:
+    parent_intensity:
+      kind: logspace
+      low: 10.0
+      high: 200.0
+      num: 9
+    mean_offspring:
+      kind: logspace
+      low: 2.0
+      high: 40.0
+      num: 9
+    cluster_scale:
+      kind: logspace
+      low: 0.005
+      high: 0.1
+      num: 9
+
+  # Used only when design.mode = random.
+  random:
+    n_param_vectors: 5000
+    ranges:
+      parent_intensity: {low: 10.0, high: 200.0, scale: log}
+      mean_offspring: {low: 2.0, high: 40.0, scale: log}
+      cluster_scale: {low: 0.005, high: 0.1, scale: log}
+
+adversarial:
+  enabled: true
+  fraction: 0.15
+  n_param_vectors: null
+  seed_offset: 100000

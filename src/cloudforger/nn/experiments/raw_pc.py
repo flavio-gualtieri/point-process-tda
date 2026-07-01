@@ -1,0 +1,93 @@
+# src/cloudforger/nn/experiments/raw_pc.py
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import torch
+
+from cloudforger.core.cloud import PointCloud
+from cloudforger.core.region import Box
+from cloudforger.nn.data import PointCloudDataset
+from cloudforger.nn.experiments.base import Experiment, register
+
+
+def _cloud_list(payload: Any):
+    if isinstance(payload, dict) and "clouds" in payload:
+        return payload["clouds"]
+    return payload
+
+
+def _to_pointcloud(cloud) -> PointCloud:
+    if not isinstance(cloud, dict):
+        return cloud
+
+    region = None
+    reg = cloud.get("region")
+    if reg is not None:
+        try:
+            region = Box(
+                low=np.asarray(reg["low"], dtype=float),
+                high=np.asarray(reg["high"], dtype=float),
+            )
+        except Exception:
+            region = None
+
+    return PointCloud(
+        points=np.asarray(cloud["points"]),
+        generator_name=cloud.get("process", ""),
+        generator_params=dict(cloud.get("params", {})),
+        seed=cloud.get("seed"),
+        region=region,
+    )
+
+
+def _labels_from_clouds(cloud_list) -> tuple[np.ndarray, list[str]]:
+    def params_of(c):
+        return dict(c["params"]) if isinstance(c, dict) else dict(c.generator_params)
+
+    params = [params_of(c) for c in cloud_list]
+    names = list(params[0].keys())
+
+    for p in params:
+        if list(p.keys()) != names:
+            raise ValueError("Clouds have inconsistent parameter keys; cannot stack labels.")
+
+    labels = np.array([[p[k] for k in names] for p in params], dtype=float)
+    return labels, names
+
+
+@register("raw_pc")
+class RawPointCloudExperiment(Experiment):
+    file_key = "raw_pc"
+    subdir = "raw_pc"
+
+    def __init__(self, cfg: dict, hom_dim: int | None = None):
+        super().__init__(cfg, hom_dim)
+        self.ambient_dim: int | None = None
+
+    @property
+    def tag(self) -> str:
+        return f"raw_pc(dim={self.ambient_dim})"
+
+    @property
+    def extra_meta(self) -> dict:
+        return {"ambient_dim": self.ambient_dim}
+
+    def extract_labels(self, payload):
+        return _labels_from_clouds(_cloud_list(payload))
+
+    def build_dataset(self, payload, labels):
+        clouds = [_to_pointcloud(c) for c in _cloud_list(payload)]
+        self.ambient_dim = clouds[0].dimension
+        return PointCloudDataset(clouds, labels, n_points=self.cfg["n_points"], dtype=torch.float32)
+
+    def build_encoder(self, dataset):
+        from cloudforger.nn.encoders.point_cloud import PointNetEncoder
+
+        return PointNetEncoder(
+            input_dim=self.ambient_dim,
+            embedding_dim=self.cfg["embedding_dim"],
+            hidden_dims=self.cfg["hidden_dims"],
+        )

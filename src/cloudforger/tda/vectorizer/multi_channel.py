@@ -1,10 +1,13 @@
 # src/cloudforger/tda/vectorizer/multi_channel.py
-from typing import Any
 
-import numpy as np
+from __future__ import annotations
+
+from typing import Any
 
 from ...core.diagram import PersistenceDiagram
 from .persistence_image import PersistenceImager
+
+import numpy as np
 
 
 class MultiChannelImager:

@@ -1,13 +1,17 @@
 # src/cloudforger/stats/base.py
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any
 
-import numpy as np
-
 from ..core.cloud import PointCloud
+
+import numpy as np
 
 
 class CloudStatistic(ABC):
+
     def __init__(self, n_samples: int, grid_size: int):
         self._n_samples = n_samples
         self._grid_size = grid_size
@@ -29,12 +33,13 @@ class CloudStatistic(ABC):
 
     def compute(self, cloud: PointCloud) -> np.ndarray:
         rng = np.random.default_rng(
-            None if cloud.seed is None else cloud.seed + 1_000_003
+            None if cloud.seed is None else cloud.seed + 1_000_937
         )
         values = self._sample_values(cloud, rng)
         values = np.sort(values)
       
         counts = np.searchsorted(values, self._grid, side="right")
+    
         return counts / len(values)
 
     @property

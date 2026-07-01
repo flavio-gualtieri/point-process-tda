@@ -1,45 +1,7 @@
-#!/usr/bin/env python3
-"""Stage 2 (statistics branch): clouds -> correlation features.
-
-Reads the clouds produced by ``generate_clouds_params.py``
-(default ``data/params/<process>/clouds.pkl``) and writes correlation features
-(default ``data/params/<process>/features.pkl``), carrying the parameter labels
-through so every feature vector stays paired with its generating parameters.
-
-Rerun if a statistic's config (n_samples, grid_size) changes.
-
-Each cloud record is reconstructed into a ``PointCloud`` (with its ``Box``
-region) before the statistics run, because the statistics read ``cloud.points``,
-``cloud.seed`` and -- for PairDistanceCDF -- require ``cloud.region``.
-
-Output pickle (dict):
-    {
-        "features":         list, one entry per cloud (aligned with labels);
-                            a record {"features": {stat: vector}, "params": {...},
-                            "seed", "process", "statistic_params"} under
-                            --format dict, or a CorrelationFeatures under
-                            --format object,
-        "feature_matrix":   (N, D) float array, statistic vectors concatenated
-                            in sorted statistic-name order,
-        "feature_order":    list[str], the statistic names in that order,
-        "labels":           (N, P) float array of generating parameters,
-        "label_names":      list[str] naming the P label columns,
-        "params":           list[dict], the raw per-cloud parameters,
-        "seeds":            list[int],
-        "process":          str,
-        "statistic_params": dict,
-    }
-With --format dict (default) the file reloads with numpy alone.
-
-Examples
---------
-    python scripts/processing/params/compute_pairwise_params.py
-    python scripts/processing/params/compute_pairwise_params.py --n-samples 10000 --grid-size 128
-"""
+# scripts/processing/params/compute_pairwise_params.py
 
 from __future__ import annotations
 
-import argparse
 import pickle
 import sys
 from pathlib import Path
@@ -54,29 +16,44 @@ _SRC = PROJECT_ROOT / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from cloudforger.core.cloud import PointCloud          # noqa: E402
-from cloudforger.core.features import CorrelationFeatures  # noqa: E402
-from cloudforger.core.region import Box                # noqa: E402
-from cloudforger.stats.pair_dist import PairDistanceCDF  # noqa: E402
+from cloudforger.core.cloud import PointCloud
+from cloudforger.core.features import CorrelationFeatures
+from cloudforger.core.region import Box
+from cloudforger.stats.pair_dist import PairDistanceCDF
 
 
-def build_statistics(n_samples: int, grid_size: int) -> list:
-    """The statistics to compute. Add TripleAngleCDF (etc.) here later -- the
-    rest of the script picks it up with no other changes."""
-    return [
-        PairDistanceCDF(n_samples=n_samples, grid_size=grid_size),
-    ]
+CONFIG = {
+    "process": "thomas",
+    "dimensions": [2],
+
+    "splits": {
+        "train_test": {
+            "input_name": "clouds.pkl",
+            "output_name": "features.pkl",
+        },
+        "adversarial": {
+            "input_name": "adversarial_clouds.pkl",
+            "output_name": "adversarial_features.pkl",
+        },
+    },
+
+    "format": "dict",
+    "pair_distance": {
+        "n_samples": 5_000,
+        "grid_size": 64,
+    },
+}
 
 
-# --- record accessors --------------------------------------------------------
-# Work whether a cloud was saved as a dict (default) or a PointCloud instance.
+def normalize_dimensions(value: int | list[int]) -> list[int]:
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, list) and all(isinstance(v, int) for v in value):
+        return value
+    raise TypeError("CONFIG['dimensions'] must be an int or a list of ints.")
+
 
 def to_pointcloud(cloud: Any) -> PointCloud:
-    """Rebuild a PointCloud (with its Box region) from a dict record.
-
-    The statistics need a PointCloud; PairDistanceCDF in particular requires the
-    region, so it is reconstructed here rather than dropped.
-    """
     if not isinstance(cloud, dict):
         return cloud
     region = None
@@ -111,6 +88,7 @@ def load_clouds(path: Path) -> list:
         data = pickle.load(f)
     if isinstance(data, dict) and "clouds" in data:
         return data["clouds"]
+    
     return data
 
 
@@ -120,12 +98,12 @@ def build_labels(clouds: list) -> tuple[np.ndarray, list[str], list[dict]]:
     for p in params:
         if list(p.keys()) != label_names:
             raise ValueError("Clouds have inconsistent parameter keys; cannot stack labels.")
-    labels = np.array([[p[k] for k in label_names] for p in params], dtype=float)
+    labels = np.array([[p[k] for k in label_names] for p in params], dtype=float) # study this
+
     return labels, label_names, params
 
 
 def features_to_record(cf: CorrelationFeatures) -> dict[str, Any]:
-    """Flatten CorrelationFeatures into a plain, picklable dict labelled by params."""
     return {
         "features": {k: np.asarray(v) for k, v in cf.features.items()},
         "params": dict(cf.generator_params),   # <-- label
@@ -135,13 +113,9 @@ def features_to_record(cf: CorrelationFeatures) -> dict[str, Any]:
     }
 
 
-def compute_features(
-    clouds_path: Path,
-    out_path: Path,
-    statistics: list,
-    process: str,
-    feature_format: str = "dict",
-) -> None:
+def compute_features(clouds_path: Path, out_path: Path,
+                     statistics: list, process: str,
+                     feature_format: str = "dict") -> None:
     clouds = load_clouds(clouds_path)
     n = len(clouds)
     labels, label_names, params = build_labels(clouds)
@@ -194,49 +168,37 @@ def compute_features(
           f"feature_matrix {feature_matrix.shape} \u2192 {out_path}")
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument(
-        "--process", default="thomas",
-        help="Process name; sets default in/out paths (default: thomas).",
-    )
-    parser.add_argument(
-        "--clouds", type=Path, default=None,
-        help="Input clouds .pkl (default: data/params/<process>/clouds.pkl).",
-    )
-    parser.add_argument(
-        "--output", type=Path, default=None,
-        help="Output features .pkl (default: data/params/<process>/features.pkl).",
-    )
-    parser.add_argument(
-        "--format", default="dict", choices=("dict", "object"),
-        help="dict: records labelled by 'params' (numpy-only to reload). "
-             "object: CorrelationFeatures instances (needs cloudforger). "
-             "Default: dict.",
-    )
-    parser.add_argument(
-        "--n-samples", type=int, default=5000,
-        help="Pairs sampled per cloud for the CDF statistic (default: 5000).",
-    )
-    parser.add_argument(
-        "--grid-size", type=int, default=64,
-        help="CDF grid resolution (default: 64).",
-    )
-    return parser.parse_args(argv)
+def main() -> None:
+    process = CONFIG["process"]
+    dimensions = normalize_dimensions(CONFIG["dimensions"])
+    feature_format = CONFIG.get("format", "dict")
 
+    if feature_format not in {"dict", "object"}:
+        raise ValueError("CONFIG['format'] must be 'dict' or 'object'.")
 
-def main(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
-    clouds_path = args.clouds or (
-        PROJECT_ROOT / "data" / "params" / args.process / "clouds.pkl"
-    )
-    out_path = args.output or (
-        PROJECT_ROOT / "data" / "params" / args.process / "features.pkl"
-    )
-    statistics = build_statistics(args.n_samples, args.grid_size)
-    compute_features(clouds_path, out_path, statistics, args.process, args.format)
+    pair_cfg = CONFIG["pair_distance"]
+    statistics = [PairDistanceCDF(n_samples=int(pair_cfg["n_samples"]), grid_size=int(pair_cfg["grid_size"]))]
+
+    for dim in dimensions:
+        base_dir = PROJECT_ROOT / "data" / "params" / f"{dim}d" / process
+
+        for split_name, split_cfg in CONFIG["splits"].items():
+            clouds_path = base_dir / split_cfg["input_name"]
+            out_path = base_dir / split_cfg["output_name"]
+
+            if not clouds_path.exists():
+                print(f"[dim={dim}] Skipping {split_name}: missing {clouds_path}")
+                continue
+
+            print(f"[dim={dim}] Computing {split_name} features")
+            compute_features(
+                clouds_path=clouds_path,
+                out_path=out_path,
+                statistics=statistics,
+                process=process,
+                feature_format=feature_format,
+            )
+
     print("\nDone.")
 
 

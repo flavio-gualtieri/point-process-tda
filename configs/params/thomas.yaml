@@ -1,15 +1,24 @@
 # configs/params/thomas.yaml
-task: classify
+
 process: thomas
-methods: [raw_pc]
-# --- Path templates ({method} and {process} are filled in per run) ---
-dataset_path_template: data/params/{process}
-output_dir_template:   results/params/{process}/{method}
-# --- Hyperparameters ---
+task: params
+
+dims: [2]
+
+methods:
+  - raw_pc
+  - pi_0
+  - pi_1
+  - pairwise
+  - betti_0
+  - betti_1
+
 batch_size: 32
-n_epochs: 500
+n_epochs: 100
 lr: 0.001
-n_points: 500
+n_points: 512
 embedding_dim: 128
-hidden_dims: [64, 128, 256]
+hidden_dims: [128, 128]
 seed: 0
+
+output_dir_template: "results/params/{process}/{dim}d/{experiment}"

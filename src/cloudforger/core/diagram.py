@@ -1,3 +1,5 @@
+# src/cloudforger/core/diagram.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -8,6 +10,7 @@ import numpy as np
 
 @dataclass
 class PersistenceDiagram:
+
     diagrams: dict[int, np.ndarray]
     generator_name: str
     generator_params: dict[str, Any]
@@ -23,4 +26,5 @@ class PersistenceDiagram:
         if pairs is None or len(pairs) == 0:
             return np.empty((0, 2), dtype=float)
         finite_mask = np.isfinite(pairs).all(axis=1)
+        
         return pairs[finite_mask]

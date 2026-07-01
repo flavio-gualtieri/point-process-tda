@@ -1,10 +1,12 @@
+# src/cloudforger/tda/vectorizer/persistence_image.py
+
 from __future__ import annotations
 
 from typing import Any, Callable
 
-import numpy as np
-
 from ...core.diagram import PersistenceDiagram
+
+import numpy as np
 
 
 def linear_weight(persistence: np.ndarray) -> np.ndarray:

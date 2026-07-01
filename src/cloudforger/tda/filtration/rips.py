@@ -1,11 +1,18 @@
 # cloudforger/tda/filtration/rips.py
-import numpy as np
+
+from __future__ import annotations
+
 from typing import Any
 from ripser import ripser
+
 from ...core.cloud import PointCloud
 from .base import Filtration
 
+import numpy as np
+
+
 class RipsFiltration(Filtration):
+
     def __init__(self, maxdim: int = 1, thresh: float | None = None):
         self._maxdim = maxdim
         self._thresh = thresh
