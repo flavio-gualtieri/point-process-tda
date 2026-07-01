@@ -1,4 +1,9 @@
+# src/cloudforger/tda/calibration.py
+
+from __future__ import annotations
+
 from ..core.diagram import PersistenceDiagram
+
 import numpy as np
 
 

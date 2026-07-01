@@ -1,10 +1,16 @@
-import numpy as np
+# src/cloudforger/stats/pair_dist.py
+
+from __future__ import annotations
 
 from ..core.cloud import PointCloud
 from .base import CloudStatistic
 from ..core.region import Box
 
+import numpy as np
+
+
 class PairDistanceCDF(CloudStatistic):
+
     @property
     def name(self) -> str:
         return "pair_distance_cdf"
