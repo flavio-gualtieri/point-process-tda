@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +36,8 @@ class ExperimentResult:
     seed: int | None
     n_epochs: int
     test_loss: float
+    adversarial_loss: float | None
+    adversarial_path: str | None
     best_val_loss: float
     best_epoch: int
     final_train_loss: float
@@ -92,6 +92,14 @@ def analysis_dir(process: str, dim: int) -> Path:
     return Path(CONFIG["analysis_root"]) / dim_dir_name(dim) / process
 
 
+def figs_dir(process: str, dim: int) -> Path:
+    return analysis_dir(process, dim) / "figs"
+
+
+def summaries_dir(process: str, dim: int) -> Path:
+    return analysis_dir(process, dim) / "summaries"
+
+
 def safe_torch_load(path: Path) -> dict[str, Any]:
     try:
         return torch.load(path, map_location="cpu", weights_only=False)
@@ -106,15 +114,41 @@ def read_json_if_exists(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, torch.Tensor):
+        value = value.detach().cpu().item()
+    try:
+        out = float(value)
+    except TypeError:
+        return None
+    if np.isnan(out):
+        return None
+    return out
+
+
 def auc(values: list[float]) -> float:
     if len(values) == 0:
         return float("nan")
     if len(values) == 1:
         return float(values[0])
-    return float(np.trapz(np.asarray(values, dtype=float)) / (len(values) - 1))
+
+    arr = np.asarray(values, dtype=float)
+
+    if hasattr(np, "trapezoid"):
+        area = np.trapezoid(arr)
+    else:
+        area = np.trapz(arr)
+
+    return float(area / (len(arr) - 1))
 
 
-def first_epoch_within_threshold(values: list[float], target: float, multiplier: float) -> int | None:
+def first_epoch_within_threshold(
+    values: list[float],
+    target: float,
+    multiplier: float,
+) -> int | None:
     threshold = multiplier * target
     for i, value in enumerate(values, start=1):
         if value <= threshold:
@@ -153,6 +187,14 @@ def load_experiment(process: str, dim: int, method: str) -> ExperimentResult | N
     min_train = float(np.min(train_loss))
     test_loss = float(payload.get("test_loss", json_meta.get("test_loss", float("nan"))))
 
+    adversarial_loss = optional_float(
+        payload.get("adversarial_loss", json_meta.get("adversarial_loss"))
+    )
+    adversarial_path = payload.get(
+        "adversarial_path",
+        json_meta.get("adversarial_path"),
+    )
+
     train_val_gap_at_best = best_val_loss - train_at_best
     final_train_val_gap = final_val - final_train
     overfit_ratio = final_val / final_train if final_train > 0 else float("inf")
@@ -172,6 +214,8 @@ def load_experiment(process: str, dim: int, method: str) -> ExperimentResult | N
         seed=seed,
         n_epochs=len(train_loss),
         test_loss=test_loss,
+        adversarial_loss=adversarial_loss,
+        adversarial_path=str(adversarial_path) if adversarial_path is not None else None,
         best_val_loss=best_val_loss,
         best_epoch=best_epoch,
         final_train_loss=final_train,
@@ -211,6 +255,17 @@ def results_to_frame(results: list[ExperimentResult]) -> pd.DataFrame:
     rows = []
 
     for r in results:
+        if r.adversarial_loss is None:
+            adversarial_minus_test = np.nan
+            adversarial_ratio_to_test = np.nan
+        else:
+            adversarial_minus_test = r.adversarial_loss - r.test_loss
+            adversarial_ratio_to_test = (
+                r.adversarial_loss / r.test_loss
+                if r.test_loss > 0
+                else np.nan
+            )
+
         rows.append(
             {
                 "process": r.process,
@@ -219,6 +274,9 @@ def results_to_frame(results: list[ExperimentResult]) -> pd.DataFrame:
                 "seed": r.seed,
                 "n_epochs": r.n_epochs,
                 "test_loss": r.test_loss,
+                "adversarial_loss": np.nan if r.adversarial_loss is None else r.adversarial_loss,
+                "adversarial_minus_test": adversarial_minus_test,
+                "adversarial_ratio_to_test": adversarial_ratio_to_test,
                 "best_val_loss": r.best_val_loss,
                 "best_epoch": r.best_epoch,
                 "final_train_loss": r.final_train_loss,
@@ -233,10 +291,12 @@ def results_to_frame(results: list[ExperimentResult]) -> pd.DataFrame:
                 "late_val_mean": r.late_val_mean,
                 "late_val_std": r.late_val_std,
                 "path": str(r.path),
+                "adversarial_path": r.adversarial_path,
             }
         )
 
     df = pd.DataFrame(rows)
+
     df = df.sort_values("test_loss", ascending=True).reset_index(drop=True)
     df["test_rank"] = np.arange(1, len(df) + 1)
 
@@ -244,7 +304,65 @@ def results_to_frame(results: list[ExperimentResult]) -> pd.DataFrame:
     df["relative_test_loss"] = df["test_loss"] / best_test
     df["percent_worse_than_best"] = 100.0 * (df["test_loss"] - best_test) / best_test
 
+    if df["adversarial_loss"].notna().any():
+        finite_adv = df["adversarial_loss"].dropna()
+        best_adv = float(finite_adv.min())
+        df["adversarial_rank"] = df["adversarial_loss"].rank(
+            method="min",
+            ascending=True,
+            na_option="bottom",
+        ).astype("Int64")
+        df["relative_adversarial_loss"] = df["adversarial_loss"] / best_adv
+        df["percent_worse_than_best_adversarial"] = (
+            100.0 * (df["adversarial_loss"] - best_adv) / best_adv
+        )
+    else:
+        df["adversarial_rank"] = pd.Series([pd.NA] * len(df), dtype="Int64")
+        df["relative_adversarial_loss"] = np.nan
+        df["percent_worse_than_best_adversarial"] = np.nan
+
     return df
+
+
+def dataframe_to_markdown(df: pd.DataFrame) -> str:
+    columns = list(df.columns)
+
+    formatted_rows = []
+    for _, row in df.iterrows():
+        formatted_rows.append(
+            [
+                "" if pd.isna(row[col]) else str(row[col])
+                for col in columns
+            ]
+        )
+
+    widths = [
+        max(
+            len(str(col)),
+            *(len(row[i]) for row in formatted_rows),
+        )
+        for i, col in enumerate(columns)
+    ]
+
+    header = "| " + " | ".join(
+        str(col).ljust(widths[i])
+        for i, col in enumerate(columns)
+    ) + " |"
+
+    separator = "| " + " | ".join(
+        "-" * widths[i]
+        for i in range(len(columns))
+    ) + " |"
+
+    body = [
+        "| " + " | ".join(
+            row[i].ljust(widths[i])
+            for i in range(len(columns))
+        ) + " |"
+        for row in formatted_rows
+    ]
+
+    return "\n".join([header, separator, *body])
 
 
 def plot_overlay_curves(results: list[ExperimentResult], out_dir: Path) -> None:
@@ -252,8 +370,20 @@ def plot_overlay_curves(results: list[ExperimentResult], out_dir: Path) -> None:
 
     for r in results:
         epochs = np.arange(1, r.n_epochs + 1)
-        ax.plot(epochs, r.history["train_loss"], linestyle="--", alpha=0.65, label=f"{r.method} train")
-        ax.plot(epochs, r.history["val_loss"], linestyle="-", alpha=0.95, label=f"{r.method} val")
+        ax.plot(
+            epochs,
+            r.history["train_loss"],
+            linestyle="--",
+            alpha=0.65,
+            label=f"{r.method} train",
+        )
+        ax.plot(
+            epochs,
+            r.history["val_loss"],
+            linestyle="-",
+            alpha=0.95,
+            label=f"{r.method} val",
+        )
 
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
@@ -289,11 +419,54 @@ def plot_test_loss_ranking(df: pd.DataFrame, out_dir: Path) -> None:
     ax.bar(ordered["method"], ordered["test_loss"])
     ax.set_xlabel("Method")
     ax.set_ylabel("Test loss")
-    ax.set_title("Test loss ranking")
+    ax.set_title("Normal test loss ranking")
     ax.tick_params(axis="x", rotation=35)
     ax.grid(True, axis="y", alpha=0.25)
     fig.tight_layout()
     fig.savefig(out_dir / "test_loss_ranking.png", dpi=200)
+    plt.close(fig)
+
+
+def plot_adversarial_loss_ranking(df: pd.DataFrame, out_dir: Path) -> None:
+    available = df.dropna(subset=["adversarial_loss"])
+    if available.empty:
+        return
+
+    ordered = available.sort_values("adversarial_loss", ascending=True)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.bar(ordered["method"], ordered["adversarial_loss"])
+    ax.set_xlabel("Method")
+    ax.set_ylabel("Adversarial loss")
+    ax.set_title("Adversarial test loss ranking")
+    ax.tick_params(axis="x", rotation=35)
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out_dir / "adversarial_loss_ranking.png", dpi=200)
+    plt.close(fig)
+
+
+def plot_test_vs_adversarial_bars(df: pd.DataFrame, out_dir: Path) -> None:
+    available = df.dropna(subset=["adversarial_loss"])
+    if available.empty:
+        return
+
+    ordered = available.sort_values("test_loss", ascending=True)
+    x = np.arange(len(ordered))
+    width = 0.38
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar(x - width / 2, ordered["test_loss"], width, label="normal test")
+    ax.bar(x + width / 2, ordered["adversarial_loss"], width, label="adversarial")
+    ax.set_xticks(x)
+    ax.set_xticklabels(ordered["method"], rotation=35, ha="right")
+    ax.set_xlabel("Method")
+    ax.set_ylabel("Loss")
+    ax.set_title("Normal test vs adversarial test loss")
+    ax.legend()
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out_dir / "test_vs_adversarial_bars.png", dpi=200)
     plt.close(fig)
 
 
@@ -316,11 +489,42 @@ def plot_best_val_vs_test(df: pd.DataFrame, out_dir: Path) -> None:
     ax.plot([low, high], [low, high], linestyle="--", linewidth=1)
 
     ax.set_xlabel("Best validation loss")
-    ax.set_ylabel("Test loss")
+    ax.set_ylabel("Normal test loss")
     ax.set_title("Validation-test agreement")
     ax.grid(True, alpha=0.25)
     fig.tight_layout()
     fig.savefig(out_dir / "best_val_vs_test.png", dpi=200)
+    plt.close(fig)
+
+
+def plot_test_vs_adversarial_scatter(df: pd.DataFrame, out_dir: Path) -> None:
+    available = df.dropna(subset=["adversarial_loss"])
+    if available.empty:
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    ax.scatter(available["test_loss"], available["adversarial_loss"])
+
+    for _, row in available.iterrows():
+        ax.annotate(
+            row["method"],
+            (row["test_loss"], row["adversarial_loss"]),
+            textcoords="offset points",
+            xytext=(5, 5),
+            fontsize=8,
+        )
+
+    low = min(available["test_loss"].min(), available["adversarial_loss"].min())
+    high = max(available["test_loss"].max(), available["adversarial_loss"].max())
+    ax.plot([low, high], [low, high], linestyle="--", linewidth=1)
+
+    ax.set_xlabel("Normal test loss")
+    ax.set_ylabel("Adversarial test loss")
+    ax.set_title("Normal vs adversarial generalization")
+    ax.grid(True, alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out_dir / "test_vs_adversarial_scatter.png", dpi=200)
     plt.close(fig)
 
 
@@ -331,11 +535,30 @@ def plot_overfitting_gap(df: pd.DataFrame, out_dir: Path) -> None:
     ax.bar(ordered["method"], ordered["final_train_val_gap"])
     ax.set_xlabel("Method")
     ax.set_ylabel("Final validation loss - final train loss")
-    ax.set_title("Final generalization gap")
+    ax.set_title("Final train/validation gap")
     ax.tick_params(axis="x", rotation=35)
     ax.grid(True, axis="y", alpha=0.25)
     fig.tight_layout()
-    fig.savefig(out_dir / "generalization_gap.png", dpi=200)
+    fig.savefig(out_dir / "train_val_gap.png", dpi=200)
+    plt.close(fig)
+
+
+def plot_adversarial_gap(df: pd.DataFrame, out_dir: Path) -> None:
+    available = df.dropna(subset=["adversarial_minus_test"])
+    if available.empty:
+        return
+
+    ordered = available.sort_values("adversarial_minus_test", ascending=False)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.bar(ordered["method"], ordered["adversarial_minus_test"])
+    ax.set_xlabel("Method")
+    ax.set_ylabel("Adversarial loss - normal test loss")
+    ax.set_title("Adversarial generalization gap")
+    ax.tick_params(axis="x", rotation=35)
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(out_dir / "adversarial_gap.png", dpi=200)
     plt.close(fig)
 
 
@@ -357,99 +580,113 @@ def plot_convergence(df: pd.DataFrame, out_dir: Path) -> None:
     plt.close(fig)
 
 
-def plot_metric_heatmap(df: pd.DataFrame, out_dir: Path) -> None:
-    metrics = [
-        "test_loss",
-        "best_val_loss",
-        "final_train_val_gap",
-        "overfit_ratio",
-        "val_auc",
-        "late_val_std",
-    ]
-
-    matrix = df.set_index("method")[metrics].copy()
-
-    normalized = matrix.copy()
-    for col in normalized.columns:
-        values = normalized[col].astype(float)
-        lo = values.min()
-        hi = values.max()
-        if math.isclose(lo, hi):
-            normalized[col] = 0.0
-        else:
-            normalized[col] = (values - lo) / (hi - lo)
-
-    fig, ax = plt.subplots(figsize=(10, max(4, 0.5 * len(normalized))))
-    im = ax.imshow(normalized.values, aspect="auto")
-
-    ax.set_xticks(np.arange(len(metrics)))
-    ax.set_yticks(np.arange(len(normalized.index)))
-    ax.set_xticklabels(metrics, rotation=35, ha="right")
-    ax.set_yticklabels(normalized.index)
-    ax.set_title("Normalized diagnostic metrics; lower is better")
-
-    for i in range(normalized.shape[0]):
-        for j in range(normalized.shape[1]):
-            raw = matrix.iloc[i, j]
-            ax.text(j, i, f"{raw:.3g}", ha="center", va="center", fontsize=8)
-
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    fig.tight_layout()
-    fig.savefig(out_dir / "diagnostic_heatmap.png", dpi=200)
-    plt.close(fig)
-
-
-def write_markdown_report(df: pd.DataFrame, out_dir: Path, process: str, dim: int) -> None:
+def write_markdown_report(
+    df: pd.DataFrame,
+    out_dir: Path,
+    process: str,
+    dim: int,
+) -> None:
     best = df.iloc[0]
     worst = df.sort_values("test_loss", ascending=False).iloc[0]
-    fastest = df.sort_values("convergence_epoch_105", ascending=True, na_position="last").iloc[0]
+    fastest = df.sort_values(
+        "convergence_epoch_105",
+        ascending=True,
+        na_position="last",
+    ).iloc[0]
     smallest_gap = df.sort_values("final_train_val_gap", ascending=True).iloc[0]
     most_stable = df.sort_values("late_val_std", ascending=True).iloc[0]
+
+    has_adversarial = df["adversarial_loss"].notna().any()
 
     lines = []
     lines.append(f"# Parameter-estimation feature comparison: {process}, {dim}d")
     lines.append("")
     lines.append("## Summary")
     lines.append("")
-    lines.append(f"- Best test loss: `{best['method']}` with `{best['test_loss']:.6g}`.")
-    lines.append(f"- Worst test loss: `{worst['method']}` with `{worst['test_loss']:.6g}`.")
+    lines.append(f"- Best normal test loss: `{best['method']}` with `{best['test_loss']:.6g}`.")
+    lines.append(f"- Worst normal test loss: `{worst['method']}` with `{worst['test_loss']:.6g}`.")
     lines.append(f"- Fastest convergence: `{fastest['method']}` at epoch `{fastest['convergence_epoch_105']}`.")
     lines.append(f"- Smallest final train/validation gap: `{smallest_gap['method']}` with gap `{smallest_gap['final_train_val_gap']:.6g}`.")
     lines.append(f"- Most stable late validation curve: `{most_stable['method']}` with late-val std `{most_stable['late_val_std']:.6g}`.")
+
+    if has_adversarial:
+        adv_df = df.dropna(subset=["adversarial_loss"])
+        best_adv = adv_df.sort_values("adversarial_loss", ascending=True).iloc[0]
+        worst_adv = adv_df.sort_values("adversarial_loss", ascending=False).iloc[0]
+        smallest_adv_gap = adv_df.sort_values("adversarial_minus_test", ascending=True).iloc[0]
+        largest_adv_gap = adv_df.sort_values("adversarial_minus_test", ascending=False).iloc[0]
+
+        lines.append(f"- Best adversarial loss: `{best_adv['method']}` with `{best_adv['adversarial_loss']:.6g}`.")
+        lines.append(f"- Worst adversarial loss: `{worst_adv['method']}` with `{worst_adv['adversarial_loss']:.6g}`.")
+        lines.append(f"- Smallest adversarial gap: `{smallest_adv_gap['method']}` with adversarial-minus-test `{smallest_adv_gap['adversarial_minus_test']:.6g}`.")
+        lines.append(f"- Largest adversarial gap: `{largest_adv_gap['method']}` with adversarial-minus-test `{largest_adv_gap['adversarial_minus_test']:.6g}`.")
+    else:
+        lines.append("- No adversarial losses were found in the loaded result files.")
+
     lines.append("")
-    lines.append("## Ranking by test loss")
+    lines.append("## Ranking by normal test loss")
     lines.append("")
-    lines.append(df[
-        [
-            "test_rank",
+
+    normal_cols = [
+        "test_rank",
+        "method",
+        "test_loss",
+        "best_val_loss",
+        "best_epoch",
+        "final_train_val_gap",
+        "convergence_epoch_105",
+        "percent_worse_than_best",
+    ]
+    lines.append(dataframe_to_markdown(df[normal_cols]))
+
+    if has_adversarial:
+        lines.append("")
+        lines.append("## Ranking by adversarial loss")
+        lines.append("")
+
+        adv_cols = [
+            "adversarial_rank",
             "method",
+            "adversarial_loss",
             "test_loss",
-            "best_val_loss",
-            "best_epoch",
-            "final_train_val_gap",
-            "convergence_epoch_105",
-            "percent_worse_than_best",
+            "adversarial_minus_test",
+            "adversarial_ratio_to_test",
+            "percent_worse_than_best_adversarial",
         ]
-    ].to_markdown(index=False))
+
+        adv_table = df.dropna(subset=["adversarial_loss"]).sort_values(
+            "adversarial_loss",
+            ascending=True,
+        )
+        lines.append(dataframe_to_markdown(adv_table[adv_cols]))
+
     lines.append("")
     lines.append("## How to read the diagnostics")
     lines.append("")
-    lines.append("- `test_loss` is the main held-out score from the runner's normal train/val/test split.")
+    lines.append("- `test_loss` is the held-out score from the normal train/val/test split.")
+    lines.append("- `adversarial_loss` is the loss on parameter combinations intentionally excluded from the normal dataset.")
+    lines.append("- `adversarial_minus_test` measures how much performance degrades on unseen parameter combinations.")
     lines.append("- `best_val_loss` checks whether the model selected by validation also generalizes well.")
-    lines.append("- `final_train_val_gap` is a simple overfitting diagnostic.")
+    lines.append("- `final_train_val_gap` is a simple train/validation overfitting diagnostic.")
     lines.append("- `convergence_epoch_105` is the first epoch whose validation loss is within 5% of the best validation loss.")
     lines.append("- `val_auc` summarizes the whole validation curve; lower means better average validation performance during training.")
     lines.append("- `late_val_std` measures how noisy or unstable validation loss was near the end of training.")
     lines.append("")
     lines.append("## Generated figures")
     lines.append("")
-    lines.append("- `overlay_train_val_curves.png`")
-    lines.append("- `validation_curves.png`")
-    lines.append("- `test_loss_ranking.png`")
-    lines.append("- `best_val_vs_test.png`")
-    lines.append("- `generalization_gap.png`")
-    lines.append("- `convergence_speed.png`")
-    lines.append("- `diagnostic_heatmap.png`")
+    lines.append("- `figs/overlay_train_val_curves.png`")
+    lines.append("- `figs/validation_curves.png`")
+    lines.append("- `figs/test_loss_ranking.png`")
+    lines.append("- `figs/best_val_vs_test.png`")
+    lines.append("- `figs/train_val_gap.png`")
+    lines.append("- `figs/convergence_speed.png`")
+
+    if has_adversarial:
+        lines.append("- `figs/adversarial_loss_ranking.png`")
+        lines.append("- `figs/test_vs_adversarial_bars.png`")
+        lines.append("- `figs/test_vs_adversarial_scatter.png`")
+        lines.append("- `figs/adversarial_gap.png`")
+
     lines.append("")
 
     with open(out_dir / "analysis_report.md", "w") as f:
@@ -457,39 +694,53 @@ def write_markdown_report(df: pd.DataFrame, out_dir: Path, process: str, dim: in
 
 
 def analyze_dimension(process: str, dim: int, methods: list[str]) -> None:
-    out_dir = analysis_dir(process, dim)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    fig_out = figs_dir(process, dim)
+    summary_out = summaries_dir(process, dim)
+
+    fig_out.mkdir(parents=True, exist_ok=True)
+    summary_out.mkdir(parents=True, exist_ok=True)
 
     results = collect_results(process, dim, methods)
     df = results_to_frame(results)
 
-    df.to_csv(out_dir / "summary.csv", index=False)
-    df.to_json(out_dir / "summary.json", orient="records", indent=2)
+    df.to_csv(summary_out / "summary.csv", index=False)
+    df.to_json(summary_out / "summary.json", orient="records", indent=2)
 
-    plot_overlay_curves(results, out_dir)
-    plot_validation_only(results, out_dir)
-    plot_test_loss_ranking(df, out_dir)
-    plot_best_val_vs_test(df, out_dir)
-    plot_overfitting_gap(df, out_dir)
-    plot_convergence(df, out_dir)
-    plot_metric_heatmap(df, out_dir)
-    write_markdown_report(df, out_dir, process, dim)
+    plot_overlay_curves(results, fig_out)
+    plot_validation_only(results, fig_out)
+    plot_test_loss_ranking(df, fig_out)
+    plot_best_val_vs_test(df, fig_out)
+    plot_overfitting_gap(df, fig_out)
+    plot_convergence(df, fig_out)
+
+    if df["adversarial_loss"].notna().any():
+        plot_adversarial_loss_ranking(df, fig_out)
+        plot_test_vs_adversarial_bars(df, fig_out)
+        plot_test_vs_adversarial_scatter(df, fig_out)
+        plot_adversarial_gap(df, fig_out)
+
+    write_markdown_report(df, summary_out, process, dim)
 
     print(f"\nAnalysis complete for {process}, {dim}d")
-    print(f"Saved outputs to: {out_dir}")
+    print(f"Saved figures to:   {fig_out}")
+    print(f"Saved summaries to: {summary_out}")
     print("")
-    print(df[
-        [
-            "test_rank",
-            "method",
-            "test_loss",
-            "best_val_loss",
-            "best_epoch",
-            "final_train_val_gap",
-            "convergence_epoch_105",
-            "percent_worse_than_best",
-        ]
-    ].to_string(index=False))
+
+    display_cols = [
+        "test_rank",
+        "method",
+        "test_loss",
+        "adversarial_rank",
+        "adversarial_loss",
+        "adversarial_minus_test",
+        "best_val_loss",
+        "best_epoch",
+        "final_train_val_gap",
+        "convergence_epoch_105",
+        "percent_worse_than_best",
+    ]
+
+    print(df[display_cols].to_string(index=False))
 
 
 def main() -> None:

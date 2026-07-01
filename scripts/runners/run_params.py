@@ -24,6 +24,13 @@ METHOD_FILES = {
     "betti": "betti.pkl",
 }
 
+ADVERSARIAL_METHOD_FILES = {
+    "raw_pc": "adversarial_clouds.pkl",
+    "pi": "adversarial_images.pkl",
+    "pairwise": "adversarial_features.pkl",
+    "betti": "adversarial_betti.pkl",
+}
+
 # Concrete methods expanded by the "all" meta-method.
 ALL_METHODS = ["raw_pc", "pi_0", "pi_1", "pairwise", "betti_0", "betti_1"]
 
@@ -61,6 +68,18 @@ def _dataset_path(cfg: dict, file_key: str) -> Path:
     return _data_dir(cfg) / METHOD_FILES[file_key]
 
 
+def _adversarial_dataset_path(cfg: dict, file_key: str) -> Path | None:
+    if not cfg.get("use_adversarial", True):
+        return None
+
+    if cfg.get("adversarial_dataset_dir"):
+        return Path(cfg["adversarial_dataset_dir"]) / ADVERSARIAL_METHOD_FILES[file_key]
+
+    path = _data_dir(cfg) / ADVERSARIAL_METHOD_FILES[file_key]
+
+    return path if path.exists() else None
+
+
 def _output_dir(cfg: dict, subdir: str) -> Path:
     if cfg.get("output_dir"):
         return Path(cfg["output_dir"])
@@ -95,8 +114,9 @@ def run(cfg: dict):
 
     experiment = build_experiment(cfg)
     dataset_path = _dataset_path(cfg, experiment.file_key)
+    adversarial_path = _adversarial_dataset_path(cfg, experiment.file_key)
     output_dir = _output_dir(cfg, experiment.subdir)
-    return experiment.run(dataset_path, output_dir)
+    return experiment.run(dataset_path, output_dir, adversarial_path=adversarial_path)
 
 
 # ---------------------------------------------------------------------------

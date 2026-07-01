@@ -137,14 +137,7 @@ def _train_and_eval(model, loaders, cfg: dict, device: str, tag: str):
 # ---------------------------------------------------------------------------
 
 class Experiment(ABC):
-    """One end-to-end parameter-estimation run.
 
-    Subclasses declare ``file_key`` (semantic dataset key) and ``subdir``
-    (result location), then implement ``build_dataset`` and ``build_encoder``.
-    :meth:`run` ties the shared pipeline together.
-    """
-
-    #: semantic dataset key; the runner maps it to a concrete filename.
     file_key: str
 
     def __init__(self, cfg: dict, hom_dim: int | None = None):
@@ -183,7 +176,7 @@ class Experiment(ABC):
 
     # -- shared orchestration ----------------------------------------------
 
-    def run(self, dataset_path: Path, output_dir: Path) -> dict:
+    def run(self, dataset_path: Path, output_dir: Path, adversarial_path: Path | None = None) -> dict:
         device = _prepare_device(self.cfg)
 
         payload = _load_pickle(Path(dataset_path))
@@ -202,12 +195,58 @@ class Experiment(ABC):
             model, loaders, self.cfg, device, self.tag
         )
 
-        self._save(Path(output_dir), best_state, history, test_loss,
-                   label_names, log_mean, log_std)
-        return {"history": history, "test_loss": test_loss}
+        adversarial_loss = None
 
-    def _save(self, output_dir: Path, best_state, history, test_loss,
-              label_names, log_mean, log_std):
+        if adversarial_path is not None and Path(adversarial_path).exists():
+            adversarial_payload = _load_pickle(Path(adversarial_path))
+            adversarial_labels, _ = self.extract_labels(adversarial_payload)
+
+            adversarial_log_labels = np.log(adversarial_labels)
+            adversarial_labels = (adversarial_log_labels - log_mean) / log_std
+
+            adversarial_dataset = self.build_dataset(adversarial_payload, adversarial_labels)
+            adversarial_loader = DataLoader(
+                adversarial_dataset,
+                batch_size=self.cfg["batch_size"],
+                shuffle=False,
+            )
+
+            loss_fn = nn.MSELoss()
+            adversarial_loss, _ = evaluate(model, adversarial_loader, loss_fn, device)
+
+            print(f"\n[{self.tag}] Adversarial test loss: {adversarial_loss:.4f}")
+
+        self._save(
+            Path(output_dir),
+            best_state,
+            history,
+            test_loss,
+            label_names,
+            log_mean,
+            log_std,
+            adversarial_loss=adversarial_loss,
+            adversarial_path=adversarial_path,
+        )
+
+        result = {"history": history, "test_loss": test_loss}
+
+        if adversarial_loss is not None:
+            result["adversarial_loss"] = adversarial_loss
+
+        return result
+
+    def _save(
+            self,
+            output_dir: Path,
+            best_state,
+            history,
+            test_loss,
+            label_names,
+            log_mean,
+            log_std,
+            adversarial_loss: float | None = None,
+            adversarial_path: Path | None = None,
+    ):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         torch.save(
@@ -219,19 +258,23 @@ class Experiment(ABC):
                 "label_names": label_names,
                 "label_log_mean": log_mean,
                 "label_log_std": log_std,
+                "adversarial_loss": adversarial_loss,
+                "adversarial_path": adversarial_path,
             },
             output_dir / "results.pt",
         )
 
+        json_payload = {
+            "task": self.cfg["task"],
+            "method": self.cfg["method"],
+            "test_loss": test_loss,
+            "seed": self.cfg["seed"],
+            **self.extra_meta,
+        }
+
+        if adversarial_loss is not None:
+            json_payload["adversarial_loss"] = adversarial_loss
+            json_payload["adversarial_path"] = str(adversarial_path)
+
         with open(output_dir / "results.json", "w") as f:
-            json.dump(
-                {
-                    "task": self.cfg["task"],
-                    "method": self.cfg["method"],
-                    "test_loss": test_loss,
-                    "seed": self.cfg["seed"],
-                    **self.extra_meta,
-                },
-                f,
-                indent=2,
-            )
+            json.dump(json_payload, f, indent=2)
