@@ -1,0 +1,24 @@
+# configs/params/matern.yaml
+
+process: matern
+task: params
+
+dims: [2]
+
+methods:
+  - raw_pc
+  - pi_0
+  - pi_1
+  - pairwise
+  - betti_0
+  - betti_1
+
+batch_size: 32
+n_epochs: 500
+lr: 0.001
+n_points: 512
+embedding_dim: 128
+hidden_dims: [128, 128]
+seed: 0
+
+output_dir_template: "results/params/{dim}d/{process}/{experiment}"

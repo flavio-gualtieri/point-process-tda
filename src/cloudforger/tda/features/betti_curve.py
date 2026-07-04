@@ -15,7 +15,7 @@ class BettiCurve(DiagramFeature):
 
     def __init__(
             self,
-            homology_dims: tuple[int] = (0, 1),
+            homology_dims: tuple[int] | int = (0, 1),
             grid_size: int = 128,
             grid_range: tuple[float, float] = (0.0, 1.0),
             drop_infinite: bool = True,
@@ -27,7 +27,7 @@ class BettiCurve(DiagramFeature):
         if grid_range[0] >= grid_range[1]:
             raise ValueError("grid_range must satisfy low < high.")
 
-        self._homology_dims = tuple(homology_dims)
+        self._homology_dims = tuple(homology_dims) if isinstance(homology_dims, tuple) else [homology_dims]
         self._grid_size = int(grid_size)
         self._grid_range = tuple(float(x) for x in grid_range)
         self._grid = np.linspace(*self._grid_range, self._grid_size)
