@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import inspect
 import itertools
 import os
 import pickle
@@ -27,6 +28,8 @@ from cloudforger.core.cloud import PointCloud
 from cloudforger.core.diagram import PersistenceDiagram
 from cloudforger.core.features import CorrelationFeatures
 from cloudforger.core.region import Box, Region
+from cloudforger.processes.matern import MaternHardCoreProcess
+from cloudforger.processes.poisson import PoissonProcess
 from cloudforger.processes.thomas import ThomasProcess
 from cloudforger.stats.pair_dist import PairDistanceCDF
 from cloudforger.tda.calibration import calibrate, calibrate_report
@@ -46,15 +49,15 @@ from cloudforger.tda.vectorizer.persistence_image import PersistenceImager
 #              on the cluster and locally with no edits.
 #   "hpc"   -> require SLURM_ARRAY_TASK_ID and run exactly one dimension.
 #   "local" -> always run the full dimension list serially, ignoring SLURM.
-RUN_MODE = "hpc"
+RUN_MODE = "local"
 
 
 DEFAULT_STAGE_ORDER = (
     "generate_clouds",
+    "compute_pairwise",
     "compute_diagrams",
     "vectorize_diagrams",
     "compute_betti",
-    "compute_pairwise",
 )
 
 DEFAULT_SPLITS: dict[str, dict[str, str]] = {
@@ -75,8 +78,8 @@ DEFAULT_SPLITS: dict[str, dict[str, str]] = {
 }
 
 PIPELINE_CONFIG: dict[str, Any] = {
-    "process": "thomas",
-    "dimensions": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    "process": "",
+    "dimensions": [2],
     "data_root": "data/params",
     "skip_missing": True,
     "overwrite": True,
@@ -89,7 +92,7 @@ PIPELINE_CONFIG: dict[str, Any] = {
         "features": "dict",
     },
     "cloud_generation": {
-        "config_path": "configs/params/cloud_generation.yaml",
+        "config_path": "configs/params/thomas_cloudgen.yaml",
     },
     "filtration": {
         "maxdim": 1,
@@ -114,12 +117,10 @@ PIPELINE_CONFIG: dict[str, Any] = {
     },
 }
 
-ProcessBuilder = Callable[[dict[str, Any]], PointProcess]
-
-PROCESS_REGISTRY: dict[str, dict[str, Any]] = {
-    "thomas": {
-        "build": lambda p: ThomasProcess(**p),
-    },
+PROCESS_REGISTRY: dict[str, type[PointProcess]] = {
+    "thomas": ThomasProcess,
+    "matern": MaternHardCoreProcess,
+    "poisson": PoissonProcess,
 }
 
 
@@ -378,12 +379,13 @@ def generate_clouds_for_design(
     if process_name not in PROCESS_REGISTRY:
         raise ValueError(f"Unknown process {process_name!r}. Available: {sorted(PROCESS_REGISTRY)}")
 
-    build: ProcessBuilder = PROCESS_REGISTRY[process_name]["build"]
+    cls = PROCESS_REGISTRY[process_name]
+    valid_params = set(inspect.signature(cls.__init__).parameters) - {"self"}
     clouds: list[PointCloud] = []
 
     for offset, params in enumerate(design):
-        process = build(params)
-        clouds.append(process.sample(n=n_hint, region=region, seed=base_seed + offset))
+        filtered = {k: v for k, v in params.items() if k in valid_params}
+        clouds.append(cls(**filtered).sample(n=n_hint, region=region, seed=base_seed + offset))
 
     return clouds
 
@@ -781,7 +783,16 @@ def compute_pairwise_features(
 class ParamsPipeline:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = copy.deepcopy(config)
-        self.process = str(self.config.get("process", "thomas"))
+        self.process = str(self.config.get("process", ""))
+        if not self.process:
+            _cloud_cfg_path = resolve_path(
+                self.config.get("cloud_generation", {}).get(
+                    "config_path", "configs/params/thomas_cloudgen.yaml"
+                )
+            )
+            if _cloud_cfg_path.exists():
+                self.process = str(load_yaml_config(_cloud_cfg_path).get("process", ""))
+                self.config["process"] = self.process
         self.dimensions = normalize_int_list(self.config.get("dimensions", [2]), "dimensions")
         # dimension_indices lets a single-dimension run (e.g. one SLURM array
         # task) keep its ORIGINAL position in the full list, so that the seed
@@ -838,10 +849,10 @@ class ParamsPipeline:
         return True
 
     def prepare_cloud_design(self) -> CloudDesignBundle:
-        cloud_cfg_path = resolve_path(self.config["cloud_generation"].get("config_path", "configs/params/cloud_generation.yaml"))
+        cloud_cfg_path = resolve_path(self.config["cloud_generation"].get("config_path", "configs/params/thomas_cloudgen.yaml"))
         cloud_cfg = load_yaml_config(cloud_cfg_path)
 
-        cloud_cfg["process"] = self.process
+        self.process = self.config["process"] = str(cloud_cfg.get("process", self.process))
         cloud_cfg["dimension"] = list(self.dimensions)
 
         output_format = require_format(

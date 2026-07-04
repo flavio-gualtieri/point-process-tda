@@ -6,7 +6,9 @@ import numpy as np
 from .cloud import PointCloud
 from .region import Region
 
+
 class PointProcess(ABC):
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -19,16 +21,28 @@ class PointProcess(ABC):
 
     @abstractmethod
     def _sample_points(
-        self, n: int, region: Region, rng: np.random.Generator
+            self,
+            n: int | None,
+            region: Region,
+            rng: np.random.Generator
     ) -> np.ndarray:
         ...
 
     def sample(
-        self, n: int, region: Region, seed: int | None = None
+            self,
+            n: int | Region | None = None,
+            region: Region | None = None,
+            seed: int | None = None
     ) -> PointCloud:
-        """Public API. Wraps _sample_points with seeding and metadata."""
+        if region is None and isinstance(n, Region):
+            region = n
+            n = None
+        if region is None:
+            raise TypeError("Must specify a region to sample from.")
+        
         rng = np.random.default_rng(seed)
         points = self._sample_points(n, region, rng)
+        
         return PointCloud(
             points=points,
             generator_name=self.name,

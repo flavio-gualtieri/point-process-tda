@@ -20,7 +20,7 @@ from cloudforger.nn.heads.paramest import ParameterEstimator
 from cloudforger.nn.models.single_modal import SingleModalModel
 
 # Number of parameters predicted per generating process.
-N_PARAMS = {"thomas": 3}
+N_PARAMS = {"thomas": 3, "matern": 2}
 
 # Matches dimensioned methods like "pi_1" / "betti_0".
 _PERSIST_TOKEN = re.compile(r"^(pi|betti)_(\d+)$")
@@ -218,6 +218,7 @@ class Experiment(ABC):
 
         self._save(
             Path(output_dir),
+            model,
             best_state,
             history,
             test_loss,
@@ -238,6 +239,7 @@ class Experiment(ABC):
     def _save(
             self,
             output_dir: Path,
+            model: nn.Module,
             best_state,
             history,
             test_loss,
@@ -263,6 +265,8 @@ class Experiment(ABC):
             },
             output_dir / "results.pt",
         )
+
+        torch.save(model.cpu(), output_dir / "model.pt")
 
         json_payload = {
             "task": self.cfg["task"],
