@@ -15,6 +15,10 @@ class SingleModalModel(nn.Module):
     def modality(self) -> str:
         return self.encoder.input_modality
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, covariates: torch.Tensor | None = None) -> torch.Tensor:
         embedding = self.encoder(x)
+
+        if covariates is not None:
+            embedding = torch.cat([embedding, covariates], dim=1)
+
         return self.head(embedding)

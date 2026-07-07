@@ -12,6 +12,7 @@ class PointCloud:
     generator_params: dict[str, Any] = field(default_factory=dict)
     seed: int | None = None
     region: Optional[Region] = None
+    covariates: Optional[np.ndarray] = None  # shape (N, n_covariates), aligned with points
 
     @property
     def n_points(self) -> int:
@@ -21,8 +22,14 @@ class PointCloud:
     def dimension(self) -> int:
         return self.points.shape[1]
     
+    @property
+    def n_covariates(self) -> int:
+        if self.covariates is None:
+            return 0
+        return self.covariates.shape[1]
+    
     def __repr__(self) -> str:
         return (
             f"PointCloud(n={self.n_points}, d={self.dimension}, "
-            f"generator={self.generator_name!r}, seed={self.seed})"
+            f"generator={self.generator_name!r}, seed={self.seed}, n_covariates={self.n_covariates})"
         )

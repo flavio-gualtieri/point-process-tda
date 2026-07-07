@@ -14,7 +14,7 @@ if _SRC.is_dir() and str(_SRC) not in sys.path:
 
 from cloudforger.nn.experiments import build_experiment
 
-DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "params" / "thomas.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "params" / "inhom_thomas.yaml"
 
 # file_key (declared by each Experiment) -> pickle filename.
 METHOD_FILES = {
@@ -38,6 +38,7 @@ ALL_METHODS = ["raw_pc", "pi_0", "pi_1", "pairwise", "betti_0", "betti_1"]
 PASS_THROUGH = [
     "task", "process", "batch_size", "n_epochs", "lr",
     "n_points", "embedding_dim", "hidden_dims", "seed",
+    "use_covariates", "target_label_names", "log_label_names",
 ]
 
 
@@ -187,7 +188,7 @@ def main(argv: list[str] | None = None):
     )
     parser.add_argument(
         "config", nargs="?", default=str(DEFAULT_CONFIG),
-        help="Path to the YAML config (default: configs/params/thomas.yaml).",
+        help="Path to the YAML config (default: configs/params/inhom_thomas.yaml).",
     )
     parser.add_argument(
         "--methods", nargs="+", default=None,

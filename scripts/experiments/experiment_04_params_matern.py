@@ -9,7 +9,7 @@ from pathlib import Path
 from cloudforger.nn.data import PointCloudDataset
 from cloudforger.nn.encoders.point_cloud import PointNetEncoder
 from cloudforger.nn.heads.paramest import ParameterEstimator
-from cloudforger.nn.train import train_one_epoch, evaluate
+from cloudforger.nn.train_old import train_one_epoch, evaluate
 from cloudforger.nn.splits import train_val_test_split
 
 # --- Config ---

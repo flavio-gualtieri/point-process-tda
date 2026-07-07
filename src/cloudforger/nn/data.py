@@ -368,3 +368,5 @@ class CorrelationFeatureDataset(Dataset):
             return int(self.feature_matrix.shape[1])
 
         return len(self.features[0].vector(self.statistic_names))
+    
+
