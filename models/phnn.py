@@ -1,4 +1,4 @@
-# model/model.py
+# model/phnn.py
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from cloudforger.nn.encoders.stats import StatsEncoder
 from cloudforger.nn.models.single_modal import SingleModalModel
+
 
 DEFAULT_MODEL_PATH = "/Users/qp252676/Desktop/point-process-tda/results/params/2d/thomas/betti_0/model.pt"
 DEFAULT_RESULTS_PATH = "/Users/qp252676/Desktop/point-process-tda/results/params/2d/thomas/betti_0/results.pt"
@@ -50,6 +50,7 @@ class Model(nn.Module):
 
         if params.shape[0] == 1:
             return dict(zip(self.label_names, params[0].tolist()))
+
         return params
 
 
@@ -59,7 +60,14 @@ def load_betti_0(data_path: str) -> torch.Tensor:
     if isinstance(data, list):
         data = data[0]
     curve = np.asarray(data["betti0_curve"], dtype=np.float32)
+
     return torch.as_tensor(curve, dtype=torch.float32)
+
+
+def estimate_from_betti0(betti0_curve: np.ndarray, model: Model | None = None) -> dict[str, float]:
+    if model is None:
+        model = Model()
+    return model.forward(betti_0=torch.as_tensor(betti0_curve, dtype=torch.float32))
 
 
 def main() -> None:
@@ -67,6 +75,7 @@ def main() -> None:
     betti_0 = load_betti_0(data_path)
     model = Model()
     params_est = model.forward(betti_0=betti_0)
+
     print(params_est)
 
 

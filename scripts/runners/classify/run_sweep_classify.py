@@ -1,7 +1,7 @@
 # scripts/run_sweep.py
 
 import yaml
-from scripts.runners.runner_classify import run
+from scripts.runners.classify.runner_classify import run
 
 with open("configs/classify/raw_pc.yaml") as f:
     cfg = yaml.safe_load(f)   # gives you a plain Python dict — same as your CONFIG
