@@ -11,7 +11,7 @@ from cloudforger.nn.data import PersistenceImageDataset
 from cloudforger.nn.encoders.persistence_image import PIEncoder
 from cloudforger.nn.heads.paramest import ParameterEstimator     # CHANGED: regression head
 from cloudforger.nn.models.single_modal import SingleModalModel
-from cloudforger.nn.train import train_one_epoch, evaluate
+from cloudforger.nn.train_old import train_one_epoch, evaluate
 from cloudforger.nn.splits import train_val_test_split
 
 # --- Config ---

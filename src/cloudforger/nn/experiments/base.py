@@ -15,7 +15,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
 from cloudforger.nn.splits import train_val_test_split
-from cloudforger.nn.train import train_one_epoch, evaluate
+from cloudforger.nn.train_old import train_one_epoch, evaluate
 from cloudforger.nn.heads.paramest import ParameterEstimator
 from cloudforger.nn.models.single_modal import SingleModalModel
 
@@ -25,6 +25,91 @@ N_PARAMS = {"thomas": 3, "matern": 2}
 # Matches dimensioned methods like "pi_1" / "betti_0".
 _PERSIST_TOKEN = re.compile(r"^(pi|betti)_(\d+)$")
 
+
+class CovariateHeadDataset(Dataset):
+    """Wrap a base dataset so each sample returns (x, covariate_mean, y)."""
+
+    def __init__(self, base: Dataset, covariates: np.ndarray, dtype=torch.float32):
+        self.base = base
+        self.covariates = torch.as_tensor(covariates, dtype=dtype)
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getattr__(self, name):
+        # Preserve attributes like input_dim used by existing experiments.
+        return getattr(self.base, name)
+
+    def __getitem__(self, idx):
+        x, y = self.base[idx]
+        return x, self.covariates[idx], y
+
+
+def _extract_covariate_means(payload: Any) -> np.ndarray:
+    if not isinstance(payload, dict) or "covariates" not in payload:
+        raise KeyError(
+            "use_covariates=True requires payload['covariates']. "
+            "Run the covariate backfill/vectorization scripts first."
+        )
+
+    means = []
+    for cov in payload["covariates"]:
+        arr = np.asarray(cov, dtype=float)
+        if arr.ndim != 2:
+            raise ValueError(f"Expected covariates with shape (n_points, n_covariates), got {arr.shape}")
+        if arr.shape[0] == 0:
+            means.append(np.zeros(arr.shape[1], dtype=float))
+        else:
+            means.append(arr.mean(axis=0))
+
+    return np.asarray(means, dtype=np.float32)
+
+
+def _select_labels(
+    labels: np.ndarray,
+    label_names: list[str],
+    target_label_names: list[str] | None,
+) -> tuple[np.ndarray, list[str]]:
+    if not target_label_names:
+        return labels, label_names
+
+    idx = []
+    for name in target_label_names:
+        if name not in label_names:
+            raise KeyError(f"Requested label {name!r}, available labels are {label_names}")
+        idx.append(label_names.index(name))
+
+    return labels[:, idx], list(target_label_names)
+
+
+def _normalize_labels_by_name(
+    labels: np.ndarray,
+    label_names: list[str],
+    log_label_names: list[str] | None,
+) -> tuple[np.ndarray, dict]:
+    log_set = set(log_label_names or label_names)
+
+    transformed = labels.astype(float).copy()
+    transforms = []
+
+    for j, name in enumerate(label_names):
+        if name in log_set:
+            if np.any(transformed[:, j] <= 0):
+                raise ValueError(f"Cannot log-transform non-positive label {name!r}")
+            transformed[:, j] = np.log(transformed[:, j])
+            transforms.append("log")
+        else:
+            transforms.append("identity")
+
+    mean = transformed.mean(axis=0)
+    std = transformed.std(axis=0)
+    std = np.where(std == 0, 1.0, std)
+
+    return (transformed - mean) / std, {
+        "mean": mean,
+        "std": std,
+        "transforms": transforms,
+    }
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -87,13 +172,6 @@ def _normalize_labels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nd
     log_std = log_labels.std(axis=0)
     log_std = np.where(log_std == 0, 1.0, log_std)
     return (log_labels - log_mean) / log_std, log_mean, log_std
-
-
-def _make_head(cfg: dict) -> ParameterEstimator:
-    process = cfg["process"]
-    if process not in N_PARAMS:
-        raise ValueError(f"Unknown process '{process}'. Available: {sorted(N_PARAMS)}")
-    return ParameterEstimator(embedding_dim=cfg["embedding_dim"], n_params=N_PARAMS[process])
 
 
 def _make_loaders(dataset: Dataset, cfg: dict):
@@ -180,15 +258,34 @@ class Experiment(ABC):
         device = _prepare_device(self.cfg)
 
         payload = _load_pickle(Path(dataset_path))
+
         labels, label_names = self.extract_labels(payload)
-        labels, log_mean, log_std = _normalize_labels(labels)
+        labels, label_names = _select_labels(
+            labels,
+            label_names,
+            self.cfg.get("target_label_names"),
+        )
+        labels, label_norm = _normalize_labels_by_name(
+            labels,
+            label_names,
+            self.cfg.get("log_label_names"),
+        )
 
         dataset = self.build_dataset(payload, labels)
+
+        head_extra_dim = 0
+        if self.cfg.get("use_covariates", False):
+            covariate_means = _extract_covariate_means(payload)
+            if len(covariate_means) != len(dataset):
+                raise ValueError(f"Covariate/data length mismatch: {len(covariate_means)} vs {len(dataset)}")
+            dataset = CovariateHeadDataset(dataset, covariate_means)
+            head_extra_dim = covariate_means.shape[1]
+
         loaders = _make_loaders(dataset, self.cfg)
 
         model = SingleModalModel(
             encoder=self.build_encoder(dataset),
-            head=_make_head(self.cfg),
+            head=ParameterEstimator(embedding_dim=self.cfg["embedding_dim"] + head_extra_dim, n_params=labels.shape[1])
         ).to(device)
 
         history, best_state, test_loss = _train_and_eval(
@@ -199,12 +296,28 @@ class Experiment(ABC):
 
         if adversarial_path is not None and Path(adversarial_path).exists():
             adversarial_payload = _load_pickle(Path(adversarial_path))
-            adversarial_labels, _ = self.extract_labels(adversarial_payload)
+            adversarial_labels, adversarial_label_names = self.extract_labels(adversarial_payload)
+            adversarial_labels, _ = _select_labels(
+                adversarial_labels,
+                adversarial_label_names,
+                self.cfg.get("target_label_names"),
+            )
 
-            adversarial_log_labels = np.log(adversarial_labels)
-            adversarial_labels = (adversarial_log_labels - log_mean) / log_std
+            adv_transformed = adversarial_labels.astype(float).copy()
+            for j, transform in enumerate(label_norm["transforms"]):
+                if transform == "log":
+                    if np.any(adv_transformed[:, j] <= 0):
+                        raise ValueError(f"Cannot log-transform adversarial label {label_names[j]!r}")
+                    adv_transformed[:, j] = np.log(adv_transformed[:, j])
+
+            adversarial_labels = (adv_transformed - label_norm["mean"]) / label_norm["std"]
 
             adversarial_dataset = self.build_dataset(adversarial_payload, adversarial_labels)
+
+            if self.cfg.get("use_covariates", False):
+                adversarial_covariate_means = _extract_covariate_means(adversarial_payload)
+                adversarial_dataset = CovariateHeadDataset(adversarial_dataset, adversarial_covariate_means)
+    
             adversarial_loader = DataLoader(
                 adversarial_dataset,
                 batch_size=self.cfg["batch_size"],
@@ -223,8 +336,7 @@ class Experiment(ABC):
             history,
             test_loss,
             label_names,
-            log_mean,
-            log_std,
+            label_norm,
             adversarial_loss=adversarial_loss,
             adversarial_path=adversarial_path,
         )
@@ -237,17 +349,16 @@ class Experiment(ABC):
         return result
 
     def _save(
-            self,
-            output_dir: Path,
-            model: nn.Module,
-            best_state,
-            history,
-            test_loss,
-            label_names,
-            log_mean,
-            log_std,
-            adversarial_loss: float | None = None,
-            adversarial_path: Path | None = None,
+        self,
+        output_dir: Path,
+        model: nn.Module,
+        best_state,
+        history,
+        test_loss,
+        label_names,
+        label_norm,
+        adversarial_loss: float | None = None,
+        adversarial_path: Path | None = None,
     ):
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -258,8 +369,10 @@ class Experiment(ABC):
                 "config": self.cfg,
                 "test_loss": test_loss,
                 "label_names": label_names,
-                "label_log_mean": log_mean,
-                "label_log_std": log_std,
+                "label_norm": label_norm,
+                "label_log_mean": label_norm["mean"],
+                "label_log_std": label_norm["std"],
+                "label_transforms": label_norm["transforms"],
                 "adversarial_loss": adversarial_loss,
                 "adversarial_path": adversarial_path,
             },

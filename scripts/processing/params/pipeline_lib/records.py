@@ -35,6 +35,9 @@ def cloud_to_record(cloud: PointCloud) -> dict[str, Any]:
     if isinstance(cloud.region, Box):
         record["region"] = {"low": cloud.region.low, "high": cloud.region.high}
 
+    if cloud.covariates is not None:
+        record["covariates"] = cloud.covariates
+
     return record
 
 
@@ -59,6 +62,7 @@ def to_pointcloud(cloud: Any) -> PointCloud:
         generator_params=dict(cloud.get("params", {})),
         seed=cloud.get("seed"),
         region=region,
+        covariates=np.asarray(cloud["covariates"]) if cloud.get("covariates") is not None else None,
     )
 
 

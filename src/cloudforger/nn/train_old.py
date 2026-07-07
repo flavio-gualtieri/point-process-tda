@@ -1,3 +1,5 @@
+# src/pointforge/nn/train.py
+
 from __future__ import annotations
 
 import torch
@@ -15,17 +17,6 @@ def _batch_size(labels: torch.Tensor) -> int:
     return labels.size(0)
 
 
-def _unpack_batch(batch):
-    if len(batch) == 2:
-        inputs, labels = batch
-        covariates = None
-    elif len(batch) == 3:
-        inputs, covariates, labels = batch
-    else:
-        raise ValueError(f"Unexpected batch structure with {len(batch)} elements.")
-    return inputs, covariates, labels
-
-
 def train_one_epoch(
         model,
         loader: DataLoader,
@@ -35,19 +26,13 @@ def train_one_epoch(
 ) -> tuple[float, float]:
     model.train()
     total_loss, total_correct, total_seen = 0.0, 0, 0
-
-    for batch in loader:
-        inputs, covariates, labels = _unpack_batch(batch)
-
+    for inputs, labels in loader:
         inputs = _to_device(inputs, device)
         labels = labels.to(device)
-        if covariates is not None:
-            covariates = covariates.to(device)
-
         n = _batch_size(labels)
 
         optimizer.zero_grad()
-        logits = model(inputs, covariates)
+        logits = model(inputs)
         loss = loss_fn(logits, labels)
         loss.backward()
         optimizer.step()
@@ -58,6 +43,7 @@ def train_one_epoch(
         total_seen += n
 
     acc = total_correct / total_seen if total_seen > 0 else float("nan")
+
     return total_loss / total_seen, acc
 
 
@@ -65,18 +51,12 @@ def train_one_epoch(
 def evaluate(model, loader: DataLoader, loss_fn: nn.Module, device: torch.device):
     model.eval()
     total_loss, total_correct, total_seen = 0.0, 0, 0
-
-    for batch in loader:
-        inputs, covariates, labels = _unpack_batch(batch)
-
+    for inputs, labels in loader:
         inputs = _to_device(inputs, device)
         labels = labels.to(device)
-        if covariates is not None:
-            covariates = covariates.to(device)
-
         n = _batch_size(labels)
 
-        logits = model(inputs, covariates)
+        logits = model(inputs)
         loss = loss_fn(logits, labels)
 
         total_loss += loss.item() * n
@@ -85,6 +65,7 @@ def evaluate(model, loader: DataLoader, loss_fn: nn.Module, device: torch.device
         total_seen += n
 
     acc = total_correct / total_seen if total_seen > 0 else float("nan")
+    
     return total_loss / total_seen, acc
 
 

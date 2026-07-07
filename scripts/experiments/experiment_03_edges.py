@@ -8,7 +8,7 @@ from cloudforger.nn.data import CorrelationFeatureDataset
 from cloudforger.nn.encoders.stats import StatsEncoder
 from cloudforger.nn.heads.classifier import ClassificationHead
 from cloudforger.nn.models.single_modal import SingleModalModel
-from cloudforger.nn.train import train_one_epoch, evaluate
+from cloudforger.nn.train_old import train_one_epoch, evaluate
 from cloudforger.nn.splits import train_val_test_split
 
 # --- Config ---
