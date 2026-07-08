@@ -43,9 +43,23 @@ def _to_pointcloud(cloud) -> PointCloud:
     )
 
 
+def _scalarize_params(params: dict) -> dict[str, float]:
+    """Expand vector-valued params, e.g. beta -> beta_0, beta_1, ..."""
+    out: dict[str, float] = {}
+    for key, value in params.items():
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            out[key] = float(arr)
+        else:
+            for j, item in enumerate(arr.ravel()):
+                out[f"{key}_{j}"] = float(item)
+    return out
+
+
 def _labels_from_clouds(cloud_list) -> tuple[np.ndarray, list[str]]:
     def params_of(c):
-        return dict(c["params"]) if isinstance(c, dict) else dict(c.generator_params)
+        raw = dict(c["params"]) if isinstance(c, dict) else dict(c.generator_params)
+        return _scalarize_params(raw)
 
     params = [params_of(c) for c in cloud_list]
     names = list(params[0].keys())

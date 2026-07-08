@@ -304,8 +304,12 @@ class PointCloudDataset(Dataset):
 
         if self.n_points is not None:
             n = len(points)
-            chosen = np.random.choice(n, self.n_points, replace=n < self.n_points)
-            points = points[chosen]
+            if n == 0:
+                dim = pts.shape[1] if pts.ndim == 2 else getattr(cloud, "dimension", 2)
+                pts = np.zeros((self.n_points, int(dim)), dtype=float)
+            else:
+                chosen = np.random.choice(n, self.n_points, replace=n < self.n_points)
+                pts = pts[chosen]
 
         return torch.from_numpy(np.asarray(points, dtype=np.float32)), self.labels[idx]
 

@@ -15,7 +15,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
 from cloudforger.nn.splits import train_val_test_split
-from cloudforger.nn.train_old import train_one_epoch, evaluate
+from cloudforger.nn.train import train_one_epoch, evaluate
 from cloudforger.nn.heads.paramest import ParameterEstimator
 from cloudforger.nn.models.single_modal import SingleModalModel
 
@@ -46,17 +46,29 @@ class CovariateHeadDataset(Dataset):
 
 
 def _extract_covariate_means(payload: Any) -> np.ndarray:
-    if not isinstance(payload, dict) or "covariates" not in payload:
+    if isinstance(payload, dict) and "covariates" in payload:
+        covariates = payload["covariates"]
+    elif isinstance(payload, dict) and "clouds" in payload:
+        covariates = [c.get("covariates") if isinstance(c, dict) else getattr(c, "covariates", None)
+                      for c in payload["clouds"]]
+    elif isinstance(payload, list):
+        covariates = [c.get("covariates") if isinstance(c, dict) else getattr(c, "covariates", None)
+                      for c in payload]
+    else:
         raise KeyError(
-            "use_covariates=True requires payload['covariates']. "
-            "Run the covariate backfill/vectorization scripts first."
+            "use_covariates=True requires covariates either at payload['covariates'] "
+            "or inside each cloud record."
         )
 
     means = []
-    for cov in payload["covariates"]:
+    for i, cov in enumerate(covariates):
+        if cov is None:
+            raise ValueError(f"Missing covariates at sample index {i}")
+
         arr = np.asarray(cov, dtype=float)
         if arr.ndim != 2:
             raise ValueError(f"Expected covariates with shape (n_points, n_covariates), got {arr.shape}")
+
         if arr.shape[0] == 0:
             means.append(np.zeros(arr.shape[1], dtype=float))
         else:
