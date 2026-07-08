@@ -1,4 +1,4 @@
-# scripts/runners/run_params.py
+# scripts/runners/params/run_params.py
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PROJECT_ROOT = HERE.parents[1]
+PROJECT_ROOT = HERE.parents[2]
 _SRC = PROJECT_ROOT / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))

@@ -16,7 +16,7 @@ import torch
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 CONFIG: dict[str, Any] = {
-    "process": "thomas",
+    "process": "inhom_thomas",
     "dimensions": [2],
     "methods": ["raw_pc", "pi_0", "pi_1", "pairwise", "betti_0", "betti_1"],
     "results_root": PROJECT_ROOT / "results" / "params",
