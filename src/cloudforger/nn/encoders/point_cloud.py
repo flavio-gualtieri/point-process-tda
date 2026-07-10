@@ -19,8 +19,18 @@ class PointNetEncoder(Encoder):
     def input_modality(self) -> str:
         return "point_cloud"
     
-    def forward(self, x: torch.Tensor)  -> torch.Tensor:
-        features = self.point_mlp(x)
+    def forward(self, x: torch.Tensor | dict)  -> torch.Tensor:
+        if isinstance(x, dict):
+            points, mask = x["points"], x["mask"]
+        else:
+            points, mask = x, None
+
+        features = self.point_mlp(points)
+
+        if mask is not None:
+            # Padded points are excluded from the max-pool: real features are
+            # >=0 (last point_mlp layer is a ReLU), so -inf never wins.
+            features = features.masked_fill(~mask.unsqueeze(-1), float("-inf"))
 
         pooled, _ = features.max(dim=1)
         return self.head(pooled)

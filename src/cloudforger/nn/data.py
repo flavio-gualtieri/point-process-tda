@@ -305,13 +305,41 @@ class PointCloudDataset(Dataset):
         if self.n_points is not None:
             n = len(points)
             if n == 0:
-                dim = pts.shape[1] if pts.ndim == 2 else getattr(cloud, "dimension", 2)
-                pts = np.zeros((self.n_points, int(dim)), dtype=float)
+                dim = points.shape[1] if points.ndim == 2 else getattr(cloud, "dimension", 2)
+                points = np.zeros((self.n_points, int(dim)), dtype=float)
             else:
                 chosen = np.random.choice(n, self.n_points, replace=n < self.n_points)
-                pts = pts[chosen]
+                points = points[chosen]
 
         return torch.from_numpy(np.asarray(points, dtype=np.float32)), self.labels[idx]
+
+
+def pad_point_cloud_collate(batch: list[tuple]):
+    """Collate variable-length point clouds by zero-padding to the batch's
+    max cloud size and returning a validity mask alongside the points, so no
+    points are dropped to fit a fixed cardinality."""
+    has_covariates = len(batch[0]) == 3
+
+    if has_covariates:
+        points, covariates, labels = zip(*batch)
+    else:
+        points, labels = zip(*batch)
+
+    dim = points[0].shape[1]
+    max_n = max(p.shape[0] for p in points)
+
+    padded = torch.zeros(len(points), max_n, dim, dtype=points[0].dtype)
+    mask = torch.zeros(len(points), max_n, dtype=torch.bool)
+    for i, p in enumerate(points):
+        n = p.shape[0]
+        padded[i, :n] = p
+        mask[i, :n] = True
+
+    x = {"points": padded, "mask": mask}
+
+    if has_covariates:
+        return x, torch.stack(covariates), torch.stack(labels)
+    return x, torch.stack(labels)
 
 
 class CorrelationFeatureDataset(Dataset):

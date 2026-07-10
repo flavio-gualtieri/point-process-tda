@@ -14,7 +14,7 @@ if _SRC.is_dir() and str(_SRC) not in sys.path:
 
 from cloudforger.nn.experiments import build_experiment
 
-DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "params" / "inhom_thomas.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "params" / "thomas.yaml"
 
 # file_key (declared by each Experiment) -> pickle filename.
 METHOD_FILES = {
@@ -102,7 +102,7 @@ def run(cfg: dict):
         print("\nAll methods done.")
         return results
 
-    if method in ("pi", "betti"):
+    if method in ("pi", "betti", "betti_cnn"):
         results = {}
         for dim in (0, 1):
             dim_method = f"{method}_{dim}"
@@ -116,7 +116,7 @@ def run(cfg: dict):
     experiment = build_experiment(cfg)
     dataset_path = _dataset_path(cfg, experiment.file_key)
     adversarial_path = _adversarial_dataset_path(cfg, experiment.file_key)
-    output_dir = _output_dir(cfg, experiment.subdir)
+    output_dir = _output_dir(cfg, experiment.subdir) / f"seed_{cfg['seed']}"
     return experiment.run(dataset_path, output_dir, adversarial_path=adversarial_path)
 
 
@@ -146,6 +146,14 @@ def _as_dim_list(dims) -> list[int]:
     return [int(dims)]
 
 
+def _resolve_seeds(config: dict, override) -> list[int]:
+    if override is not None:
+        return [int(s) for s in override]
+    if config.get("seeds") is not None:
+        return [int(s) for s in config["seeds"]]
+    return [int(config["seed"])]
+
+
 def _resolve_dims(config: dict, override) -> list[int]:
     if override is not None:
         return _as_dim_list(override)
@@ -156,15 +164,16 @@ def _resolve_dims(config: dict, override) -> list[int]:
     raise KeyError("Config must specify 'dims' (an int or a list of ints).")
 
 
-def build_cfg(config: dict, method: str, dim: int) -> dict:
-    """Assemble the per-(method, dim) cfg the runner expects from the config."""
+def build_cfg(config: dict, method: str, dim: int, seed: int) -> dict:
+    """Assemble the per-(method, dim, seed) cfg the runner expects from the config."""
     # Templates may reference any config value plus these convenience aliases.
     fmt = {**config, "method": method, "experiment": method,
-           "dim": dim, "dimension": dim}
+           "dim": dim, "dimension": dim, "seed": seed}
 
     cfg = {k: config[k] for k in PASS_THROUGH if k in config}
     cfg["method"] = method
     cfg["dim"] = dim
+    cfg["seed"] = seed
 
     # Optional filesystem roots (anchored if relative).
     for key in ("data_dir", "results_dir"):
@@ -188,7 +197,7 @@ def main(argv: list[str] | None = None):
     )
     parser.add_argument(
         "config", nargs="?", default=str(DEFAULT_CONFIG),
-        help="Path to the YAML config (default: configs/params/inhom_thomas.yaml).",
+        help="Path to the YAML config (default: configs/params/thomas.yaml).",
     )
     parser.add_argument(
         "--methods", nargs="+", default=None,
@@ -198,6 +207,10 @@ def main(argv: list[str] | None = None):
         "--dims", nargs="+", type=int, default=None,
         help="Override the config's dims (e.g. --dims 2 3).",
     )
+    parser.add_argument(
+        "--seeds", nargs="+", type=int, default=None,
+        help="Override the config's seed(s) (e.g. --seeds 0 1 2).",
+    )
     args = parser.parse_args(argv)
 
     with open(args.config) as f:
@@ -205,19 +218,22 @@ def main(argv: list[str] | None = None):
 
     methods = args.methods if args.methods is not None else config["methods"]
     dims = _resolve_dims(config, args.dims)
+    seeds = _resolve_seeds(config, args.seeds)
 
     print(f"Config:  {args.config}")
     print(f"Process: {config['process']} | task: {config.get('task')}")
     print(f"Methods: {methods}")
     print(f"Dims:    {dims}")
+    print(f"Seeds:   {seeds}")
 
     summary: dict = {}
     for method in methods:
         for dim in dims:
-            cfg = build_cfg(config, method, dim)
-            target = cfg.get("output_dir", "<convention>")
-            print(f"\n######### {method} | dim={dim}  ->  {target} #########")
-            summary.setdefault(method, {})[dim] = run(cfg)
+            for seed in seeds:
+                cfg = build_cfg(config, method, dim, seed)
+                target = cfg.get("output_dir", "<convention>")
+                print(f"\n######### {method} | dim={dim} | seed={seed}  ->  {target}/seed_{seed} #########")
+                summary.setdefault(method, {}).setdefault(dim, {})[seed] = run(cfg)
 
     print("\nAll requested (method, dim) runs finished.")
     return summary

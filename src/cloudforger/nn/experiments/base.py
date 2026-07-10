@@ -22,8 +22,8 @@ from cloudforger.nn.models.single_modal import SingleModalModel
 # Number of parameters predicted per generating process.
 N_PARAMS = {"thomas": 3, "matern": 2}
 
-# Matches dimensioned methods like "pi_1" / "betti_0".
-_PERSIST_TOKEN = re.compile(r"^(pi|betti)_(\d+)$")
+# Matches dimensioned methods like "pi_1" / "betti_0" / "betti_cnn_1".
+_PERSIST_TOKEN = re.compile(r"^(pi|betti_cnn|betti)_(\d+)$")
 
 
 class CovariateHeadDataset(Dataset):
@@ -75,6 +75,13 @@ def _extract_covariate_means(payload: Any) -> np.ndarray:
             means.append(arr.mean(axis=0))
 
     return np.asarray(means, dtype=np.float32)
+
+
+def _combine_head_extra(parts: list[np.ndarray]) -> np.ndarray:
+    """Concatenate one or more per-sample (N,) or (N,k) feature arrays into a
+    single (N, total_k) array for the encoder-embedding/head merge point."""
+    parts = [p if p.ndim > 1 else p[:, None] for p in parts]
+    return parts[0] if len(parts) == 1 else np.concatenate(parts, axis=1)
 
 
 def _select_labels(
@@ -186,9 +193,9 @@ def _normalize_labels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nd
     return (log_labels - log_mean) / log_std, log_mean, log_std
 
 
-def _make_loaders(dataset: Dataset, cfg: dict):
+def _make_loaders(dataset: Dataset, cfg: dict, collate_fn=None):
     train_ds, val_ds, test_ds = train_val_test_split(dataset, seed=cfg["seed"])
-    kw = dict(batch_size=cfg["batch_size"])
+    kw = dict(batch_size=cfg["batch_size"], collate_fn=collate_fn)
     return (
         DataLoader(train_ds, **kw, shuffle=True),
         DataLoader(val_ds, **kw),
@@ -229,6 +236,7 @@ def _train_and_eval(model, loaders, cfg: dict, device: str, tag: str):
 class Experiment(ABC):
 
     file_key: str
+    collate_fn = None  # override on subclasses whose samples have variable size
 
     def __init__(self, cfg: dict, hom_dim: int | None = None):
         self.cfg = cfg
@@ -255,6 +263,13 @@ class Experiment(ABC):
     def extract_labels(self, payload: Any) -> tuple[np.ndarray, list[str]]:
         """Default: payloads carry their own ``labels`` / ``label_names``."""
         return np.asarray(payload["labels"], dtype=float), list(payload["label_names"])
+
+    def extract_head_extra(self, payload: Any, dataset_path: Path) -> np.ndarray | None:
+        """Optional per-sample feature(s) concatenated onto the encoder's
+        embedding before the shared regression head — e.g. point count n(x),
+        as in Vihrs (2022). Default: None (no extra feature; existing
+        experiments that don't override this are unaffected)."""
+        return None
 
     @abstractmethod
     def build_dataset(self, payload: Any, labels: np.ndarray) -> Dataset:
@@ -285,15 +300,27 @@ class Experiment(ABC):
 
         dataset = self.build_dataset(payload, labels)
 
-        head_extra_dim = 0
+        head_extra_parts: list[np.ndarray] = []
         if self.cfg.get("use_covariates", False):
             covariate_means = _extract_covariate_means(payload)
             if len(covariate_means) != len(dataset):
                 raise ValueError(f"Covariate/data length mismatch: {len(covariate_means)} vs {len(dataset)}")
-            dataset = CovariateHeadDataset(dataset, covariate_means)
-            head_extra_dim = covariate_means.shape[1]
+            head_extra_parts.append(covariate_means)
 
-        loaders = _make_loaders(dataset, self.cfg)
+        extra = self.extract_head_extra(payload, Path(dataset_path))
+        if extra is not None:
+            extra = np.asarray(extra, dtype=np.float32)
+            if len(extra) != len(dataset):
+                raise ValueError(f"head-extra feature/data length mismatch: {len(extra)} vs {len(dataset)}")
+            head_extra_parts.append(extra)
+
+        head_extra_dim = 0
+        if head_extra_parts:
+            combined_extra = _combine_head_extra(head_extra_parts)
+            dataset = CovariateHeadDataset(dataset, combined_extra)
+            head_extra_dim = combined_extra.shape[1]
+
+        loaders = _make_loaders(dataset, self.cfg, collate_fn=self.collate_fn)
 
         model = SingleModalModel(
             encoder=self.build_encoder(dataset),
@@ -326,14 +353,23 @@ class Experiment(ABC):
 
             adversarial_dataset = self.build_dataset(adversarial_payload, adversarial_labels)
 
+            adv_extra_parts: list[np.ndarray] = []
             if self.cfg.get("use_covariates", False):
                 adversarial_covariate_means = _extract_covariate_means(adversarial_payload)
-                adversarial_dataset = CovariateHeadDataset(adversarial_dataset, adversarial_covariate_means)
-    
+                adv_extra_parts.append(adversarial_covariate_means)
+
+            adv_extra = self.extract_head_extra(adversarial_payload, Path(adversarial_path))
+            if adv_extra is not None:
+                adv_extra_parts.append(np.asarray(adv_extra, dtype=np.float32))
+
+            if adv_extra_parts:
+                adversarial_dataset = CovariateHeadDataset(adversarial_dataset, _combine_head_extra(adv_extra_parts))
+
             adversarial_loader = DataLoader(
                 adversarial_dataset,
                 batch_size=self.cfg["batch_size"],
                 shuffle=False,
+                collate_fn=self.collate_fn,
             )
 
             loss_fn = nn.MSELoss()

@@ -9,7 +9,7 @@ import torch
 
 from cloudforger.core.cloud import PointCloud
 from cloudforger.core.region import Box
-from cloudforger.nn.data import PointCloudDataset
+from cloudforger.nn.data import PointCloudDataset, pad_point_cloud_collate
 from cloudforger.nn.experiments.base import Experiment, register
 
 
@@ -76,6 +76,7 @@ def _labels_from_clouds(cloud_list) -> tuple[np.ndarray, list[str]]:
 class RawPointCloudExperiment(Experiment):
     file_key = "raw_pc"
     subdir = "raw_pc"
+    collate_fn = staticmethod(pad_point_cloud_collate)
 
     def __init__(self, cfg: dict, hom_dim: int | None = None):
         super().__init__(cfg, hom_dim)
@@ -95,7 +96,7 @@ class RawPointCloudExperiment(Experiment):
     def build_dataset(self, payload, labels):
         clouds = [_to_pointcloud(c) for c in _cloud_list(payload)]
         self.ambient_dim = clouds[0].dimension
-        return PointCloudDataset(clouds, labels, n_points=self.cfg["n_points"], dtype=torch.float32)
+        return PointCloudDataset(clouds, labels, n_points=None, dtype=torch.float32)
 
     def build_encoder(self, dataset):
         from cloudforger.nn.encoders.point_cloud import PointNetEncoder
