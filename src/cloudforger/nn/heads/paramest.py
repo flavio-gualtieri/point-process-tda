@@ -7,7 +7,7 @@ class ParameterEstimator(nn.Module):
         self,
         embedding_dim: int,
         n_params: int,
-        hidden_dims: tuple[int, ...] = (64,),
+        hidden_dims: tuple[int, ...] = (64, 32),
         dropout: float = 0.1,
     ):
         super().__init__()

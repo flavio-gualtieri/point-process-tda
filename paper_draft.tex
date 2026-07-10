@@ -1,0 +1,300 @@
+% Use the official AAAI style when aaai2027.sty is available.
+% Otherwise, fall back to article mode for drafting.
+\IfFileExists{aaai2027.sty}{
+    \documentclass[letterpaper]{article}
+    \usepackage[submission]{aaai2027}
+    \newif\ifaaaistyle
+    \aaaistyletrue
+}{
+    \documentclass[10pt,letterpaper]{article}
+    \newif\ifaaaistyle
+    \aaaistylefalse
+}
+
+% ============================================================
+% Fonts and basic formatting
+% ============================================================
+\ifaaaistyle
+    \usepackage{times}
+    \usepackage{helvet}
+    \usepackage{courier}
+\else
+    \usepackage[margin=1in]{geometry}
+    \usepackage{mathpazo}
+\fi
+
+% ============================================================
+% Mathematics
+% ============================================================
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{dsfont}
+\usepackage{mathrsfs}
+\usepackage{dsfont}
+
+% ============================================================
+% Figures and tables
+% ============================================================
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{siunitx}
+
+% ============================================================
+% Lists, algorithms, and code
+% ============================================================
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{listings}
+
+% ============================================================
+% References and URLs
+% ============================================================
+\usepackage{url}
+\usepackage{natbib}
+
+% Do not load hyperref for the AAAI submission unless the
+% official author kit explicitly permits it.
+\ifaaaistyle\else
+    \usepackage[hidelinks]{hyperref}
+\fi
+
+% AAAI papers normally use unnumbered section headings.
+\setcounter{secnumdepth}{0}
+
+% ============================================================
+% General mathematical commands
+% ============================================================
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\1}{\mathds{1}}
+\newcommand{\xeta}{\xi, \eta}
+
+\newcommand{\calF}{\mathcal{F}}
+\newcommand{\bigO}{\mathcal{O}}
+
+\newcommand{\kpar}{\kappa}
+\newcommand{\cs}{\sigma}
+\newcommand{\mo}{\mu}
+\newcommand{\lm}{\text{log\,MAE}}
+
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\Aut}{Aut}
+\DeclareMathOperator{\Gal}{Gal}
+\DeclareMathOperator{\lcmop}{lcm}
+\DeclareMathOperator{\argmin}{arg\,min}
+\DeclareMathOperator{\argmax}{arg\,max}
+
+% ============================================================
+% Paper-specific commands
+% ============================================================
+\newcommand{\parentIntensity}{\kappa}
+\newcommand{\clusterScale}{\sigma}
+\newcommand{\meanOffspring}{\mu}
+\newcommand{\logMAE}{\operatorname{logMAE}}
+
+% ============================================================
+% Draft annotations
+% ============================================================
+\newif\ifdraft
+\drafttrue
+
+\ifdraft
+    \usepackage{xcolor}
+    \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\else
+    \newcommand{\todo}[1]{}
+\fi
+
+% ============================================================
+% Theorem environments
+% ============================================================
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{claim}[theorem]{Claim}
+\newtheorem{corollary}[theorem]{Corollary}
+
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\newtheorem{problem}[theorem]{Problem}
+
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+% ============================================================
+% Title and author information
+% ============================================================
+\title{Deep Learning for Parameter Estimation in Homogeneous Thomas Processes}
+
+\ifaaaistyle
+    % Anonymous submission version
+    \author{Anonymous Submission}
+
+    % Replace the anonymous author block with the following for
+    % the camera-ready version:
+    %
+    % \author{
+    %     Flavio Gualtieri\textsuperscript{\rm 1}
+    % }
+    %
+    % \affiliations{
+    %     \textsuperscript{\rm 1}Institution Name\\
+    %     City, Country\\
+    %     email@example.com
+    % }
+\else
+    \author{Flavio Gualtieri}
+    \date{\today}
+\fi
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We propose a novel deep learning estimator for the three parameters of a homogeneous Thomas point process: parent intensity $\kpar$, cluster scale $\cs$, and mean offspring $\mo$. The estimator is comprised of an encoder that computes a $128$-dimensional feature vector, which is in turn fed to a FCNN with three output nodes corresponding to the three parameters. We present a comparison of various model features - raw point cloud, parwise distance CDF, $H_0$/$H_1$ persistence image, $H_0$/$H_1$ Betti curve - showing that features constructed from the persistent homology of the point cloud perform significantly better than more classical and second-order features.
+\end{abstract}
+
+
+\section{Introduction}
+The study of spatial point processes (SPPs) has a variety of important applications spanning astronomy, cell biology, and epidemiology. Many natural phenomena can be modelled using point processes - such as galaxy clustering - so one can hope to leverage an understanding of SPPs to obtain new insights.
+
+The ability to infer the parameters that describe a given point process is of particular interest becasue a wealth of summary statistics and properties become available once these parameters are known.
+
+A number of parameter estimation methods have been proposed, typically relying on closed-form expressions for summary staistics such as the $K$ and $g$ functions. Minimum contrast on $K$ or $g$ (Diggle 2003). Palm likelihood (Tanaka, Ogata \& Stoyan 2008). Bayesian and MCMC.
+
+These methods have limitations we hope to address. Reliance on hand-picked summary statistic (and by extension a closed-form expression for this statistic), hyperparameter tuning sensitivity.
+
+
+\section{Background}
+We provide a basic introduction to spatial point processes and notions from persistent homology used in this paper.
+
+\subsection{The Thomas Point Process}
+A $d$-dimensional spatial point process $X$ on a subset $W \subseteq \R^d$ is equipped with an intensity function $\rho(u): \R^d \rightarrow \R^+$ such that
+
+    \[
+    \E[N(W)] = \int_W \rho(u) du,
+    \]
+    
+where $N(W) = |W \cap X|$ denotes the number of points of $X$ in $W$. When $\rho(u) = \lambda \in \R$ we say that $X$ is \emph{homogeneous}.
+
+    \begin{definition}[Neimann-Scott process]
+        For a Neimann-Scott process with Poisson-distributed offspring we have:
+        
+            \[
+            \rho_{NS}(u) = \mo \sum_{p \in P} k(u - p),
+            \]
+            
+        where $P$ is a Poisson-distributed \emph{parent} point process with $\rho_P(u) = \kpar$, and $k$ is a kernel that describes how the \emph{offspring} point are spatially distributed around their parents. We therefore identify the parameters of parent and offspring intensities, as well as any additional parameters introduced by the kernel $k$.
+    \end{definition}
+
+A homogeneous Thomas process is a special type of Neimann-Scott process where $k$ is an isotropic Gaussian kernel $\mathcal{N}(0, \cs^2I)$, and therefore has parameters $\theta = (\kpar, \mo, \cs)$. Computationally speaking, we may construct a Thomas point process on a $d$-dimensional unit box $W = [0, 1]^d$ as follows:
+
+    \begin{enumerate}
+        \item Expand $W$ by an edge buffer $b = 4\cs$ to avoid boundary truncation of clusters, to obtain $W_{exp}$.
+        \item Sample a homogeneous Poisson parent process $P = \{p_i\}_{i=1}^{N_p}$ with intensity $\rho_P(u) = \kpar$ on $W_{exp}$, so $N_p \sim Po(\kpar \cdot |W_{exp}|)$.
+        \item Each $p_i \in P$ produces $K_p \sim Po(\mo)$ offspring.
+        \item Displace offspring from their respective parents with i.i.d. isotropic Gaussian noise, $x_{ij} = p_i + \epsilon_{ij}$, where $\epsilon_{ij} \sim \mathcal{N}(0, \sigma^2I_d)$.
+        \item Truncate $W_{exp}$ back to $W$, discarding points in $\R^d \setminus W$ and retaining only the remaining offspring points to obtain $X_{Thomas} = \{x_k\}_{k=1}^{N_T} \subset [0, 1]^d$.
+    \end{enumerate}
+
+
+\subsection{Summary Statistics}
+A wealth of summary statistics exist to describe SPPs. In this paper we focus on the $g$ and $K$ functions because they are the most widely used in parameter estimation, but these are no means the only ones. We begin by defining the second-order product density $\rho^{(2)}(u, v)$.
+
+    \begin{definition}[Second-order product density]
+        Let $X$ denote a point process on $\R^d$ with $\rho(u)$ and $\xeta \in X$. The function $\rho^{(2)}(u, v):  \R^d \times \R^d \rightarrow \R^+$ is the second-order product density if:
+
+            \[
+            \alpha^{(2)}(C) = \int \int \1[(\xeta) \in C]\rho^{(2)}(\xeta) d\xi d\eta, \quad C \subseteq \R^d \times \R^d,
+            \]
+
+        where $\alpha^{(2)}(C): R^d \times \R^d \rightarrow \R^+$ is the second-order factorial moment measure:
+
+            \[
+            \alpha^{(2)}(C) = \E\sum_{\xeta \in X}^{\neq} \1[(\xeta) \in C], \quad C \subseteq \R^d \times \R^d.
+            \]
+    \end{definition}
+
+The second-order product density $\rho^{(2)}(u, v)$ describes the probability of jointly observing a pair of points from $X$ in balls $b_{\epsilon}(\xi)$, $b_{\epsilon}(\eta)$ with volumes $d\xi$, $d\eta$. The pair correlation function $g(\xeta): R^d \times R^d \rightarrow \R^+$ is defined
+
+    \[
+    g(\xeta) = \frac{\rho^{(2)}(\xeta)}{\rho(\xi)\rho(\eta)}.
+    \]
+
+It is clear that for a homogeneous Poisson process we have $g = 1$. Intuitively, $g$ provides information about whether an SPP is attractive ($g > 1$), or repulsive ($g < 1$). We now define the $K$ function.
+
+    \begin{definition}[$K$-function]
+        For a stationary and isotropic point process $X$ on $\R^d$, the $K$-function $K(r): \R \rightarrow R^+$ is defined
+
+            \[
+            K(r) = \int_{b_r(0)} g(\xi) d\xi
+            \]
+    \end{definition}
+
+Intuitively, $K(r)$ provides a measure of how many further points we expect to see at a distance $r$ from the origin.
+
+\subsection{Persistent Homology}
+We now turn out attention to some basic notions from persistent homology (PH).
+
+    \begin{definition}[Vietoris-Rips complex]
+        Let $X = \{x_i\}_{i=1}^N$ where $x_i \in \R^d$ denote a point cloud. We equip $X$ with a Vietoris-Rips (VR) complex by defining:
+            
+            \[
+            VR_t(X) = \{\sigma | b_t(x_i) \cap b_t(x_j) \neq \emptyset \forall x_i, x_j \in \sigma\}
+            \]
+    \end{definition}
+
+From the notion of a VR complex the notion of VR filtration follows naturally, as one can easily see that $VR_s(X) \subseteq VR_t(X)$ whenever $s \leq t$.
+
+
+- Define birth-death
+- Define persistence diagram
+- Define persitence image
+- Define betti curve
+
+\section{Model}
+We explain the model and it's features
+
+\subsection{Overall Architecture}
+- Define FNCC
+- Define encoders
+- Explain specifics of this model's head (with three output nodes)
+
+\subsection{Features}
+Explain each feature and it's encdoer
+
+\subsection{Raw Point Cloud}
+- Point-net style encoder
+- Explain importance of persumation invariance
+
+\subsection{Pairwise Distance CDF}
+
+\subsection{Persistence Image}
+- Explain how it is computed from diagrams
+- Explain calibration procedure
+- Explain CNN encoder
+
+\subsection{Betti Curve}
+- Sample 128 points on betti curve
+
+
+\section{Results}
+Explain results
+
+
+
+
+
+\end{document}
