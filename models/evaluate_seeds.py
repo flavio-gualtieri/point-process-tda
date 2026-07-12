@@ -27,7 +27,7 @@ DEFAULT_SEEDS = [
     9267492783429472,
 ]
 
-DEFAULT_FEATURES = ["betti_0", "betti_1", "pairwise", "pi_0", "pi_1", "raw_pc"]
+DEFAULT_FEATURES = ["betti_0", "betti_1", "pairwise", "pi_0", "pi_1", "raw_pc", "new_feature", "betti_cnn_0"]
 
 # Fixed categorical order (never cycled/reassigned) so a feature keeps its color
 # across both figures.

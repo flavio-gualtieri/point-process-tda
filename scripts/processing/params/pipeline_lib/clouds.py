@@ -20,7 +20,7 @@ from cloudforger.processes.poisson import PoissonProcess
 from cloudforger.processes.thomas import ThomasProcess
 from cloudforger.processes.inhom_thomas import InhomThomas
 
-from pipeline_lib.io import dump_pickle
+from pipeline_lib.io import dump_pickle, load_yaml_config, require_format, resolve_path
 from pipeline_lib.records import cloud_to_record
 
 PROCESS_REGISTRY: dict[str, type[PointProcess]] = {
@@ -235,3 +235,130 @@ def write_cloud_manifest(
     }
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(manifest, f, sort_keys=False)
+
+
+# ---------------------------------------------------------------------------
+# Per-dimension stage entry points, called by the orchestrator
+# ---------------------------------------------------------------------------
+
+
+def prepare_cloud_design(
+    config: dict[str, Any],
+    dimensions: list[int],
+    process: str,
+) -> tuple[CloudDesignBundle, str]:
+    cloud_cfg_path = resolve_path(config["cloud_generation"].get("config_path", "configs/params/thomas_cloudgen.yaml"))
+    cloud_cfg = load_yaml_config(cloud_cfg_path)
+
+    process = str(cloud_cfg.get("process", process))
+    cloud_cfg["dimension"] = list(dimensions)
+
+    output_format = require_format(
+        config.get("formats", {}).get("clouds", cloud_cfg.get("format", "dict")),
+        "formats.clouds",
+    )
+    cloud_cfg["format"] = output_format
+
+    base_seed = int(cloud_cfg.get("seed", 0))
+    n_hint = int(cloud_cfg.get("n_hint", 0))
+    reps = int(cloud_cfg["design"].get("reps", 1))
+    if reps < 1:
+        raise ValueError("cloud_generation design.reps must be >= 1.")
+
+    design_rng = np.random.default_rng(base_seed)
+    param_vectors = build_param_vectors(cloud_cfg, design_rng)
+    train_test_vectors, adversarial_vectors, adversarial_indices = split_adversarial_vectors(
+        param_vectors, cloud_cfg, base_seed
+    )
+
+    train_test_design = repeat_vectors(train_test_vectors, reps)
+    adversarial_design = repeat_vectors(adversarial_vectors, reps)
+    adversarial_seed_offset = int(cloud_cfg.get("adversarial", {}).get("seed_offset", 100_000))
+    dimension_seed_stride = int(cloud_cfg.get("dimension_seed_stride", 1_000_937_000))
+
+    bundle = CloudDesignBundle(
+        config=cloud_cfg,
+        train_test_vectors=train_test_vectors,
+        adversarial_vectors=adversarial_vectors,
+        adversarial_indices=adversarial_indices,
+        train_test_design=train_test_design,
+        adversarial_design=adversarial_design,
+        base_seed=base_seed,
+        output_format=output_format,
+        n_hint=n_hint,
+        adversarial_seed_offset=adversarial_seed_offset,
+        dimension_seed_stride=dimension_seed_stride,
+    )
+    return bundle, process
+
+
+def generate_clouds_for_dim(
+    dim_index: int,
+    dim: int,
+    design: CloudDesignBundle,
+    process: str,
+    train_test_output: Path,
+    adversarial_output: Path,
+    manifest_output: Path,
+    overwrite: bool,
+) -> None:
+    dim_seed = design.base_seed + dim_index * design.dimension_seed_stride
+    region = build_region(design.config, dim)
+
+    outputs = [train_test_output, adversarial_output, manifest_output]
+    if all(path.exists() for path in outputs) and not overwrite:
+        print(f"  Skipping cloud generation; outputs exist in {train_test_output.parent}")
+        return
+
+    train_test_clouds = generate_clouds_for_design(
+        process_name=process,
+        region=region,
+        design=design.train_test_design,
+        base_seed=dim_seed,
+        n_hint=design.n_hint,
+    )
+    adversarial_clouds = generate_clouds_for_design(
+        process_name=process,
+        region=region,
+        design=design.adversarial_design,
+        base_seed=dim_seed + design.adversarial_seed_offset,
+        n_hint=design.n_hint,
+    )
+
+    save_clouds(train_test_output, train_test_clouds, design.output_format)
+    save_clouds(adversarial_output, adversarial_clouds, design.output_format)
+
+    manifest_config = dict(design.config)
+    manifest_config["dimension"] = dim
+    manifest_config["dimension_seed"] = dim_seed
+    write_cloud_manifest(
+        manifest_output,
+        manifest_config,
+        design.train_test_vectors,
+        design.adversarial_vectors,
+        design.adversarial_indices,
+        train_test_clouds,
+        adversarial_clouds,
+    )
+
+    train_stats = cloud_stats(train_test_clouds)
+    adv_stats = cloud_stats(adversarial_clouds)
+    reps = int(design.config["design"].get("reps", 1))
+
+    print(
+        f"  Generated {train_stats['n_clouds']} train/test clouds from "
+        f"{len(design.train_test_vectors)} parameter vectors x {reps} rep(s)."
+    )
+    print(
+        f"  Generated {adv_stats['n_clouds']} adversarial clouds from "
+        f"{len(design.adversarial_vectors)} held-out parameter vectors x {reps} rep(s)."
+    )
+    print(
+        f"  Train/test points: total {train_stats['total_points']}, "
+        f"min {train_stats['min_points']}, max {train_stats['max_points']}."
+    )
+    print(
+        f"  Adversarial points: total {adv_stats['total_points']}, "
+        f"min {adv_stats['min_points']}, max {adv_stats['max_points']}."
+    )
+    print(f"  Saved clouds and manifest in {train_test_output.parent}")
