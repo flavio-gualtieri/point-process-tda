@@ -751,37 +751,70 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None) -> dict[int, dict[str, Any]]:
-    args = build_arg_parser().parse_args(argv)
-    r_grid = default_r_grid(args.r_max, args.n_r)
+def prepare_data(
+    clouds_path: Path,
+    adversarial_clouds_path: Path,
+    *,
+    r_max: float = R_MAX,
+    n_r: int = N_R,
+    feature_cache_dir: Path | None = None,
+    recompute_features: bool = False,
+    max_clouds: int | None = None,
+) -> dict[str, Any]:
+    """Loads clouds + extracts/caches L(r)-r features once. Callers that need
+    to run multiple seeds (e.g. dtm_experiment/train.py, which interleaves
+    seeds across several methods) should call this once and pass the result
+    into run_one_seed() per seed, instead of re-loading the multi-thousand
+    cloud pickle from scratch for every seed."""
+    r_grid = default_r_grid(r_max, n_r)
+    cache_dir = feature_cache_dir or clouds_path.parent
 
-    cache_dir = args.feature_cache_dir or args.clouds.parent
-
-    print(f"Loading clouds from {args.clouds} ...")
-    train_records = load_cloud_records(args.clouds)
-    if args.max_clouds is not None:
-        train_records = train_records[: args.max_clouds]
+    print(f"Loading clouds from {clouds_path} ...")
+    train_records = load_cloud_records(clouds_path)
+    if max_clouds is not None:
+        train_records = train_records[:max_clouds]
     print(f"  {len(train_records)} clouds loaded.")
 
-    train_cache = cache_dir / (args.clouds.stem + ".lfunc_cache.npz")
+    train_cache = cache_dir / (clouds_path.stem + ".lfunc_cache.npz")
     train_features = get_features(
-        train_records, r_grid, cache_path=train_cache, force=args.recompute_features, tag="train_test"
+        train_records, r_grid, cache_path=train_cache, force=recompute_features, tag="train_test"
     )
 
     adv_records: list[dict[str, Any]] | None = None
     adv_features: dict[str, np.ndarray] | None = None
-    if args.adversarial_clouds.exists():
-        print(f"Loading adversarial clouds from {args.adversarial_clouds} ...")
-        adv_records = load_cloud_records(args.adversarial_clouds)
-        if args.max_clouds is not None:
-            adv_records = adv_records[: args.max_clouds]
+    if adversarial_clouds_path.exists():
+        print(f"Loading adversarial clouds from {adversarial_clouds_path} ...")
+        adv_records = load_cloud_records(adversarial_clouds_path)
+        if max_clouds is not None:
+            adv_records = adv_records[:max_clouds]
         print(f"  {len(adv_records)} adversarial clouds loaded.")
-        adv_cache = cache_dir / (args.adversarial_clouds.stem + ".lfunc_cache.npz")
+        adv_cache = cache_dir / (adversarial_clouds_path.stem + ".lfunc_cache.npz")
         adv_features = get_features(
-            adv_records, r_grid, cache_path=adv_cache, force=args.recompute_features, tag="adversarial"
+            adv_records, r_grid, cache_path=adv_cache, force=recompute_features, tag="adversarial"
         )
     else:
-        print(f"No adversarial clouds found at {args.adversarial_clouds}; skipping adversarial evaluation.")
+        print(f"No adversarial clouds found at {adversarial_clouds_path}; skipping adversarial evaluation.")
+
+    return {
+        "r_grid": r_grid,
+        "train_records": train_records,
+        "train_features": train_features,
+        "adversarial_features": adv_features,
+        "adversarial_path": adversarial_clouds_path if adv_features is not None else None,
+    }
+
+
+def main(argv: list[str] | None = None) -> dict[int, dict[str, Any]]:
+    args = build_arg_parser().parse_args(argv)
+    data = prepare_data(
+        args.clouds,
+        args.adversarial_clouds,
+        r_max=args.r_max,
+        n_r=args.n_r,
+        feature_cache_dir=args.feature_cache_dir,
+        recompute_features=args.recompute_features,
+        max_clouds=args.max_clouds,
+    )
 
     mc_cache: dict[Any, Any] = {}
     mc_rng = np.random.default_rng(MC_SEED)
@@ -791,11 +824,11 @@ def main(argv: list[str] | None = None) -> dict[int, dict[str, Any]]:
         print(f"\n{'#' * 90}\n### new_feature | seed {seed}\n{'#' * 90}")
         summary[seed] = run_one_seed(
             seed,
-            train_records=train_records,
-            train_features=train_features,
-            adversarial_features=adv_features,
-            adversarial_path=args.adversarial_clouds if adv_features is not None else None,
-            r_grid=r_grid,
+            train_records=data["train_records"],
+            train_features=data["train_features"],
+            adversarial_features=data["adversarial_features"],
+            adversarial_path=data["adversarial_path"],
+            r_grid=data["r_grid"],
             output_root=args.output_root,
             n_epochs=args.n_epochs,
             batch_size=args.batch_size,

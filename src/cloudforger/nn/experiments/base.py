@@ -130,6 +130,57 @@ def _normalize_labels_by_name(
         "transforms": transforms,
     }
 
+
+# ---------------------------------------------------------------------------
+# Shared n(x) side-channel (Vihrs 2022 feeds n(x) alongside the curve because
+# the curve alone can't recover intensity-related parameters). One
+# implementation shared by every experiment that wants it, so all methods in
+# a comparison have equal access to it rather than some getting it and
+# others not.
+# ---------------------------------------------------------------------------
+
+def _resolve_sibling_clouds_path(dataset_path: Path) -> Path:
+    """Resolve the sibling clouds.pkl (or adversarial_clouds.pkl) living next
+    to a features/betti/images file, using the "adversarial_" filename
+    prefix convention every split already follows (see DEFAULT_SPLITS in
+    pipeline_lib/config.py), rather than pattern-matching on the file's own
+    base name. Robust to any naming scheme (betti.pkl, betti_dtm_k5.pkl,
+    images.pkl, features.pkl, ...) as long as it lives in the same directory
+    as clouds.pkl, which every split does by construction."""
+    name = "adversarial_clouds.pkl" if dataset_path.name.startswith("adversarial_") else "clouds.pkl"
+    return dataset_path.parent / name
+
+
+def log_zscore_fit_once(experiment: Any, values: np.ndarray, attr: str) -> np.ndarray:
+    """Log+zscore `values`, fitting mean/std on the first call and freezing
+    them on `experiment` for later calls (e.g. the adversarial payload) --
+    the same fit-once/apply-frozen convention _normalize_labels_by_name uses
+    for the targets."""
+    log_v = np.log(values)
+    if not hasattr(experiment, attr):
+        std = float(log_v.std())
+        setattr(experiment, attr, {"mean": float(log_v.mean()), "std": std if std else 1.0})
+    norm = getattr(experiment, attr)
+    return ((log_v - norm["mean"]) / norm["std"]).astype(np.float32)
+
+
+def n_points_head_extra(experiment: Any, payload: Any, dataset_path: Path) -> np.ndarray:
+    """Log+zscore n(x), joined from the sibling clouds.pkl by the shared
+    'seed' field -- for any experiment whose own payload (betti.pkl,
+    images.pkl, features.pkl, ...) carries a "seeds" list but not n_points
+    itself. Call from Experiment.extract_head_extra as:
+        return n_points_head_extra(self, payload, dataset_path)
+    """
+    clouds_path = _resolve_sibling_clouds_path(dataset_path)
+    with open(clouds_path, "rb") as f:
+        clouds = pickle.load(f)
+    n_points_by_seed = {c["seed"]: c["n_points"] for c in clouds}
+
+    seeds = payload["seeds"]
+    n_points = np.array([n_points_by_seed[int(s)] for s in seeds], dtype=np.float64)
+    return log_zscore_fit_once(experiment, n_points, attr="_n_points_norm")
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -205,7 +256,7 @@ def _make_loaders(dataset: Dataset, cfg: dict, collate_fn=None):
 
 def _train_and_eval(model, loaders, cfg: dict, device: str, tag: str):
     train_loader, val_loader, test_loader = loaders
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg["lr"])
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg["lr"], weight_decay=1e-4)
     loss_fn = nn.MSELoss()
 
     history = {"train_loss": [], "val_loss": []}

@@ -7,10 +7,12 @@ from typing import Any
 import numpy as np
 import torch
 
+from pathlib import Path
+
 from cloudforger.core.cloud import PointCloud
 from cloudforger.core.region import Box
 from cloudforger.nn.data import PointCloudDataset, pad_point_cloud_collate
-from cloudforger.nn.experiments.base import Experiment, register
+from cloudforger.nn.experiments.base import Experiment, register, log_zscore_fit_once
 
 
 def _cloud_list(payload: Any):
@@ -88,7 +90,12 @@ class RawPointCloudExperiment(Experiment):
 
     @property
     def extra_meta(self) -> dict:
-        return {"ambient_dim": self.ambient_dim}
+        meta: dict[str, Any] = {"ambient_dim": self.ambient_dim}
+        norm = getattr(self, "_n_points_norm", None)
+        if norm is not None:
+            meta["n_points_log_mean"] = norm["mean"]
+            meta["n_points_log_std"] = norm["std"]
+        return meta
 
     def extract_labels(self, payload):
         return _labels_from_clouds(_cloud_list(payload))
@@ -97,6 +104,18 @@ class RawPointCloudExperiment(Experiment):
         clouds = [_to_pointcloud(c) for c in _cloud_list(payload)]
         self.ambient_dim = clouds[0].dimension
         return PointCloudDataset(clouds, labels, n_points=None, dtype=torch.float32)
+
+    def extract_head_extra(self, payload, dataset_path: Path) -> np.ndarray:
+        # Unlike betti/pi/pairwise, n(x) is already in this experiment's own
+        # payload (each cloud record carries "n_points") -- no sibling-file
+        # join needed. Worth having explicitly regardless: PointNetEncoder
+        # max-pools over per-point features, which is cardinality-invariant
+        # by construction, so this encoder architecturally cannot recover
+        # n(x) from the points themselves the way a curve/image encoder can
+        # (weakly) infer it from density.
+        clouds = _cloud_list(payload)
+        n_points = np.array([c["n_points"] for c in clouds], dtype=np.float64)
+        return log_zscore_fit_once(self, n_points, attr="_n_points_norm")
 
     def build_encoder(self, dataset):
         from cloudforger.nn.encoders.point_cloud import PointNetEncoder

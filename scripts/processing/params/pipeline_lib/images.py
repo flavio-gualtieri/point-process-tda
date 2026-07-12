@@ -35,7 +35,7 @@ def build_imagers(
         else:
             birth_hi = axes["birth"].get(99.0, 1.0)
             persistence_hi = axes["persistence"].get(99.0, 1.0)
-            birth_hi = 1.0 if birth_hi <= 0 else birth_hi
+            birth_hi = 4.0 * sigma if birth_hi <= 0 else birth_hi
             persistence_hi = 1.0 if persistence_hi <= 0 else persistence_hi
 
         imagers[dim] = PersistenceImager(

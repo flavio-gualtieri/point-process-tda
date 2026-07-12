@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import pickle
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from cloudforger.nn.data import BettiCurveDataset
-from cloudforger.nn.experiments.base import Experiment, register
+from cloudforger.nn.experiments.base import Experiment, register, n_points_head_extra
 
 
 @register("betti_cnn")
@@ -38,9 +37,27 @@ class BettiCurveCNNExperiment(Experiment):
             meta["n_points_log_mean"] = norm["mean"]
             meta["n_points_log_std"] = norm["std"]
         return meta
-
+    
     def build_dataset(self, payload, labels):
-        return BettiCurveDataset(payload, labels, homology_dims=[self.hom_dim])
+        # Global-scalar z-score (one mean/std for the whole curve, not
+        # per-bin) -- matches Vihrs (2022) section 2.2 item 2d exactly:
+        # "for {L_i} the mean and standard deviation were calculated both
+        # over all n_train simulations and over all m values for r, meaning
+        # that all values of {L_i} were scaled by the same amount." Per-bin
+        # normalization would give every position its own affine transform,
+        # which breaks the translation-equivariance the Conv1D relies on.
+        matrix_key = f"betti{self.hom_dim}_matrix"
+        raw = np.asarray(payload[matrix_key], dtype=np.float64)
+
+        if not hasattr(self, "_curve_norm"):
+            mean = float(raw.mean())
+            std = float(raw.std())
+            self._curve_norm = {"mean": mean, "std": std if std > 0 else 1.0}
+
+        norm = self._curve_norm
+        normalized = ((raw - norm["mean"]) / norm["std"]).astype(np.float32)
+
+        return BettiCurveDataset({matrix_key: normalized}, labels, homology_dims=[self.hom_dim])
 
     def build_encoder(self, dataset):
         from cloudforger.nn.encoders.sequence_cnn import SequenceCNNEncoder
@@ -48,28 +65,8 @@ class BettiCurveCNNExperiment(Experiment):
         return SequenceCNNEncoder(
             input_dim=dataset.input_dim,
             embedding_dim=self.cfg["embedding_dim"],
+            pool_size=5,
         )
 
     def extract_head_extra(self, payload, dataset_path: Path) -> np.ndarray:
-        # betti.pkl carries no n_points itself; join it from the sibling
-        # clouds.pkl (or adversarial_clouds.pkl) by the shared 'seed' field,
-        # the same join key models/evaluate.py's attach_betti_curves uses.
-        clouds_path = dataset_path.with_name(dataset_path.name.replace("betti", "clouds"))
-        with open(clouds_path, "rb") as f:
-            clouds = pickle.load(f)
-        n_points_by_seed = {c["seed"]: c["n_points"] for c in clouds}
-
-        seeds = payload["seeds"]
-        n_points = np.array([n_points_by_seed[int(s)] for s in seeds], dtype=np.float64)
-        log_n = np.log(n_points)
-
-        # Fit log+zscore on the first call (the train_test payload) and
-        # reuse the frozen stats for the later adversarial-payload call --
-        # the same fit-once/apply-frozen convention _normalize_labels_by_name
-        # uses for the targets.
-        if not hasattr(self, "_n_points_norm"):
-            std = float(log_n.std())
-            self._n_points_norm = {"mean": float(log_n.mean()), "std": std if std else 1.0}
-
-        norm = self._n_points_norm
-        return ((log_n - norm["mean"]) / norm["std"]).astype(np.float32)
+        return n_points_head_extra(self, payload, dataset_path)
