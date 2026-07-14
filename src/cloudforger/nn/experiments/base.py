@@ -23,7 +23,7 @@ from cloudforger.nn.models.single_modal import SingleModalModel
 N_PARAMS = {"thomas": 3, "matern": 2}
 
 # Matches dimensioned methods like "pi_1" / "betti_0" / "betti_cnn_1".
-_PERSIST_TOKEN = re.compile(r"^(pi|betti_cnn|betti)_(\d+)$")
+_PERSIST_TOKEN = re.compile(r"^(pi|betti_cnn_weighted|betti_cnn|betti)_(\d+)$")
 
 
 class CovariateHeadDataset(Dataset):
@@ -151,6 +151,17 @@ def _resolve_sibling_clouds_path(dataset_path: Path) -> Path:
     return dataset_path.parent / name
 
 
+def zscore_fit_once(experiment: Any, values: np.ndarray, attr: str) -> np.ndarray:
+    """Same fit-once/freeze convention as log_zscore_fit_once, but no log
+    step -- use this for values that can legitimately be zero or negative
+    (persistence entropy can be exactly 0), where log() would be undefined."""
+    if not hasattr(experiment, attr):
+        std = float(values.std())
+        setattr(experiment, attr, {"mean": float(values.mean()), "std": std if std else 1.0})
+    norm = getattr(experiment, attr)
+    return ((values - norm["mean"]) / norm["std"]).astype(np.float32)
+
+
 def log_zscore_fit_once(experiment: Any, values: np.ndarray, attr: str) -> np.ndarray:
     """Log+zscore `values`, fitting mean/std on the first call and freezing
     them on `experiment` for later calls (e.g. the adversarial payload) --
@@ -181,6 +192,29 @@ def n_points_head_extra(experiment: Any, payload: Any, dataset_path: Path) -> np
     return log_zscore_fit_once(experiment, n_points, attr="_n_points_norm")
 
 
+def persistence_entropy_head_extra(
+    experiment: Any, payload: Any, dims: tuple[int, ...], n_x: np.ndarray
+) -> np.ndarray:
+    """Join per-dim persistence entropy (payload["persistence_entropy"] is
+    always keyed by a single int homology dim -- see
+    dtm_experiment/compute_features.py's persistence_entropy) onto n(x), one
+    extra z-scored column per dim in `dims`. Must be called with every dim
+    the experiment actually trains on: a single `self.hom_dim` lookup breaks
+    for tuple/None hom_dim (the "01"-fused and combined_all methods), since
+    the entropy dict is never keyed by a tuple or None -- it would silently
+    fall back to n_x-only with no entropy feature at all."""
+    entropy_by_dim = payload.get("persistence_entropy", {})
+    entropies = [entropy_by_dim.get(d) for d in dims]
+    if any(e is None for e in entropies):
+        return n_x
+
+    entropy_cols = [
+        zscore_fit_once(experiment, np.asarray(e, dtype=np.float64), attr=f"_entropy_norm_{d}")
+        for d, e in zip(dims, entropies)
+    ]
+    return np.stack([n_x, *entropy_cols], axis=1)
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -197,10 +231,12 @@ def register(*names: str):
     return deco
 
 
-def _parse_method(method: str) -> tuple[str, int | None]:
+def _parse_method(method: str) -> tuple[str, int | tuple[int, ...] | None]:
     m = _PERSIST_TOKEN.match(method)
     if m:
-        return m.group(1), int(m.group(2))
+        digits = m.group(2)
+        hom_dim = int(digits) if len(digits) == 1 else tuple(int(c) for c in digits)
+        return m.group(1), hom_dim
     return method, None
 
 
@@ -309,6 +345,16 @@ class Experiment(ABC):
         """Extra fields written into results.json."""
         return {}
 
+    @property
+    def encoder_output_dim(self) -> int:
+        """Width of the vector build_encoder's module emits, before any
+        head-extra features (covariates, n_points, ...) are concatenated on.
+        Default: cfg['embedding_dim'], matching every single-encoder
+        experiment. Override for encoders that fuse several sub-embeddings
+        (e.g. a multi-modal fusion encoder over several data files) into a
+        wider vector, so the shared head is sized correctly."""
+        return self.cfg["embedding_dim"]
+
     # -- per-experiment hooks ----------------------------------------------
 
     def extract_labels(self, payload: Any) -> tuple[np.ndarray, list[str]]:
@@ -335,7 +381,8 @@ class Experiment(ABC):
     def run(self, dataset_path: Path, output_dir: Path, adversarial_path: Path | None = None) -> dict:
         device = _prepare_device(self.cfg)
 
-        payload = _load_pickle(Path(dataset_path))
+        self._dataset_path = Path(dataset_path)
+        payload = _load_pickle(self._dataset_path)
 
         labels, label_names = self.extract_labels(payload)
         labels, label_names = _select_labels(
@@ -375,7 +422,7 @@ class Experiment(ABC):
 
         model = SingleModalModel(
             encoder=self.build_encoder(dataset),
-            head=ParameterEstimator(embedding_dim=self.cfg["embedding_dim"] + head_extra_dim, n_params=labels.shape[1])
+            head=ParameterEstimator(embedding_dim=self.encoder_output_dim + head_extra_dim, n_params=labels.shape[1])
         ).to(device)
 
         history, best_state, test_loss = _train_and_eval(
@@ -385,7 +432,8 @@ class Experiment(ABC):
         adversarial_loss = None
 
         if adversarial_path is not None and Path(adversarial_path).exists():
-            adversarial_payload = _load_pickle(Path(adversarial_path))
+            self._dataset_path = Path(adversarial_path)
+            adversarial_payload = _load_pickle(self._dataset_path)
             adversarial_labels, adversarial_label_names = self.extract_labels(adversarial_payload)
             adversarial_labels, _ = _select_labels(
                 adversarial_labels,

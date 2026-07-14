@@ -22,7 +22,7 @@ SEEDS = [
 ]
 
 DATA_DIR = ROOT / "data" / "params" / "2d" / "thomas"
-RESULTS_DIR = Path(__file__).resolve().parent / "results"
+RESULTS_DIR = Path(__file__).resolve().parent / "results_k10"
 
 N_EPOCHS = 500
 
@@ -97,13 +97,12 @@ def train_new_feature_for_seed(seed: int) -> None:
         print(f"\nnew_feature | seed {seed}: already done, skipping.")
         return
 
-    data = _get_new_feature_data()
-    if data is None:
-        print(f"! {DATA_DIR / 'clouds.pkl'} missing. Skipping new_feature for seed {seed}.")
-        return
-
     print(f"\n{'#' * 90}\n### new_feature | seed {seed}\n{'#' * 90}")
     try:
+        data = _get_new_feature_data()
+        if data is None:
+            print(f"! {DATA_DIR / 'clouds.pkl'} missing. Skipping new_feature for seed {seed}.")
+            return
         run_new_feature.run_one_seed(
             seed,
             train_records=data["train_records"],
@@ -132,7 +131,7 @@ def main() -> None:
     # are still training.
     for seed in SEEDS:
         print(f"\n{'*' * 90}\n*** seed {seed}\n{'*' * 90}")
-        train_betti_pi_for_seed(seed)
+        #train_betti_pi_for_seed(seed)
         train_new_feature_for_seed(seed)
         print(f"\n--- seed {seed} done. Compare progress so far with: python dtm_experiment/compare.py ---")
 
