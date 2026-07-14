@@ -6,6 +6,7 @@ from .pairwise import PairwiseExperiment
 from .persistence_image import PersistenceImageExperiment
 from .betti import BettiCurveExperiment
 from .betti_cnn import BettiCurveCNNExperiment
+from .combined_all import CombinedAllExperiment
 
 __all__ = [
     "Experiment",
@@ -17,4 +18,5 @@ __all__ = [
     "PersistenceImageExperiment",
     "BettiCurveExperiment",
     "BettiCurveCNNExperiment",
+    "CombinedAllExperiment",
 ]

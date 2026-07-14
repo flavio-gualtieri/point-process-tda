@@ -48,19 +48,28 @@ def _axis_bounds(stats: dict, dim: int) -> tuple[float, float]:
     return float(birth_hi), float(persistence_hi)
 
 
-def build_calibrated_betti(stats: dict) -> dict[int, BettiCurve]:
-    betti_by_dim: dict[int, BettiCurve] = {}
+def persistence_entropy(pairs: np.ndarray) -> float:
+    finite = pairs[np.isfinite(pairs).all(axis=1)]
+    if len(finite) == 0:
+        return 0.0
+    p = finite[:, 1] - finite[:, 0]
+    total = p.sum()
+    if total <= 0:
+        return 0.0
+    probs = p / total
+    return float(-(probs * np.log(probs)).sum())
+
+
+def build_calibrated_betti(stats: dict, weight_by_persistence: bool = False) -> dict[int, BettiCurve]:
+    betti_by_dim = {}
     for dim in HOMOLOGY_DIMS:
         birth_hi, pers_hi = _axis_bounds(stats, dim)
         grid_range = (0.0, (birth_hi + pers_hi) * GRID_RANGE_PAD)
         betti_by_dim[dim] = BettiCurve(
-            homology_dims=(dim,),
-            grid_size=BETTI_GRID_SIZE,
-            grid_range=grid_range,
-            drop_infinite=True,
-            normalize=False,
+            homology_dims=(dim,), grid_size=BETTI_GRID_SIZE, grid_range=grid_range,
+            drop_infinite=True, normalize=False,
+            weight_by_persistence=weight_by_persistence,   # new
         )
-        print(f"  [betti] dim={dim}: grid_range=({grid_range[0]:.4f}, {grid_range[1]:.4f})")
     return betti_by_dim
 
 
@@ -124,8 +133,10 @@ def compute_for_split(
     diagrams: list[PersistenceDiagram],
     bundle: dict[str, Any],
     betti_by_dim: dict[int, BettiCurve],
+    betti_weighted_by_dim: dict[int, BettiCurve],
     imager: MultiChannelImager,
     betti_out: Path,
+    betti_weighted_out: Path,
     images_out: Path,
     tag: str,
 ) -> None:
@@ -134,16 +145,21 @@ def compute_for_split(
     betti_matrices: dict[int, np.ndarray] = {
         dim: np.empty((n, BETTI_GRID_SIZE), dtype=np.float32) for dim in HOMOLOGY_DIMS
     }
+    betti_weighted_matrices = {dim: np.empty((n, BETTI_GRID_SIZE), dtype=np.float32) for dim in HOMOLOGY_DIMS}
     image_tensors: dict[int, np.ndarray] = {
         dim: np.empty((n, PI_RESOLUTION, PI_RESOLUTION), dtype=np.float32) for dim in HOMOLOGY_DIMS
     }
+    entropies: dict[int, np.ndarray] = {dim: np.empty(n, dtype=np.float32) for dim in HOMOLOGY_DIMS}
 
     for i, d in enumerate(diagrams):
         for dim in HOMOLOGY_DIMS:
             betti_matrices[dim][i] = betti_by_dim[dim].compute(d).curves[dim]
+            betti_weighted_matrices[dim][i] = betti_weighted_by_dim[dim].compute(d).curves[dim]
         images = imager.transform(d)
         for dim in HOMOLOGY_DIMS:
             image_tensors[dim][i] = images[dim]
+        for dim in HOMOLOGY_DIMS:
+            entropies[dim][i] = persistence_entropy(d.diagrams.get(dim, np.empty((0, 2))))
         if (i + 1) % 1000 == 0 or i + 1 == n:
             print(f"\r    [{tag}] {i + 1}/{n}", end="", flush=True)
     print()
@@ -154,6 +170,7 @@ def compute_for_split(
         "params": bundle["params"],
         "seeds": bundle["seeds"],
         "process": bundle.get("process", ""),
+        "persistence_entropy": {dim: entropies[dim] for dim in HOMOLOGY_DIMS},
     }
 
     dump_pickle(betti_out, {
@@ -163,6 +180,8 @@ def compute_for_split(
         "betti1_matrix": betti_matrices[1],
     })
     print(f"  [{tag}] saved betti curves -> {betti_out}")
+
+    dump_pickle(betti_weighted_out, {**common, "betti0_matrix": betti_weighted_matrices[0], "betti1_matrix": betti_weighted_matrices[1], ...})
 
     dump_pickle(images_out, {
         **common,
@@ -174,8 +193,8 @@ def compute_for_split(
 
 
 def main() -> None:
-    diagrams_path = DATA_DIR / "diagrams_dtm_k10.pkl"
-    adv_diagrams_path = DATA_DIR / "adversarial_diagrams_dtm_k10.pkl"
+    diagrams_path = DATA_DIR / "diagrams_dtm_k5.pkl"
+    adv_diagrams_path = DATA_DIR / "adversarial_diagrams_dtm_k5.pkl"
 
     if not diagrams_path.exists():
         raise FileNotFoundError(
@@ -196,12 +215,13 @@ def main() -> None:
     print(calibrate_report(diagrams))
 
     betti_by_dim = build_calibrated_betti(stats)
+    betti_weighted_by_dim = build_calibrated_betti(stats, weight_by_persistence=True)
     imager = build_calibrated_imager(stats)
 
     print("\nComputing train_test features ...")
     compute_for_split(
-        diagrams, bundle, betti_by_dim, imager,
-        DATA_DIR / "betti_dtm_k10.pkl", DATA_DIR / "images_dtm_k10.pkl",
+        diagrams, bundle, betti_by_dim, betti_weighted_by_dim, imager,
+        DATA_DIR / "betti_dtm_k10.pkl", DATA_DIR / "betti_weighted_dtm_k10.pkl", DATA_DIR / "images_dtm_k10.pkl",
         tag="train_test",
     )
 
@@ -217,7 +237,7 @@ def main() -> None:
         print("Computing adversarial features (reusing train_test calibration) ...")
         compute_for_split(
             adv_diagrams, adv_bundle, betti_by_dim, imager,
-            DATA_DIR / "adversarial_betti_dtm_k10.pkl", DATA_DIR / "adversarial_images_dtm_k10.pkl",
+            DATA_DIR / "adversarial_betti_dtm_k5.pkl", DATA_DIR / "adversarial_images_dtm_k5.pkl",
             tag="adversarial",
         )
     else:

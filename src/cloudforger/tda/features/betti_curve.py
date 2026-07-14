@@ -20,6 +20,7 @@ class BettiCurve(DiagramFeature):
             grid_range: tuple[float, float] = (0.0, 1.0),
             drop_infinite: bool = True,
             normalize: bool = False,
+            weight_by_persistence: bool = False,
     ):
         if grid_size < 2:
             raise ValueError("grid_size must be >= 2.")
@@ -33,6 +34,7 @@ class BettiCurve(DiagramFeature):
         self._grid = np.linspace(*self._grid_range, self._grid_size)
         self._drop_infinite = bool(drop_infinite)
         self._normalize = bool(normalize)
+        self._weight_by_persistence = bool(weight_by_persistence)
 
     @property
     def name(self) -> str:
@@ -47,6 +49,7 @@ class BettiCurve(DiagramFeature):
             "grid_range": self._grid_range,
             "drop_infinite": self._drop_infinite,
             "normalize": self._normalize,
+            "weight_by_persistence": self._weight_by_persistence,
         }
 
     @property
@@ -83,7 +86,12 @@ class BettiCurve(DiagramFeature):
         alive = (births[:, None] <= self._grid[None, :]) & (
             self._grid[None, :] < deaths[:, None]
         )
-        curve = alive.sum(axis=0).astype(float)
+
+        if self._weight_by_persistence:
+            weights = deaths - births
+            curve = (alive.astype(float) * weights[:, None]).sum(axis=0)
+        else:
+            curve = alive.sum(axis=0).astype(float)
 
         if self._normalize and len(births) > 0:
             curve = curve / float(len(births))

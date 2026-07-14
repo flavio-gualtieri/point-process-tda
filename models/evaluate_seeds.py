@@ -153,6 +153,98 @@ def print_loss_summary(title: str, summary: dict[str, dict[str, float]]) -> None
         )
 
 
+def _training_dynamics(result: dict[str, Any]) -> dict[str, float] | None:
+    """Per-seed train/val trajectory summary: best (min) and final (last)
+    loss for each split, the epoch the best val checkpoint came from, and how
+    much val degraded between that checkpoint and the final epoch. A large
+    positive overfit_gap/overfit_ratio is the standard overfitting signature:
+    train loss still falling while val loss has already turned back up."""
+    history = result.get("history")
+    if not history or "train_loss" not in history or "val_loss" not in history:
+        return None
+    train, val = np.asarray(history["train_loss"]), np.asarray(history["val_loss"])
+    if len(train) == 0 or len(val) == 0:
+        return None
+    val_min, val_last = float(np.min(val)), float(val[-1])
+    train_min, train_last = float(np.min(train)), float(train[-1])
+    return {
+        "n_epochs": len(val),
+        "best_epoch": int(np.argmin(val)) + 1,
+        "train_min": train_min,
+        "train_last": train_last,
+        "val_min": val_min,
+        "val_last": val_last,
+        "overfit_gap": val_last - val_min,
+        "overfit_ratio": val_last / val_min if val_min else float("nan"),
+    }
+
+
+def feature_training_summary(
+    results: dict[str, dict[int, dict[str, Any]]]
+) -> dict[str, dict[str, dict[str, float]]]:
+    """feature -> {metric -> across-seed summary stats} for every metric
+    _training_dynamics reports (train_min, val_last, overfit_gap, ...)."""
+    summary: dict[str, dict[str, dict[str, float]]] = {}
+    for feature, by_seed in results.items():
+        per_seed = [d for r in by_seed.values() if (d := _training_dynamics(r)) is not None]
+        if not per_seed:
+            summary[feature] = {}
+            continue
+        metrics = per_seed[0].keys()
+        summary[feature] = {m: _summary_stats(np.array([d[m] for d in per_seed])) for m in metrics}
+    return summary
+
+
+def print_training_summary(title: str, summary: dict[str, dict[str, dict[str, float]]]) -> None:
+    print(f"\n{'=' * 100}\n  {title}\n{'=' * 100}")
+    print(
+        f"  {'feature':<14}{'n':>4}{'train_min':>12}{'val_min':>12}{'val_last':>12}"
+        f"{'best_ep':>10}{'overfit_gap':>13}{'overfit_x':>11}"
+    )
+    print(f"  {'-' * 94}")
+    for feature in sorted(summary, key=lambda f: summary[f].get("val_min", {}).get("mean", float("inf"))):
+        s = summary[feature]
+        if not s or s["val_min"]["n"] == 0:
+            print(f"  {feature:<14}{0:>4d}  (no history)")
+            continue
+        best_ep = f"{s['best_epoch']['mean']:.0f}/{s['n_epochs']['mean']:.0f}"
+        print(
+            f"  {feature:<14}{s['val_min']['n']:>4d}"
+            f"{s['train_min']['mean']:>12.4f}"
+            f"{s['val_min']['mean']:>12.4f}"
+            f"{s['val_last']['mean']:>12.4f}"
+            f"{best_ep:>10}"
+            f"{s['overfit_gap']['mean']:>+13.4f}"
+            f"{s['overfit_ratio']['mean']:>11.2f}"
+        )
+    print(
+        "  (best_ep = mean epoch of the best val checkpoint, out of n_epochs trained;"
+        " overfit_gap = val_last - val_min; overfit_x = val_last / val_min)"
+    )
+
+
+def print_overfit_flags(summary: dict[str, dict[str, dict[str, float]]], ratio_threshold: float = 1.1) -> None:
+    """Call out any feature whose val loss climbed back up by more than
+    `ratio_threshold` between its best checkpoint and the final epoch --
+    i.e. it kept training well past the point of diminishing/negative
+    returns on held-out data."""
+    flagged = {
+        f: s for f, s in summary.items()
+        if s and s["val_min"]["n"] > 0 and s["overfit_ratio"]["mean"] > ratio_threshold
+    }
+    if not flagged:
+        return
+    print(f"\n{'-' * 88}\n  Overfitting check (val_last / val_min > {ratio_threshold:g})\n{'-' * 88}")
+    for feature, s in sorted(flagged.items(), key=lambda kv: -kv[1]["overfit_ratio"]["mean"]):
+        pct = (s["overfit_ratio"]["mean"] - 1.0) * 100
+        print(
+            f"  ! {feature}: val loss rose {pct:.0f}% after its best epoch "
+            f"({s['best_epoch']['mean']:.0f}/{s['n_epochs']['mean']:.0f}) while training continued to epoch "
+            f"{s['n_epochs']['mean']:.0f} -- train loss kept falling (train_min={s['train_min']['mean']:.4f}) "
+            f"while val degraded (val_min={s['val_min']['mean']:.4f} -> val_last={s['val_last']['mean']:.4f})."
+        )
+
+
 def print_paired_comparison(results: dict[str, dict[int, dict[str, Any]]], metric: str) -> None:
     """Wilcoxon signed-rank test of every feature against the feature with the
     lowest mean, matched on common seeds (delta = feature - best)."""
