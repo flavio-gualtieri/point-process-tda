@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -86,6 +87,31 @@ def evaluate(model, loader: DataLoader, loss_fn: nn.Module, device: torch.device
 
     acc = total_correct / total_seen if total_seen > 0 else float("nan")
     return total_loss / total_seen, acc
+
+
+@torch.no_grad()
+def evaluate_per_target(model, loader: DataLoader, device: torch.device) -> np.ndarray:
+    """Same aggregation as evaluate(), but keeps the per-target-column MSE
+    instead of collapsing it to one scalar -- lets callers see whether a
+    method's aggregate loss is driven by one target or spread evenly across
+    them. Mean of the returned array equals evaluate()'s scalar loss."""
+    model.eval()
+    total_sq_err, total_seen = None, 0
+
+    for batch in loader:
+        inputs, covariates, labels = _unpack_batch(batch)
+
+        inputs = _to_device(inputs, device)
+        labels = labels.to(device)
+        if covariates is not None:
+            covariates = covariates.to(device)
+
+        logits = model(inputs, covariates)
+        sq_err = (logits - labels).pow(2).sum(dim=0)
+        total_sq_err = sq_err if total_sq_err is None else total_sq_err + sq_err
+        total_seen += _batch_size(labels)
+
+    return (total_sq_err / total_seen).cpu().numpy()
 
 
 def train_and_eval(model, loaders, cfg: dict, device: str, tag: str):

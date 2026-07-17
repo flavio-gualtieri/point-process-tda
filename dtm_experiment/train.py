@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts" / "runners" / "params"))
 
 from cloudforger.nn.experiments import build_experiment
-import run_new_feature
+import run_vihrs
 
 SEEDS = [
     9371,
@@ -25,6 +25,12 @@ DATA_DIR = ROOT / "data" / "params" / "2d" / "thomas"
 RESULTS_DIR = Path(__file__).resolve().parent / "results_k10"
 
 N_EPOCHS = 500
+
+# Vihrs (2022)'s own paper-faithful epoch count (Appendix A.2: chosen once
+# via a held-out-curve check, no early stopping) -- deliberately NOT the same
+# budget as the TDA methods below, since run_vihrs.py is a standalone
+# replication of the paper's own recipe, not tuned for parity with them.
+VIHRS_N_EPOCHS = 20
 
 # Same betti_cnn/pi settings as the Rips-based fix, except n_epochs: the new
 # clouds.pkl is ~7x larger than the dataset that 500-epoch/batch=32 choice
@@ -45,22 +51,22 @@ BETTI_PI_METHODS = [
     ("pi_1", "images_dtm_k10.pkl", "adversarial_images_dtm_k10.pkl"),
 ]
 
-# new_feature's own clouds.pkl load + L(r)-r feature extraction is expensive
+# vihrs's own clouds.pkl load + L(r)-r feature extraction is expensive
 # and identical across seeds -- loaded lazily, once, and reused for every
 # seed instead of redone per-seed now that seeds are the outer loop.
-_NEW_FEATURE_DATA: dict | None = None
+_VIHRS_DATA: dict | None = None
 
 
-def _get_new_feature_data() -> dict | None:
-    global _NEW_FEATURE_DATA
-    if _NEW_FEATURE_DATA is None:
+def _get_vihrs_data() -> dict | None:
+    global _VIHRS_DATA
+    if _VIHRS_DATA is None:
         clouds_path = DATA_DIR / "clouds.pkl"
         if not clouds_path.exists():
             return None
-        _NEW_FEATURE_DATA = run_new_feature.prepare_data(
+        _VIHRS_DATA = run_vihrs.prepare_data(
             clouds_path, DATA_DIR / "adversarial_clouds.pkl",
         )
-    return _NEW_FEATURE_DATA
+    return _VIHRS_DATA
 
 
 def train_betti_pi_for_seed(seed: int) -> None:
@@ -90,20 +96,20 @@ def train_betti_pi_for_seed(seed: int) -> None:
             print(f"\n!! {method} | seed {seed} FAILED, continuing with next feature.\n{traceback.format_exc()}")
 
 
-def train_new_feature_for_seed(seed: int) -> None:
-    output_root = RESULTS_DIR / "new_feature"
+def train_vihrs_for_seed(seed: int) -> None:
+    output_root = RESULTS_DIR / "vihrs"
     output_dir = output_root / f"seed_{seed}"
     if (output_dir / "results.pt").exists():
-        print(f"\nnew_feature | seed {seed}: already done, skipping.")
+        print(f"\nvihrs | seed {seed}: already done, skipping.")
         return
 
-    print(f"\n{'#' * 90}\n### new_feature | seed {seed}\n{'#' * 90}")
+    print(f"\n{'#' * 90}\n### vihrs | seed {seed}\n{'#' * 90}")
     try:
-        data = _get_new_feature_data()
+        data = _get_vihrs_data()
         if data is None:
-            print(f"! {DATA_DIR / 'clouds.pkl'} missing. Skipping new_feature for seed {seed}.")
+            print(f"! {DATA_DIR / 'clouds.pkl'} missing. Skipping vihrs for seed {seed}.")
             return
-        run_new_feature.run_one_seed(
+        run_vihrs.run_one_seed(
             seed,
             train_records=data["train_records"],
             train_features=data["train_features"],
@@ -111,16 +117,16 @@ def train_new_feature_for_seed(seed: int) -> None:
             adversarial_path=data["adversarial_path"],
             r_grid=data["r_grid"],
             output_root=output_root,
-            n_epochs=N_EPOCHS,
-            batch_size=100,  # paper default, matches run_new_feature.py's own CLI default
+            n_epochs=VIHRS_N_EPOCHS,
+            batch_size=100,  # paper default, matches run_vihrs.py's own CLI default
             lr=0.001,
             device_pref=None,
             skip_mincontrast=True,  # bonus analysis only; drop this to include it
             mc_cache={},
-            mc_rng=np.random.default_rng(run_new_feature.MC_SEED),
+            mc_rng=np.random.default_rng(run_vihrs.MC_SEED),
         )
     except Exception:
-        print(f"\n!! new_feature | seed {seed} FAILED, continuing with next seed.\n{traceback.format_exc()}")
+        print(f"\n!! vihrs | seed {seed} FAILED, continuing with next seed.\n{traceback.format_exc()}")
 
 
 def main() -> None:
@@ -132,7 +138,7 @@ def main() -> None:
     for seed in SEEDS:
         print(f"\n{'*' * 90}\n*** seed {seed}\n{'*' * 90}")
         #train_betti_pi_for_seed(seed)
-        train_new_feature_for_seed(seed)
+        train_vihrs_for_seed(seed)
         print(f"\n--- seed {seed} done. Compare progress so far with: python dtm_experiment/compare.py ---")
 
     print("\nAll training done. Run dtm_experiment/compare.py next.")

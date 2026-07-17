@@ -27,7 +27,7 @@ DEFAULT_SEEDS = [
     9267492783429472,
 ]
 
-DEFAULT_FEATURES = ["betti_0", "betti_1", "pairwise", "pi_0", "pi_1", "raw_pc", "new_feature", "betti_cnn_0"]
+DEFAULT_FEATURES = ["betti_0", "betti_1", "pairwise", "pi_0", "pi_1", "raw_pc", "vihrs", "betti_cnn_0"]
 
 # Fixed categorical order (never cycled/reassigned) so a feature keeps its color
 # across both figures.
@@ -151,6 +151,72 @@ def print_loss_summary(title: str, summary: dict[str, dict[str, float]]) -> None
             f"  {feature:<14}{s['n']:>4d}{s['mean']:>11.4f}{s['std']:>11.4f}"
             f"{s['median']:>11.4f}{s['min']:>11.4f}{s['max']:>11.4f}{ci:>22}"
         )
+
+
+def _per_target_metric_values(
+    by_seed: dict[int, dict[str, Any]], metric: str
+) -> dict[str, dict[int, float]]:
+    """label_name -> {seed -> value}, for a *_per_target metric (a dict
+    keyed by label name saved per seed, e.g. result['test_loss_per_target']).
+    Seeds/targets missing or non-finite are dropped, same convention as
+    _metric_values. Silently yields {} for results that predate this metric
+    (e.g. old results.pt without a per-target breakdown) rather than erroring,
+    so this can be called on a mix of old and new runs."""
+    out: dict[str, dict[int, float]] = {}
+    for seed, result in by_seed.items():
+        per_target = result.get(metric)
+        if not per_target:
+            continue
+        for name, value in per_target.items():
+            if value is not None and np.isfinite(value):
+                out.setdefault(name, {})[seed] = float(value)
+    return out
+
+
+def feature_per_target_loss_summary(
+    results: dict[str, dict[int, dict[str, Any]]], metric: str
+) -> dict[str, dict[str, dict[str, float]]]:
+    """feature -> label_name -> across-seed summary stats, for a
+    *_per_target metric (e.g. 'test_loss_per_target')."""
+    summary: dict[str, dict[str, dict[str, float]]] = {}
+    for feature, by_seed in results.items():
+        per_target = _per_target_metric_values(by_seed, metric)
+        summary[feature] = {
+            name: _summary_stats(np.array(list(values.values())))
+            for name, values in per_target.items()
+        }
+    return summary
+
+
+def print_per_target_loss_summary(title: str, summary: dict[str, dict[str, dict[str, float]]]) -> None:
+    """One table per target label, each row a feature, sorted by mean loss
+    (lowest first) -- mirrors print_loss_summary's layout/columns, just
+    split out per target instead of aggregated across all of them."""
+    print(f"\n{'=' * 100}\n  {title}\n{'=' * 100}")
+
+    label_names: list[str] = []
+    for per_label in summary.values():
+        for name in per_label:
+            if name not in label_names:
+                label_names.append(name)
+
+    if not label_names:
+        print("  (no per-target breakdown available for these results)")
+        return
+
+    for name in label_names:
+        print(f"\n  -- {name} --")
+        print(
+            f"  {'feature':<16}{'n':>4}{'mean':>11}{'std':>11}{'median':>11}"
+            f"{'min':>11}{'max':>11}"
+        )
+        print(f"  {'-' * 74}")
+        rows = [(f, per_label[name]) for f, per_label in summary.items() if name in per_label and per_label[name]["n"] > 0]
+        for feature, s in sorted(rows, key=lambda fs: fs[1]["mean"]):
+            print(
+                f"  {feature:<16}{s['n']:>4d}{s['mean']:>11.4f}{s['std']:>11.4f}"
+                f"{s['median']:>11.4f}{s['min']:>11.4f}{s['max']:>11.4f}"
+            )
 
 
 def _training_dynamics(result: dict[str, Any]) -> dict[str, float] | None:

@@ -1,6 +1,8 @@
 # src/pointforge/nn/heads/classifier.py
+
 import torch
 import torch.nn as nn
+
 
 class ClassificationHead(nn.Module):
     """MLP from embedding to class logits."""
@@ -9,7 +11,7 @@ class ClassificationHead(nn.Module):
         self,
         embedding_dim: int,
         n_classes: int,
-        hidden_dims: tuple[int, ...] = (128,),
+        hidden_dims: tuple[int, ...] = (64, 32),
         dropout: float = 0.1,
     ):
         super().__init__()

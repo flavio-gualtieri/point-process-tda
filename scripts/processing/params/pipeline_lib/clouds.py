@@ -19,6 +19,7 @@ from cloudforger.processes.matern import MaternHardCoreProcess
 from cloudforger.processes.poisson import PoissonProcess
 from cloudforger.processes.thomas import ThomasProcess
 from cloudforger.processes.inhom_thomas import InhomThomas
+from cloudforger.processes.nested_thomas import NestedThomasProcess
 
 from pipeline_lib.io import dump_pickle, load_yaml_config, require_format, resolve_path
 from pipeline_lib.records import cloud_to_record
@@ -28,6 +29,7 @@ PROCESS_REGISTRY: dict[str, type[PointProcess]] = {
     "inhom_thomas": InhomThomas,
     "matern": MaternHardCoreProcess,
     "poisson": PoissonProcess,
+    "nested_thomas": NestedThomasProcess,
 }
 
 
