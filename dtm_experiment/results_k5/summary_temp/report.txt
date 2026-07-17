@@ -1,0 +1,148 @@
+Loading results for 4 feature(s) x 2 seed(s) from /Users/qp252676/Desktop/point-process-tda/dtm_experiment/results_k5 ...
+  ! missing results.pt for feature='fusion_pi' seed=     9372,
+    9373,
+    9374,
+    9375,
+    9376,
+    9377,
+    9378,
+    9379,
+    9380, ; skipping
+  ! missing results.pt for feature='fusion_betti' seed=     9372,
+    9373,
+    9374,
+    9375,
+    9376,
+    9377,
+    9378,
+    9379,
+    9380, ; skipping
+  ! missing results.pt for feature='fusion_scalars' seed=     9372,
+    9373,
+    9374,
+    9375,
+    9376,
+    9377,
+    9378,
+    9379,
+    9380, ; skipping
+  ! missing results.pt for feature='fusion' seed=     9372,
+    9373,
+    9374,
+    9375,
+    9376,
+    9377,
+    9378,
+    9379,
+    9380, ; skipping
+
+========================================================================================
+  Feature configs (from first available seed)
+========================================================================================
+  feature         n_seeds  n_epochs        lr  embed_dim
+  ------------------------------------------------------
+  fusion_pi             1       500     0.001         64
+  fusion_betti          1       500     0.001         64
+  fusion_scalars        1       500     0.001         64
+  fusion                1       500     0.001         64
+
+====================================================================================================
+  Training dynamics across seeds (train/val loss, best epoch)
+====================================================================================================
+  feature          n   train_min     val_min    val_last   best_ep  overfit_gap  overfit_x
+  ----------------------------------------------------------------------------------------------
+  fusion_pi        1      0.1008      0.0789      0.0826   417/500      +0.0037       1.05
+  fusion           1      0.0993      0.0790      0.0795   359/500      +0.0005       1.01
+  fusion_scalars   1      0.1017      0.0803      0.0838   382/500      +0.0034       1.04
+  fusion_betti     1      0.1006      0.0806      0.0820   335/500      +0.0014       1.02
+  (best_ep = mean epoch of the best val checkpoint, out of n_epochs trained; overfit_gap = val_last - val_min; overfit_x = val_last / val_min)
+
+====================================================================================================
+  Test loss across seeds (held-out split)
+====================================================================================================
+  feature          n       mean        std     median        min        max                95% CI
+  ----------------------------------------------------------------------------------------------
+  fusion           1     0.0771     0.0000     0.0771     0.0771     0.0771            [nan, nan]
+  fusion_pi        1     0.0782     0.0000     0.0782     0.0782     0.0782            [nan, nan]
+  fusion_betti     1     0.0784     0.0000     0.0784     0.0784     0.0784            [nan, nan]
+  fusion_scalars   1     0.0787     0.0000     0.0787     0.0787     0.0787            [nan, nan]
+
+====================================================================================================
+  Adversarial loss across seeds
+====================================================================================================
+  feature          n       mean        std     median        min        max                95% CI
+  ----------------------------------------------------------------------------------------------
+  fusion           1     0.0763     0.0000     0.0763     0.0763     0.0763            [nan, nan]
+  fusion_pi        1     0.0763     0.0000     0.0763     0.0763     0.0763            [nan, nan]
+  fusion_betti     1     0.0770     0.0000     0.0770     0.0770     0.0770            [nan, nan]
+  fusion_scalars   1     0.0773     0.0000     0.0773     0.0773     0.0773            [nan, nan]
+
+========================================================================================
+  Paired comparison vs best feature (fusion) on test_loss
+========================================================================================
+  feature         n_seeds    mean_delta    wilcoxon_p
+  ---------------------------------------------------
+
+========================================================================================
+  Paired comparison vs best feature (fusion) on adversarial_loss
+========================================================================================
+  feature         n_seeds    mean_delta    wilcoxon_p
+  ---------------------------------------------------
+
+====================================================================================================
+  Per-target test loss across seeds (which parameter drives each feature's loss)
+====================================================================================================
+
+  -- parent_intensity --
+  feature            n       mean        std     median        min        max
+  --------------------------------------------------------------------------
+  fusion             1     0.1087     0.0000     0.1087     0.1087     0.1087
+  fusion_pi          1     0.1112     0.0000     0.1112     0.1112     0.1112
+  fusion_scalars     1     0.1113     0.0000     0.1113     0.1113     0.1113
+  fusion_betti       1     0.1114     0.0000     0.1114     0.1114     0.1114
+
+  -- mean_offspring --
+  feature            n       mean        std     median        min        max
+  --------------------------------------------------------------------------
+  fusion             1     0.0988     0.0000     0.0988     0.0988     0.0988
+  fusion_pi          1     0.0995     0.0000     0.0995     0.0995     0.0995
+  fusion_betti       1     0.0999     0.0000     0.0999     0.0999     0.0999
+  fusion_scalars     1     0.1006     0.0000     0.1006     0.1006     0.1006
+
+  -- cluster_scale --
+  feature            n       mean        std     median        min        max
+  --------------------------------------------------------------------------
+  fusion_betti       1     0.0239     0.0000     0.0239     0.0239     0.0239
+  fusion             1     0.0239     0.0000     0.0239     0.0239     0.0239
+  fusion_pi          1     0.0240     0.0000     0.0240     0.0240     0.0240
+  fusion_scalars     1     0.0241     0.0000     0.0241     0.0241     0.0241
+
+====================================================================================================
+  Per-target adversarial loss across seeds
+====================================================================================================
+
+  -- parent_intensity --
+  feature            n       mean        std     median        min        max
+  --------------------------------------------------------------------------
+  fusion             1     0.1105     0.0000     0.1105     0.1105     0.1105
+  fusion_pi          1     0.1120     0.0000     0.1120     0.1120     0.1120
+  fusion_scalars     1     0.1133     0.0000     0.1133     0.1133     0.1133
+  fusion_betti       1     0.1133     0.0000     0.1133     0.1133     0.1133
+
+  -- mean_offspring --
+  feature            n       mean        std     median        min        max
+  --------------------------------------------------------------------------
+  fusion_pi          1     0.0919     0.0000     0.0919     0.0919     0.0919
+  fusion_scalars     1     0.0930     0.0000     0.0930     0.0930     0.0930
+  fusion             1     0.0934     0.0000     0.0934     0.0934     0.0934
+  fusion_betti       1     0.0937     0.0000     0.0937     0.0937     0.0937
+
+  -- cluster_scale --
+  feature            n       mean        std     median        min        max
+  --------------------------------------------------------------------------
+  fusion_betti       1     0.0241     0.0000     0.0241     0.0241     0.0241
+  fusion_pi          1     0.0249     0.0000     0.0249     0.0249     0.0249
+  fusion             1     0.0249     0.0000     0.0249     0.0249     0.0249
+  fusion_scalars     1     0.0256     0.0000     0.0256     0.0256     0.0256
+Saved training-curve comparison -> /Users/qp252676/Desktop/point-process-tda/dtm_experiment/results_k5/summary_temp/training_curves.png
+Saved loss-distribution comparison -> /Users/qp252676/Desktop/point-process-tda/dtm_experiment/results_k5/summary_temp/loss_distribution.png

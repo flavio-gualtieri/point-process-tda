@@ -13,7 +13,7 @@ from pipeline_lib.config import load_pipeline_config
 CONFIG_PATH = "/Users/qp252676/Desktop/point-process-tda/configs/params/processing/new_features.yaml"
 
 # DTM's k is the density-estimation neighbourhood size -- treat it the way
-# run_new_feature.py treats r in an L-function (see DTMFiltration's own
+# run_vihrs.py treats r in an L-function (see DTMFiltration's own
 # docstring): sweep a few values rather than committing to one a priori.
 K_VALUES = [5, 10, 20]
 

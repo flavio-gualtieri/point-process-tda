@@ -26,7 +26,7 @@ class BettiCurveCNNExperiment(Experiment):
     n(x) as a second input because the curve alone can't recover
     intensity-related parameters. Holding the data/head/training procedure
     otherwise fixed isolates whether the encoder/n(x) or the feature itself
-    explains the gap to scripts/runners/params/run_new_feature.py."""
+    explains the gap to scripts/runners/params/run_vihrs.py."""
 
     file_key = "betti"
 

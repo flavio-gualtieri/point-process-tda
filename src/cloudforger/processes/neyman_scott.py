@@ -11,6 +11,7 @@ from ..core.region import Region
 
 DisplacementSampler = Callable[[int, int, np.random.Generator], np.ndarray]
 CountSampler = Callable[[int, np.random.Generator], np.ndarray]
+ParentSampler = Callable[[Region, np.random.Generator], np.ndarray]
 
 
 def gaussian_displacements(scale: float) -> DisplacementSampler:
@@ -63,7 +64,9 @@ class NeymanScottProcess(PointProcess):
     Generic Neyman–Scott cluster process.
 
     Algorithm:
-    1. Sample Poisson parent points in an expanded region.
+    1. Sample parent points in an expanded region -- uniform-Poisson by
+       default, or via `parent_sampler` if given (e.g. another point process,
+       for a nested/hierarchical cluster process -- see NestedThomasProcess).
     2. Sample offspring counts per parent.
     3. Sample offspring displacements from a kernel.
     4. Keep only offspring inside the original region.
@@ -77,6 +80,7 @@ class NeymanScottProcess(PointProcess):
         edge_buffer: float,
         process_name: str = "neyman_scott",
         param_dict: dict[str, Any] | None = None,
+        parent_sampler: ParentSampler | None = None,
     ):
         if parent_intensity <= 0:
             raise ValueError("parent_intensity must be positive")
@@ -89,6 +93,10 @@ class NeymanScottProcess(PointProcess):
         self.edge_buffer = edge_buffer
         self.process_name = process_name
         self.param_dict = param_dict or {}
+        # None -> the default uniform-Poisson parents below. Set by
+        # subclasses that want their "parents" to come from another process
+        # (e.g. a coarser cluster process) instead -- see ParentSampler.
+        self.parent_sampler = parent_sampler
 
     @property
     def name(self) -> str:
@@ -110,11 +118,21 @@ class NeymanScottProcess(PointProcess):
     ) -> np.ndarray:
         expanded = region.expanded(self.edge_buffer)
 
-        n_parents = int(rng.poisson(self.parent_intensity * expanded.volume))
+        if self.parent_sampler is not None:
+            parents = np.asarray(self.parent_sampler(expanded, rng), dtype=float)
+            if parents.ndim != 2 or parents.shape[1] != region.dimension:
+                raise ValueError(
+                    f"parent_sampler must return shape (n_parents, {region.dimension}), got {parents.shape}"
+                )
+        else:
+            n_parents = int(rng.poisson(self.parent_intensity * expanded.volume))
+            if n_parents == 0:
+                return np.empty((0, region.dimension))
+            parents = expanded.sample_uniform(n_parents, rng)
+
+        n_parents = len(parents)
         if n_parents == 0:
             return np.empty((0, region.dimension))
-
-        parents = expanded.sample_uniform(n_parents, rng)
 
         offspring_counts = np.asarray(
             self.offspring_count_sampler(n_parents, rng),

@@ -1,15 +1,15 @@
 # dtm_experiment/fusion_model.py
 """
-L(r)-r + TDA fusion: feeds new_feature's L(r)-r/n(x) representation and
-combined_all's topological representation (pi_0+pi_1 stacked image,
+L(r)-r + TDA fusion: feeds vihrs's L(r)-r/n(x) representation and
+ph_combined's topological representation (pi_0+pi_1 stacked image,
 betti_0+betti_1 concatenated curve, n(x), persistence entropy) into ONE
 model, late-fused by concatenating all branch embeddings before a shared
-regression head -- same "concatenate before the head" pattern combined_all
+regression head -- same "concatenate before the head" pattern ph_combined
 and MultiModalModel already use.
 
-Not built on cloudforger.nn.experiments.Experiment: new_feature itself lives
+Not built on cloudforger.nn.experiments.Experiment: vihrs itself lives
 outside that framework (its own model/training loop, see
-scripts/runners/params/run_new_feature.py), and fusing it with the TDA
+scripts/runners/params/run_vihrs.py), and fusing it with the TDA
 features needs an explicit seed-based join the Experiment framework has no
 hook for -- L(r)-r covers every cloud in clouds.pkl, but the TDA features
 only cover the subset that survived the DTM empty-diagram filter in
@@ -33,13 +33,13 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Subset
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts" / "runners" / "params"))
 
-import run_new_feature as nf
+import run_vihrs as vihrs
 from cloudforger.nn.encoders.persistence_image import PIEncoder
 from cloudforger.nn.encoders.sequence_cnn import SequenceCNNEncoder
 
@@ -50,17 +50,17 @@ K = 5  # which DTM k's features to fuse against; matches whichever compute_featu
 
 SEEDS = [9371, 9372, 9373]
 N_EPOCHS = 500
-BATCH_SIZE = 32  # matches betti_cnn/pi/combined_all's batch size, not new_feature's 100 -- see run_one_seed docstring
+BATCH_SIZE = 32  # matches betti_cnn/pi/ph_combined's batch size, not vihrs's 100 -- see run_one_seed docstring
 LR = 0.001
 EMBEDDING_DIM = 64
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Plain (non-log) zscore -- persistence entropy can be exactly 0, where
-# run_new_feature.fit_log_zscore's log() would be undefined. Mirrors
+# run_vihrs.fit_log_zscore's log() would be undefined. Mirrors
 # zscore_fit_once in src/cloudforger/nn/experiments/base.py, but as an
 # explicit fit/apply pair (this file has no persistent "experiment" object
-# to hang fit-once state off of, matching run_new_feature.py's own
+# to hang fit-once state off of, matching run_vihrs.py's own
 # fit_log_zscore/apply_log_zscore convention instead).
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -123,10 +123,10 @@ def load_fusion_split(images_path: Path, betti_path: Path, lr_features: dict[str
     # by name is robust to that regardless of how many extra columns show up
     # or in what order.
     tda_label_names = list(images["label_names"])
-    missing = [name for name in nf.LABEL_NAMES if name not in tda_label_names]
+    missing = [name for name in vihrs.LABEL_NAMES if name not in tda_label_names]
     if missing:
-        raise KeyError(f"[{tag}] TDA label_names {tda_label_names} is missing {missing} from new_feature's LABEL_NAMES")
-    col_idx = [tda_label_names.index(name) for name in nf.LABEL_NAMES]
+        raise KeyError(f"[{tag}] TDA label_names {tda_label_names} is missing {missing} from vihrs's LABEL_NAMES")
+    col_idx = [tda_label_names.index(name) for name in vihrs.LABEL_NAMES]
 
     tda_idx, lr_idx = _align_tda_to_lr(np.asarray(images["seeds"]), lr_features["cloud_seeds"])
     print(f"  [{tag}] {len(tda_idx)}/{len(images['seeds'])} TDA clouds matched to L(r)-r clouds.")
@@ -169,7 +169,7 @@ class FusionCNN(nn.Module):
             lr_flat_dim = self.lr_conv(torch.zeros(1, 1, lr_seq_len)).flatten(1).shape[1]
         self.lr_head = nn.Linear(lr_flat_dim, embedding_dim)
 
-        # TDA branches -- identical architecture/setup to combined_all's.
+        # TDA branches -- identical architecture/setup to ph_combined's.
         self.pi_encoder = PIEncoder(in_channels=2, embedding_dim=embedding_dim)
         self.betti_encoder = SequenceCNNEncoder(input_dim=betti_seq_len, embedding_dim=embedding_dim, pool_size=5)
 
@@ -189,7 +189,7 @@ class FusionCNN(nn.Module):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Train / eval loops (mirrors run_new_feature.py's, adapted for 4 inputs)
+# Train / eval loops (mirrors run_vihrs.py's, adapted for 4 inputs)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _train_one_epoch(model, loader, optimizer, loss_fn, device) -> float:
@@ -221,7 +221,7 @@ def _evaluate_loss(model, loader, loss_fn, device) -> float:
 
 
 def _build_extra(split: dict[str, np.ndarray], n_norm: dict, entropy0_norm: dict, entropy1_norm: dict) -> np.ndarray:
-    n_std = nf.apply_log_zscore(split["n_points"], n_norm).astype(np.float32)
+    n_std = vihrs.apply_log_zscore(split["n_points"], n_norm).astype(np.float32)
     e0_std = apply_zscore(split["entropy0"], entropy0_norm).astype(np.float32)
     e1_std = apply_zscore(split["entropy1"], entropy1_norm).astype(np.float32)
     return np.stack([n_std, e0_std, e1_std], axis=1)
@@ -241,26 +241,35 @@ def run_one_seed(seed: int, train_split: dict[str, np.ndarray], adv_split: dict[
         device = "cpu"
 
     n = len(train_split["targets"])
-    label_norm = nf.fit_log_zscore(train_split["targets"])
-    n_norm = nf.fit_log_zscore(train_split["n_points"])
+    label_norm = vihrs.fit_log_zscore(train_split["targets"])
+    n_norm = vihrs.fit_log_zscore(train_split["n_points"])
     entropy0_norm = fit_zscore(train_split["entropy0"])
     entropy1_norm = fit_zscore(train_split["entropy1"])
 
-    targets_std = nf.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
+    targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
     lr_seq = train_split["lr_seq"].astype(np.float32)
     pi_img = np.stack([train_split["pi0"], train_split["pi1"]], axis=1).astype(np.float32)
     betti_seq = np.concatenate([train_split["b0"], train_split["b1"]], axis=1).astype(np.float32)
     extra = _build_extra(train_split, n_norm, entropy0_norm, entropy1_norm)
 
-    train_idx, val_idx, test_idx = nf.train_val_test_indices(n, seed)
+    # One shared dataset over the whole split, sliced lazily via Subset --
+    # NOT three separate fancy-indexed copies (pi_img[idx] per split), which
+    # doubles the ~3.8GB PI tensor's memory footprint and was pushing this
+    # into heavy swapping on a 17GB machine (94% of swap in use, training
+    # thrashing instead of computing). torch.from_numpy shares memory with
+    # the numpy array (no copy); Subset just stores indices and indexes at
+    # __getitem__ time (no copy either) -- same pattern
+    # cloudforger.nn.splits.train_val_test_split already uses everywhere
+    # else in this codebase via torch.utils.data.random_split/Subset.
+    full_dataset = TensorDataset(
+        torch.from_numpy(lr_seq), torch.from_numpy(pi_img),
+        torch.from_numpy(betti_seq), torch.from_numpy(extra),
+        torch.from_numpy(targets_std),
+    )
+    train_idx, val_idx, test_idx = vihrs.train_val_test_indices(n, seed)
 
     def _loader(idx: np.ndarray, shuffle: bool) -> DataLoader:
-        ds = TensorDataset(
-            torch.from_numpy(lr_seq[idx]), torch.from_numpy(pi_img[idx]),
-            torch.from_numpy(betti_seq[idx]), torch.from_numpy(extra[idx]),
-            torch.from_numpy(targets_std[idx]),
-        )
-        return DataLoader(ds, batch_size=BATCH_SIZE, shuffle=shuffle)
+        return DataLoader(Subset(full_dataset, idx), batch_size=BATCH_SIZE, shuffle=shuffle)
 
     train_loader = _loader(train_idx, True)
     val_loader = _loader(val_idx, False)
@@ -268,7 +277,7 @@ def run_one_seed(seed: int, train_split: dict[str, np.ndarray], adv_split: dict[
 
     model = FusionCNN(
         lr_seq_len=lr_seq.shape[1], betti_seq_len=betti_seq.shape[1],
-        embedding_dim=EMBEDDING_DIM, n_extra=extra.shape[1], n_targets=len(nf.LABEL_NAMES),
+        embedding_dim=EMBEDDING_DIM, n_extra=extra.shape[1], n_targets=len(vihrs.LABEL_NAMES),
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
     loss_fn = nn.MSELoss()
@@ -293,7 +302,7 @@ def run_one_seed(seed: int, train_split: dict[str, np.ndarray], adv_split: dict[
 
     adversarial_loss = None
     if adv_split is not None:
-        adv_targets_std = nf.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
+        adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
         adv_lr_seq = adv_split["lr_seq"].astype(np.float32)
         adv_pi_img = np.stack([adv_split["pi0"], adv_split["pi1"]], axis=1).astype(np.float32)
         adv_betti_seq = np.concatenate([adv_split["b0"], adv_split["b1"]], axis=1).astype(np.float32)
@@ -316,9 +325,9 @@ def run_one_seed(seed: int, train_split: dict[str, np.ndarray], adv_split: dict[
     torch.save(
         {
             "model_state": best_state, "history": history, "config": cfg, "test_loss": test_loss,
-            "label_names": list(nf.LABEL_NAMES), "label_norm": label_norm,
+            "label_names": list(vihrs.LABEL_NAMES), "label_norm": label_norm,
             "label_log_mean": label_norm["mean"], "label_log_std": label_norm["std"],
-            "label_transforms": ["log"] * len(nf.LABEL_NAMES),
+            "label_transforms": ["log"] * len(vihrs.LABEL_NAMES),
             "adversarial_loss": adversarial_loss,
         },
         output_dir / "results.pt",
@@ -337,7 +346,7 @@ def run_one_seed(seed: int, train_split: dict[str, np.ndarray], adv_split: dict[
 
 def main() -> None:
     print(f"Loading L(r)-r features (K={K} for the TDA side) ...")
-    lr_data = nf.prepare_data(DATA_DIR / "clouds.pkl", DATA_DIR / "adversarial_clouds.pkl")
+    lr_data = vihrs.prepare_data(DATA_DIR / "clouds.pkl", DATA_DIR / "adversarial_clouds.pkl")
 
     images_path = DATA_DIR / f"images_dtm_k{K}.pkl"
     betti_path = DATA_DIR / f"betti_dtm_k{K}.pkl"

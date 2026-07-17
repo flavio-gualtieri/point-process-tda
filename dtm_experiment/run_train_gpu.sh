@@ -13,7 +13,7 @@
 
 # Submit from the point-process-tda repo root: sbatch dtm_experiment/run_train_gpu.sh
 # Runs dtm_experiment/train.py (3 seeds x {betti_cnn_0, betti_cnn_1, pi_0, pi_1,
-# new_feature}) on a GPU. Resumable: train.py skips any seed/method whose
+# vihrs}) on a GPU. Resumable: train.py skips any seed/method whose
 # results.pt already exists, so a re-submit after hitting the walltime just
 # picks up where it left off.
 

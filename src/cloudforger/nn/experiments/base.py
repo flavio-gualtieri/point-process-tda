@@ -15,8 +15,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
 from cloudforger.nn.splits import train_val_test_split
-from cloudforger.nn.train import train_one_epoch, evaluate
+from cloudforger.nn.train import train_one_epoch, evaluate, evaluate_per_target
 from cloudforger.nn.heads.paramest import ParameterEstimator
+from cloudforger.nn.heads.classifier import ClassificationHead
 from cloudforger.nn.models.single_modal import SingleModalModel
 
 # Number of parameters predicted per generating process.
@@ -131,6 +132,87 @@ def _normalize_labels_by_name(
     }
 
 
+
+# ---------------------------------------------------------------------------
+# CLASSIFICATION HELPERS
+# ---------------------------------------------------------------------------
+
+
+def _as_1d_integer_labels(labels: np.ndarray) -> np.ndarray:
+    """Validate classification labels and return shape (N,) int64 labels."""
+    labels = np.asarray(labels)
+
+    # Permit payloads that store a single target as shape (N, 1).
+    if labels.ndim == 2 and labels.shape[1] == 1:
+        labels = labels[:, 0]
+
+    if labels.ndim != 1:
+        raise ValueError(
+            "Classification expects one class label per sample, with shape "
+            f"(N,) or (N, 1); got {labels.shape}"
+        )
+
+    if not np.all(np.isfinite(labels)):
+        raise ValueError("Classification labels contain NaN or infinity")
+
+    # This permits whole-valued floats such as 2.0, but rejects 2.5.
+    if not np.all(labels == np.floor(labels)):
+        raise ValueError("Classification labels must be integer-valued")
+
+    return labels.astype(np.int64)
+
+
+def _encode_classification_labels(
+    labels: np.ndarray,
+) -> tuple[np.ndarray, dict]:
+    """Fit a contiguous class-index mapping on the training payload."""
+    raw_labels = _as_1d_integer_labels(labels)
+    classes = np.unique(raw_labels)
+
+    class_to_index = {
+        int(raw_class): index
+        for index, raw_class in enumerate(classes)
+    }
+
+    encoded = np.asarray(
+        [class_to_index[int(value)] for value in raw_labels],
+        dtype=np.int64,
+    )
+
+    return encoded, {
+        "kind": "classification",
+        "classes": [int(value) for value in classes],
+        # Retain these keys temporarily because _save currently expects them.
+        "mean": None,
+        "std": None,
+        "transforms": ["class_index"],
+    }
+
+
+def _apply_classification_encoding(
+    labels: np.ndarray,
+    label_meta: dict,
+) -> np.ndarray:
+    """Apply the training class mapping to another payload."""
+    raw_labels = _as_1d_integer_labels(labels)
+
+    class_to_index = {
+        int(raw_class): index
+        for index, raw_class in enumerate(label_meta["classes"])
+    }
+
+    unknown = sorted(set(map(int, raw_labels)) - set(class_to_index))
+    if unknown:
+        raise ValueError(
+            f"Labels contain classes not seen during training: {unknown}"
+        )
+
+    return np.asarray(
+        [class_to_index[int(value)] for value in raw_labels],
+        dtype=np.int64,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Shared n(x) side-channel (Vihrs 2022 feeds n(x) alongside the curve because
 # the curve alone can't recover intensity-related parameters). One
@@ -200,7 +282,7 @@ def persistence_entropy_head_extra(
     dtm_experiment/compute_features.py's persistence_entropy) onto n(x), one
     extra z-scored column per dim in `dims`. Must be called with every dim
     the experiment actually trains on: a single `self.hom_dim` lookup breaks
-    for tuple/None hom_dim (the "01"-fused and combined_all methods), since
+    for tuple/None hom_dim (the "01"-fused and ph_combined methods), since
     the entropy dict is never keyed by a tuple or None -- it would silently
     fall back to n_x-only with no entropy feature at all."""
     entropy_by_dim = payload.get("persistence_entropy", {})
@@ -325,9 +407,10 @@ class Experiment(ABC):
     file_key: str
     collate_fn = None  # override on subclasses whose samples have variable size
 
-    def __init__(self, cfg: dict, hom_dim: int | None = None):
+    def __init__(self, cfg: dict, hom_dim: int | None = None, task_type: "params" | "classification" = "params"):
         self.cfg = cfg
         self.hom_dim = hom_dim  # used by dimensioned experiments; ignored otherwise
+        self.task_type = task_type
 
     # -- identity / metadata ------------------------------------------------
 
@@ -390,11 +473,16 @@ class Experiment(ABC):
             label_names,
             self.cfg.get("target_label_names"),
         )
-        labels, label_norm = _normalize_labels_by_name(
-            labels,
-            label_names,
-            self.cfg.get("log_label_names"),
-        )
+        if self.task_type == "classification":
+            labels, label_norm = _encode_classification_labels(labels)
+            n_outputs = len(label_norm["classes"])
+        else:
+            labels, label_norm = _normalize_labels_by_name(
+                labels,
+                label_names,
+                self.cfg.get("log_label_names"),
+            )
+            n_outputs = labels.shape[1]
 
         dataset = self.build_dataset(payload, labels)
 
@@ -420,16 +508,26 @@ class Experiment(ABC):
 
         loaders = _make_loaders(dataset, self.cfg, collate_fn=self.collate_fn)
 
-        model = SingleModalModel(
-            encoder=self.build_encoder(dataset),
-            head=ParameterEstimator(embedding_dim=self.encoder_output_dim + head_extra_dim, n_params=labels.shape[1])
-        ).to(device)
+        if self.task_type == "params":
+            model = SingleModalModel(
+                encoder=self.build_encoder(dataset),
+                head=ParameterEstimator(embedding_dim=self.encoder_output_dim + head_extra_dim, n_params=labels.shape[1])
+            ).to(device)
+        else:
+            model = SingleModalModel(
+                encoder=self.build_encoder(dataset),
+                head=ClassificationHead(embedding_dim=self.encoder_output_dim + head_extra_dim, n_classes=labels.shape[1])
+            ).to(device)
 
         history, best_state, test_loss = _train_and_eval(
             model, loaders, self.cfg, device, self.tag
         )
+        test_loss_per_target = dict(zip(
+            label_names, evaluate_per_target(model, loaders[2], device).tolist()
+        ))
 
         adversarial_loss = None
+        adversarial_loss_per_target = None
 
         if adversarial_path is not None and Path(adversarial_path).exists():
             self._dataset_path = Path(adversarial_path)
@@ -471,8 +569,11 @@ class Experiment(ABC):
                 collate_fn=self.collate_fn,
             )
 
-            loss_fn = nn.MSELoss()
+            loss_fn = nn.MSELoss() if self.task_type == "params" else nn.CrossEntropyLoss()
             adversarial_loss, _ = evaluate(model, adversarial_loader, loss_fn, device)
+            adversarial_loss_per_target = dict(zip(
+                label_names, evaluate_per_target(model, adversarial_loader, device).tolist()
+            ))
 
             print(f"\n[{self.tag}] Adversarial test loss: {adversarial_loss:.4f}")
 
@@ -486,12 +587,19 @@ class Experiment(ABC):
             label_norm,
             adversarial_loss=adversarial_loss,
             adversarial_path=adversarial_path,
+            test_loss_per_target=test_loss_per_target,
+            adversarial_loss_per_target=adversarial_loss_per_target,
         )
 
-        result = {"history": history, "test_loss": test_loss}
+        result = {
+            "history": history,
+            "test_loss": test_loss,
+            "test_loss_per_target": test_loss_per_target,
+        }
 
         if adversarial_loss is not None:
             result["adversarial_loss"] = adversarial_loss
+            result["adversarial_loss_per_target"] = adversarial_loss_per_target
 
         return result
 
@@ -506,6 +614,8 @@ class Experiment(ABC):
         label_norm,
         adversarial_loss: float | None = None,
         adversarial_path: Path | None = None,
+        test_loss_per_target: dict[str, float] | None = None,
+        adversarial_loss_per_target: dict[str, float] | None = None,
     ):
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -515,12 +625,14 @@ class Experiment(ABC):
                 "history": history,
                 "config": self.cfg,
                 "test_loss": test_loss,
+                "test_loss_per_target": test_loss_per_target,
                 "label_names": label_names,
                 "label_norm": label_norm,
                 "label_log_mean": label_norm["mean"],
                 "label_log_std": label_norm["std"],
                 "label_transforms": label_norm["transforms"],
                 "adversarial_loss": adversarial_loss,
+                "adversarial_loss_per_target": adversarial_loss_per_target,
                 "adversarial_path": adversarial_path,
             },
             output_dir / "results.pt",
@@ -532,12 +644,14 @@ class Experiment(ABC):
             "task": self.cfg["task"],
             "method": self.cfg["method"],
             "test_loss": test_loss,
+            "test_loss_per_target": test_loss_per_target,
             "seed": self.cfg["seed"],
             **self.extra_meta,
         }
 
         if adversarial_loss is not None:
             json_payload["adversarial_loss"] = adversarial_loss
+            json_payload["adversarial_loss_per_target"] = adversarial_loss_per_target
             json_payload["adversarial_path"] = str(adversarial_path)
 
         with open(output_dir / "results.json", "w") as f:

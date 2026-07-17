@@ -1,4 +1,5 @@
 # dtm_experiment/compare.py
+# sbatch dtm_experiment/run_compare.sh
 
 from __future__ import annotations
 
@@ -13,22 +14,44 @@ sys.path.insert(0, str(ROOT / "models"))
 
 import evaluate_seeds as es
 
-# train_k5.py trains all three of these; new_feature training is currently
-# commented out there (see train_k5.py::main), so it only has seed 9371 on
-# disk. Keeping all three here (instead of throttling to [9371]) means
-# betti_cnn_*/pi_* get their full 3-seed mean/std/CI instead of being
-# silently reported as single-run numbers -- collect_feature_results just
-# skips/warns on the seeds new_feature is missing.
+# Must match dtm_experiment/train_k5.py::SEEDS -- collect_feature_results
+# skips/warns per-seed if any are missing, so this is safe to keep even
+# while a seed's array task (see run_train_gpu_k5.sh) is still running.
 SEEDS = [
     9371,
+"""     9372,
+    9373,
+    9374,
+    9375,
+    9376,
+    9377,
+    9378,
+    9379,
+    9380, """
 ]
 
-FEATURES = ["combined_all", "new_feature"]
+# Full run-order sweep from train_k5.py::run_seed -- vihrs, the 3 branch-
+# ablation arms (fusion_pi/fusion_betti/fusion_scalars, point 1 of the
+# PH-value investigation), the original fusion/ph_combined/pi_01/
+# betti_cnn_01 comparison. Trim this down (e.g. back to ["vihrs", "fusion"])
+# for a smaller, focused report -- collect_feature_results skips/warns on
+# any feature with no results.pt yet, so it's safe to run this against a
+# partially-finished sweep.
+FEATURES = [
+#    "vihrs",
+    "fusion_pi",
+    "fusion_betti",
+    "fusion_scalars",
+    "fusion",
+#    "ph_combined",
+#    "pi_01",
+#    "betti_cnn_01",
+    ]
 
 k = 5
 
 RESULTS_DIR = Path(__file__).resolve().parent / f"results_k{k}"
-OUT_DIR = RESULTS_DIR / "summary"
+OUT_DIR = RESULTS_DIR / "summary_fusion"
 
 
 class _Tee(io.TextIOBase):
@@ -51,6 +74,7 @@ class _Tee(io.TextIOBase):
 def _build_json_summary(
     results: dict, features_present: list[str],
     test_summary: dict, adv_summary: dict, train_summary: dict,
+    test_per_target_summary: dict, adv_per_target_summary: dict,
 ) -> dict:
     return {
         "k": k,
@@ -61,6 +85,8 @@ def _build_json_summary(
                 "n_seeds": len(results.get(feature, {})),
                 "test_loss": test_summary.get(feature, {}),
                 "adversarial_loss": adv_summary.get(feature, {}),
+                "test_loss_per_target": test_per_target_summary.get(feature, {}),
+                "adversarial_loss_per_target": adv_per_target_summary.get(feature, {}),
                 "training": train_summary.get(feature, {}),
             }
             for feature in features_present
@@ -95,12 +121,25 @@ def main() -> None:
             es.print_paired_comparison(results, "test_loss")
             es.print_paired_comparison(results, "adversarial_loss")
 
+            test_per_target_summary = es.feature_per_target_loss_summary(results, "test_loss_per_target")
+            adv_per_target_summary = es.feature_per_target_loss_summary(results, "adversarial_loss_per_target")
+            es.print_per_target_loss_summary(
+                "Per-target test loss across seeds (which parameter drives each feature's loss)",
+                test_per_target_summary,
+            )
+            es.print_per_target_loss_summary(
+                "Per-target adversarial loss across seeds", adv_per_target_summary,
+            )
+
             es.plot_training_curves(results, features_present, OUT_DIR / "training_curves.png")
             es.plot_loss_distribution(results, features_present, OUT_DIR / "loss_distribution.png")
 
     with open(json_path, "w") as f:
         json.dump(
-            _build_json_summary(results, features_present, test_summary, adv_summary, train_summary),
+            _build_json_summary(
+                results, features_present, test_summary, adv_summary, train_summary,
+                test_per_target_summary, adv_per_target_summary,
+            ),
             f, indent=2,
         )
 

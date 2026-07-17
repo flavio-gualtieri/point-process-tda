@@ -43,12 +43,36 @@ def compute_diagrams_from_clouds(
     seeds = [cloud_seed(c) for c in clouds]
 
     computed: list[PersistenceDiagram] = []
+    keep_mask: list[bool] = []
+    n_skipped = 0
     print(f"  Computing {len(clouds)} diagrams from {clouds_path} ...")
 
     for i, cloud in enumerate(clouds):
-        computed.append(filtration.compute(to_pointcloud(cloud)))
+        pc = to_pointcloud(cloud)
+        try:
+            computed.append(filtration.compute(pc))
+            keep_mask.append(True)
+        except ValueError as exc:
+            # A cloud with fewer points than the filtration's own minimum
+            # (e.g. DTMFiltration needs >= k points for its k-NN step) --
+            # a real tail of the cloud-generation distribution (more likely
+            # for multi-level processes like NestedThomasProcess, which
+            # stacks several sequential Poisson draws), not a bug in the
+            # filtration. Skip it rather than let one degenerate cloud crash
+            # this whole group/array task; labels/seeds/params are filtered
+            # to match below so everything stays index-aligned with
+            # `diagrams`.
+            n_skipped += 1
+            keep_mask.append(False)
+            print(f"\n  ! skipping cloud {i} (seed={seeds[i]}, n_points={pc.n_points}): {exc}")
         print(f"\r    {i + 1}/{len(clouds)}", end="", flush=True)
     print()
+    if n_skipped:
+        print(f"  Skipped {n_skipped}/{len(clouds)} clouds (too few points for this filtration).")
+        keep_idx = [i for i, keep in enumerate(keep_mask) if keep]
+        labels = labels[keep_idx]
+        seeds = [seeds[i] for i in keep_idx]
+        params = [params[i] for i in keep_idx]
 
     diagrams = [diagram_to_record(d) for d in computed] if diagram_format == "dict" else computed
     dump_pickle(

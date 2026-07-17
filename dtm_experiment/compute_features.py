@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,8 +21,6 @@ from cloudforger.core.diagram import PersistenceDiagram
 
 from pipeline_lib.records import load_diagrams
 from pipeline_lib.io import dump_pickle
-
-DATA_DIR = ROOT / "data" / "params" / "2d" / "thomas"
 
 HOMOLOGY_DIMS = [0, 1]
 BETTI_GRID_SIZE = 512          # matches the Rips-based betti_cnn resolution fix
@@ -181,7 +180,13 @@ def compute_for_split(
     })
     print(f"  [{tag}] saved betti curves -> {betti_out}")
 
-    dump_pickle(betti_weighted_out, {**common, "betti0_matrix": betti_weighted_matrices[0], "betti1_matrix": betti_weighted_matrices[1], ...})
+    dump_pickle(betti_weighted_out, {
+        **common,
+        "betti_params": {dim: b.params for dim, b in betti_weighted_by_dim.items()},
+        "betti0_matrix": betti_weighted_matrices[0],
+        "betti1_matrix": betti_weighted_matrices[1],
+    })
+    print(f"  [{tag}] saved weighted betti curves -> {betti_weighted_out}")
 
     dump_pickle(images_out, {
         **common,
@@ -192,9 +197,30 @@ def compute_for_split(
     print(f"  [{tag}] saved persistence images -> {images_out}")
 
 
-def main() -> None:
-    diagrams_path = DATA_DIR / "diagrams_dtm_k5.pkl"
-    adv_diagrams_path = DATA_DIR / "adversarial_diagrams_dtm_k5.pkl"
+def build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Compute Betti curves / persistence images / entropy from "
+        "DTM diagrams already on disk for one process's dataset."
+    )
+    p.add_argument(
+        "--process", default="thomas",
+        help="Selects data/params/2d/<process>/ as the data directory "
+        "(default: thomas, matching the original single-process behavior).",
+    )
+    p.add_argument(
+        "--k", type=int, default=5,
+        help="DTM k (number of nearest neighbors) selecting which "
+        "diagrams_dtm_k<k>.pkl to read and which betti_dtm_k<k>.pkl / "
+        "images_dtm_k<k>.pkl to write (default: 5, matching the original "
+        "single-k behavior/filenames exactly).",
+    )
+    return p
+
+
+def main(process: str = "thomas", k: int = 5) -> None:
+    data_dir = ROOT / "data" / "params" / "2d" / process
+    diagrams_path = data_dir / f"diagrams_dtm_k{k}.pkl"
+    adv_diagrams_path = data_dir / f"adversarial_diagrams_dtm_k{k}.pkl"
 
     if not diagrams_path.exists():
         raise FileNotFoundError(
@@ -221,7 +247,7 @@ def main() -> None:
     print("\nComputing train_test features ...")
     compute_for_split(
         diagrams, bundle, betti_by_dim, betti_weighted_by_dim, imager,
-        DATA_DIR / "betti_dtm_k10.pkl", DATA_DIR / "betti_weighted_dtm_k10.pkl", DATA_DIR / "images_dtm_k10.pkl",
+        data_dir / f"betti_dtm_k{k}.pkl", data_dir / f"betti_weighted_dtm_k{k}.pkl", data_dir / f"images_dtm_k{k}.pkl",
         tag="train_test",
     )
 
@@ -236,15 +262,17 @@ def main() -> None:
 
         print("Computing adversarial features (reusing train_test calibration) ...")
         compute_for_split(
-            adv_diagrams, adv_bundle, betti_by_dim, imager,
-            DATA_DIR / "adversarial_betti_dtm_k5.pkl", DATA_DIR / "adversarial_images_dtm_k5.pkl",
+            adv_diagrams, adv_bundle, betti_by_dim, betti_weighted_by_dim, imager,
+            data_dir / f"adversarial_betti_dtm_k{k}.pkl", data_dir / f"adversarial_betti_weighted_dtm_k{k}.pkl",
+            data_dir / f"adversarial_images_dtm_k{k}.pkl",
             tag="adversarial",
         )
     else:
         print(f"\nNo adversarial diagrams found at {adv_diagrams_path}; skipping adversarial features.")
 
-    print("\nDone. Next: dtm_experiment/train.py")
+    print(f"\nDone ({process}, k={k}). Next: dtm_experiment/train_k5.py (or an equivalent driver for this process).")
 
 
 if __name__ == "__main__":
-    main()
+    args = build_arg_parser().parse_args()
+    main(process=args.process, k=args.k)
