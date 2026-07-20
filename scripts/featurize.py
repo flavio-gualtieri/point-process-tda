@@ -114,8 +114,11 @@ def _compute_persistence_image(
 ) -> None:
     homology_dims = tuple(feat_cfg.params.get("homology_dims", (0, 1)))
     imager = build_calibrated_imager(
-        train_diagrams, homology_dims=homology_dims,
-        resolution=int(feat_cfg.params.get("resolution", 128)), sigma=float(feat_cfg.params.get("sigma", 0.05)),
+        train_diagrams,
+        homology_dims=homology_dims,
+        resolution=int(feat_cfg.params.get("resolution", 64)),
+        sigma_frac=float(feat_cfg.params.get("sigma_frac", 0.1)),
+        sigma_stat=str(feat_cfg.params.get("sigma_stat", "median")),
     )
 
     def _payload(diagrams: list, bundle: dict) -> dict:

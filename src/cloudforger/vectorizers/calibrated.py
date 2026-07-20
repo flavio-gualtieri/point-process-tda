@@ -17,7 +17,8 @@ def build_calibrated_imager(
     diagrams: list[PersistenceDiagram],
     homology_dims: tuple[int, ...] = (0, 1),
     resolution: int = 128,
-    sigma: float = 0.05,
+    sigma_frac: float = 0.05,
+    sigma_stat: str = "median",
     verbose: bool = True,
 ) -> MultiChannelImager:
     if verbose:
@@ -26,12 +27,13 @@ def build_calibrated_imager(
 
     imagers: dict[int, PersistenceImager] = {}
     for dim in homology_dims:
-        birth_hi, pers_hi = axis_bounds(stats, dim, sigma=sigma)
+        birth_hi, pers_hi = axis_bounds(stats, dim)
         imagers[dim] = PersistenceImager(
             birth_range=(0.0, birth_hi),
             pers_range=(0.0, pers_hi),
             resolution=resolution,
-            sigma=sigma,
+            sigma_frac=sigma_frac,
+            sigma_stat=sigma_stat,
         )
         if verbose:
             print(f"  [pi] dim={dim}: birth_range=(0.0, {birth_hi:.4f}) pers_range=(0.0, {pers_hi:.4f})")
