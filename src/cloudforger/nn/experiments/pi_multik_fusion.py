@@ -174,7 +174,10 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         output_dir: Path,
         adversarial_paths: dict[str, Any] | None = None,
     ) -> dict:
-        label_names = tuple(self.cfg.get("label_names", vihrs.DEFAULT_LABEL_NAMES))
+        # None (no target_label_names in the YAML) lets prepare_data adapt
+        # to every label this process's clouds actually carry.
+        target_label_names = self.cfg.get("target_label_names")
+        label_names = tuple(target_label_names) if target_label_names else None
         k_values = list(self.cfg["k_values"])
         seed = self.cfg["seed"]
         device = prepare_device(seed)
@@ -184,6 +187,7 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
             Path(adversarial_paths["clouds"]) if adversarial_paths else None,
             label_names=label_names,
         )
+        label_names = tuple(lr_data["label_names"])
         train_split = load_fusion_split(
             k_values, list(dataset_paths["images"]), Path(dataset_paths["clouds"]),
             lr_data["train_features"], label_names, tag="train_test",

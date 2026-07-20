@@ -43,19 +43,29 @@ method:
     n_epochs: 500
     lr: 0.001
     embedding_dim: 64
+    # Stop once val_loss hasn't improved for this many epochs -- val_min was
+    # hit at epoch 103/500 with val_last up 25% by epoch 500, so the back
+    # half of the budget was pure overfitting; this reclaims that compute.
+    early_stopping_patience: 30
     # k_values is auto-derived from the filtration list above; override here
     # to fuse only a subset, e.g. k_values: [5, 15]
 
 seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+# Explicit here so every method (pi_multik, pi_multik_fusion, fusion, vihrs)
+# trains against all 5 nested-Thomas params, in this order, rather than
+# falling back to whatever labels happen to be on the data (still fine --
+# omitting target_label_names/log_label_names entirely adapts to every
+# label the process produced -- but pinning them keeps column order/count
+# stable across reruns and lets you deliberately train on a subset).
 target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
 log_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
 use_adversarial: true
 
 # Try it:
 #   python scripts/generate_nested_thomas_v2.py   # (re)builds data/nested_thomas/ with the 75-pt floor; NOT scripts/generate.py --force, which would drop the floor enforcement
-#   python scripts/featurize.py configs/runs/nested_thomas_multik_pi_multik_fusion.yaml
-#   python scripts/train.py configs/runs/nested_thomas_multik_pi_multik_fusion.yaml --seed 9371
-#   python scripts/evaluate.py configs/runs/nested_thomas_multik_pi_multik_fusion.yaml \
+#   python scripts/featurize.py configs/runs/nested_thomas_pi_multik.yaml
+#   python scripts/train.py configs/runs/nested_thomas_pi_multik.yaml --seed 9371
+#   python scripts/evaluate.py configs/runs/nested_thomas_pi_multik.yaml \
 #       --methods pi_multik pi_multik_fusion vihrs vihrs_checkpointed betti_cnn_01
 #
 # The plain multi-k persistence-image model (no vihrs fusion) is the same

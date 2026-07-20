@@ -38,7 +38,7 @@ from cloudforger.paths import DEFAULT_RESULTS_ROOT, ResultsPaths
 # Methods whose results always live under the "raw" filtration tag,
 # regardless of what's configured under `filtration:` -- mirrors
 # scripts/train.py's FILTRATION_INDEPENDENT_FILE_KEYS + baseline dispatch.
-RAW_TAG_METHODS = {"raw_pc", "pairwise", "vihrs", "vihrs_checkpointed", "mincontrast", "palm"}
+RAW_TAG_METHODS = {"raw_pc", "pairwise", "vihrs", "vihrs_checkpointed", "vihrs_500", "mincontrast", "palm"}
 
 PALETTE = [
     "#2a78d6", "#1baf7a", "#eda100", "#008300",
