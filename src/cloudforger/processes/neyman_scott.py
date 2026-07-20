@@ -1,4 +1,4 @@
-# src/cloudforger/core/base.py
+# src/cloudforger/processes/neyman_scott.py
 
 from __future__ import annotations
 

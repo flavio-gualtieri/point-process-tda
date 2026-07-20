@@ -1,4 +1,4 @@
-# src/pointforge/nn/heads/classifier.py
+# src/cloudforger/nn/heads/classifier.py
 
 import torch
 import torch.nn as nn

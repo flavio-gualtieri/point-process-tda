@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 
 from ..core.cloud import PointCloud
 from ..core.features import CorrelationFeatures
-from ..core.betti import BettiCurveFeature
+from ..features.result import BettiCurveFeature
 
 
 def _parse_dim_key(key: Any) -> int | None:

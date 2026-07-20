@@ -19,9 +19,13 @@ from cloudforger.nn.train import train_one_epoch, evaluate, evaluate_per_target
 from cloudforger.nn.heads.paramest import ParameterEstimator
 from cloudforger.nn.heads.classifier import ClassificationHead
 from cloudforger.nn.models.single_modal import SingleModalModel
-
-# Number of parameters predicted per generating process.
-N_PARAMS = {"thomas": 3, "matern": 2}
+from cloudforger.nn.experiments.common import (
+    MultiSourceExperiment,
+    prepare_device,
+    select_labels,
+    normalize_labels_by_name,
+    save_results,
+)
 
 # Matches dimensioned methods like "pi_1" / "betti_0" / "betti_cnn_1".
 _PERSIST_TOKEN = re.compile(r"^(pi|betti_cnn_weighted|betti_cnn|betti)_(\d+)$")
@@ -85,52 +89,10 @@ def _combine_head_extra(parts: list[np.ndarray]) -> np.ndarray:
     return parts[0] if len(parts) == 1 else np.concatenate(parts, axis=1)
 
 
-def _select_labels(
-    labels: np.ndarray,
-    label_names: list[str],
-    target_label_names: list[str] | None,
-) -> tuple[np.ndarray, list[str]]:
-    if not target_label_names:
-        return labels, label_names
-
-    idx = []
-    for name in target_label_names:
-        if name not in label_names:
-            raise KeyError(f"Requested label {name!r}, available labels are {label_names}")
-        idx.append(label_names.index(name))
-
-    return labels[:, idx], list(target_label_names)
-
-
-def _normalize_labels_by_name(
-    labels: np.ndarray,
-    label_names: list[str],
-    log_label_names: list[str] | None,
-) -> tuple[np.ndarray, dict]:
-    log_set = set(log_label_names or label_names)
-
-    transformed = labels.astype(float).copy()
-    transforms = []
-
-    for j, name in enumerate(label_names):
-        if name in log_set:
-            if np.any(transformed[:, j] <= 0):
-                raise ValueError(f"Cannot log-transform non-positive label {name!r}")
-            transformed[:, j] = np.log(transformed[:, j])
-            transforms.append("log")
-        else:
-            transforms.append("identity")
-
-    mean = transformed.mean(axis=0)
-    std = transformed.std(axis=0)
-    std = np.where(std == 0, 1.0, std)
-
-    return (transformed - mean) / std, {
-        "mean": mean,
-        "std": std,
-        "transforms": transforms,
-    }
-
+# _select_labels / _normalize_labels_by_name moved to
+# cloudforger.nn.experiments.common (as select_labels / normalize_labels_by_name)
+# so MultiSourceExperiment subclasses (fusion, pi_multik, pi_multik_fusion)
+# can share them too.
 
 
 # ---------------------------------------------------------------------------
@@ -222,15 +184,20 @@ def _apply_classification_encoding(
 # ---------------------------------------------------------------------------
 
 def _resolve_sibling_clouds_path(dataset_path: Path) -> Path:
-    """Resolve the sibling clouds.pkl (or adversarial_clouds.pkl) living next
-    to a features/betti/images file, using the "adversarial_" filename
-    prefix convention every split already follows (see DEFAULT_SPLITS in
-    pipeline_lib/config.py), rather than pattern-matching on the file's own
-    base name. Robust to any naming scheme (betti.pkl, betti_dtm_k5.pkl,
-    images.pkl, features.pkl, ...) as long as it lives in the same directory
-    as clouds.pkl, which every split does by construction."""
+    """Resolve the clouds.pkl (or adversarial_clouds.pkl) a features/betti/
+    images file was derived from, using the "adversarial_" filename prefix
+    convention every split already follows, rather than pattern-matching on
+    the file's own base name. Two layouts are supported: the flat one
+    (clouds.pkl next to the feature file, same directory -- still used by
+    not-yet-migrated callers) and cloudforger.paths' nested one
+    (data/<process>/<filtration_tag>/<feature>.pkl, with clouds.pkl one
+    level up in data/<process>/) -- whichever actually exists wins, checked
+    in that order."""
     name = "adversarial_clouds.pkl" if dataset_path.name.startswith("adversarial_") else "clouds.pkl"
-    return dataset_path.parent / name
+    same_dir = dataset_path.parent / name
+    if same_dir.exists():
+        return same_dir
+    return dataset_path.parent.parent / name
 
 
 def zscore_fit_once(experiment: Any, values: np.ndarray, attr: str) -> np.ndarray:
@@ -301,12 +268,15 @@ def persistence_entropy_head_extra(
 # Registry
 # ---------------------------------------------------------------------------
 
-REGISTRY: dict[str, type["Experiment"]] = {}
+REGISTRY: dict[str, type["Experiment"] | type[MultiSourceExperiment]] = {}
 
 
 def register(*names: str):
-    """Class decorator registering an Experiment under one or more base names."""
-    def deco(cls: type["Experiment"]) -> type["Experiment"]:
+    """Class decorator registering an Experiment (or MultiSourceExperiment)
+    under one or more base names -- both live in the same registry, so
+    build_experiment()/the train CLI can dispatch on --method without
+    caring which shape a given method happens to be."""
+    def deco(cls):
         for name in names:
             REGISTRY[name] = cls
         return cls
@@ -322,8 +292,11 @@ def _parse_method(method: str) -> tuple[str, int | tuple[int, ...] | None]:
     return method, None
 
 
-def build_experiment(cfg: dict) -> "Experiment":
-    """Construct the Experiment for a single concrete method string."""
+def build_experiment(cfg: dict) -> "Experiment | MultiSourceExperiment":
+    """Construct the Experiment/MultiSourceExperiment for a single concrete
+    method string. MultiSourceExperiment subclasses (fusion, pi_multik,
+    pi_multik_fusion) take only cfg -- they have no hom_dim concept, unlike
+    the persistence-image/Betti-curve family's "pi_1"/"betti_0" methods."""
     base, hom_dim = _parse_method(cfg["method"])
     try:
         cls = REGISTRY[base]
@@ -332,6 +305,8 @@ def build_experiment(cfg: dict) -> "Experiment":
             f"Unknown method '{cfg['method']}'. Registered: {sorted(REGISTRY)}; "
             "plus pi_<dim>, betti_<dim>."
         )
+    if issubclass(cls, MultiSourceExperiment):
+        return cls(cfg)
     return cls(cfg, hom_dim)
 
 
@@ -342,16 +317,6 @@ def build_experiment(cfg: dict) -> "Experiment":
 def _load_pickle(path: Path):
     with open(path, "rb") as f:
         return pickle.load(f)
-
-
-def _prepare_device(cfg: dict) -> str:
-    torch.manual_seed(cfg["seed"])
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(cfg["seed"])
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
 
 
 def _normalize_labels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -462,13 +427,13 @@ class Experiment(ABC):
     # -- shared orchestration ----------------------------------------------
 
     def run(self, dataset_path: Path, output_dir: Path, adversarial_path: Path | None = None) -> dict:
-        device = _prepare_device(self.cfg)
+        device = prepare_device(self.cfg["seed"])
 
         self._dataset_path = Path(dataset_path)
         payload = _load_pickle(self._dataset_path)
 
         labels, label_names = self.extract_labels(payload)
-        labels, label_names = _select_labels(
+        labels, label_names = select_labels(
             labels,
             label_names,
             self.cfg.get("target_label_names"),
@@ -477,7 +442,7 @@ class Experiment(ABC):
             labels, label_norm = _encode_classification_labels(labels)
             n_outputs = len(label_norm["classes"])
         else:
-            labels, label_norm = _normalize_labels_by_name(
+            labels, label_norm = normalize_labels_by_name(
                 labels,
                 label_names,
                 self.cfg.get("log_label_names"),
@@ -533,7 +498,7 @@ class Experiment(ABC):
             self._dataset_path = Path(adversarial_path)
             adversarial_payload = _load_pickle(self._dataset_path)
             adversarial_labels, adversarial_label_names = self.extract_labels(adversarial_payload)
-            adversarial_labels, _ = _select_labels(
+            adversarial_labels, _ = select_labels(
                 adversarial_labels,
                 adversarial_label_names,
                 self.cfg.get("target_label_names"),
@@ -577,18 +542,20 @@ class Experiment(ABC):
 
             print(f"\n[{self.tag}] Adversarial test loss: {adversarial_loss:.4f}")
 
-        self._save(
+        save_results(
             Path(output_dir),
-            model,
-            best_state,
-            history,
-            test_loss,
-            label_names,
-            label_norm,
+            model=model,
+            best_state=best_state,
+            history=history,
+            cfg=self.cfg,
+            test_loss=test_loss,
+            label_names=label_names,
+            label_norm=label_norm,
             adversarial_loss=adversarial_loss,
             adversarial_path=adversarial_path,
             test_loss_per_target=test_loss_per_target,
             adversarial_loss_per_target=adversarial_loss_per_target,
+            extra_meta=self.extra_meta,
         )
 
         result = {
@@ -602,57 +569,3 @@ class Experiment(ABC):
             result["adversarial_loss_per_target"] = adversarial_loss_per_target
 
         return result
-
-    def _save(
-        self,
-        output_dir: Path,
-        model: nn.Module,
-        best_state,
-        history,
-        test_loss,
-        label_names,
-        label_norm,
-        adversarial_loss: float | None = None,
-        adversarial_path: Path | None = None,
-        test_loss_per_target: dict[str, float] | None = None,
-        adversarial_loss_per_target: dict[str, float] | None = None,
-    ):
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        torch.save(
-            {
-                "model_state": best_state,
-                "history": history,
-                "config": self.cfg,
-                "test_loss": test_loss,
-                "test_loss_per_target": test_loss_per_target,
-                "label_names": label_names,
-                "label_norm": label_norm,
-                "label_log_mean": label_norm["mean"],
-                "label_log_std": label_norm["std"],
-                "label_transforms": label_norm["transforms"],
-                "adversarial_loss": adversarial_loss,
-                "adversarial_loss_per_target": adversarial_loss_per_target,
-                "adversarial_path": adversarial_path,
-            },
-            output_dir / "results.pt",
-        )
-
-        torch.save(model.cpu(), output_dir / "model.pt")
-
-        json_payload = {
-            "task": self.cfg["task"],
-            "method": self.cfg["method"],
-            "test_loss": test_loss,
-            "test_loss_per_target": test_loss_per_target,
-            "seed": self.cfg["seed"],
-            **self.extra_meta,
-        }
-
-        if adversarial_loss is not None:
-            json_payload["adversarial_loss"] = adversarial_loss
-            json_payload["adversarial_loss_per_target"] = adversarial_loss_per_target
-            json_payload["adversarial_path"] = str(adversarial_path)
-
-        with open(output_dir / "results.json", "w") as f:
-            json.dump(json_payload, f, indent=2)
