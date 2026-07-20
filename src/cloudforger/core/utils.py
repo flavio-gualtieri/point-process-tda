@@ -1,4 +1,4 @@
-# src/pointforge/core/utils.py
+# src/cloudforger/core/utils.py
 import numpy as np
 from .cloud import PointCloud
 

@@ -1,7 +1,15 @@
 [project]
 name = "cloudforger"
 version = "0.1.0"
-dependencies = ["numpy"]
+dependencies = [
+    "numpy",
+    "scipy",
+    "torch",
+    "gudhi",
+    "ripser",
+    "pyyaml",
+    "matplotlib",
+]
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -9,3 +17,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = ["slow: exercises the full CLI pipeline end-to-end (generate/featurize/train/evaluate)"]

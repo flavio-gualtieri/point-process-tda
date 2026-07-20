@@ -1,4 +1,4 @@
-# src/pointforge/nn/models/multi_modal.py
+# src/cloudforger/nn/models/multi_modal.py
 import torch
 import torch.nn as nn
 from ..encoders.base import Encoder

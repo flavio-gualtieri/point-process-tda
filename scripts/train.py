@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+# scripts/train.py
+"""Train (or fit, for classical baselines) one configured method for one or
+more seeds, saving results.pt / results.json / (model.pt if trainable)
+under results/<process>/<filtration_tag>/<method>/seed_<seed>/.
+
+One method name (RunConfig's method.name) selects the estimator regardless
+of whether it's a CNN (cloudforger.nn.experiments), a classical estimator
+(mincontrast/palm), or the vihrs neural baseline -- all three write the
+identical output schema (cloudforger.nn.experiments.common.save_results),
+so scripts/evaluate.py has exactly one code path no matter which one
+produced the numbers.
+
+Classical baselines (mincontrast/palm) have no natural notion of "seed" the
+way trained models do -- they fit per-cloud, with no train/val/test split.
+To make them seed-paired-comparable with every trained method (needed for
+evaluate.py's paired tests), each seed's run fits only on that seed's TEST
+partition, using the exact same train_val_test_indices(n, seed) split every
+trained method uses, and reports loss on the same standardized (log+zscore,
+fit on that seed's TRAIN split) scale trained methods use -- not raw units,
+which would make "test_loss" numbers incomparable across methods.
+
+Usage:
+    python scripts/train.py configs/runs/thomas_dtm_k5_betti_cnn.yaml
+    python scripts/train.py configs/runs/foo.yaml --seed 9371   # single seed, for SLURM array jobs
+    python scripts/train.py configs/runs/foo.yaml --force        # retrain even if results.pt exists
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import traceback
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from cloudforger import baselines
+from cloudforger.config import RunConfig, load_config
+from cloudforger.core.io import load_pickle
+from cloudforger.core.splits import train_val_test_indices
+from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
+from cloudforger.filtration.base import Filtration
+from cloudforger.nn.experiments.base import build_experiment
+from cloudforger.nn.experiments.common import MultiSourceExperiment, save_results
+from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths, ResultsPaths, is_done
+
+MULTI_K_METHODS = {"pi_multik", "pi_multik_fusion"}
+CLASSICAL_BASELINE_NAMES = {"mincontrast", "palm"}
+FILE_KEY_TO_FEATURE_NAME = {"betti": "betti_curve", "pi": "persistence_image", "images": "persistence_image"}
+# file_keys with no filtration dependency -- their results always live under
+# the "raw" tag (paths.RAW_TAG), regardless of what's configured under
+# `filtration:`, so a raw_pc run never misleadingly looks like it used
+# whatever filtration happened to be in the config.
+FILTRATION_INDEPENDENT_FILE_KEYS = {"raw_pc", "pairwise"}
+
+
+def build_filtrations(cfg: RunConfig) -> list[Filtration]:
+    return [FILTRATION_REGISTRY.build(f.name, **f.params) for f in cfg.filtration]
+
+
+def build_method_cfg(cfg: RunConfig, seed: int) -> dict[str, Any]:
+    cfg_dict: dict[str, Any] = {
+        "task": "params",
+        "method": cfg.method.name,
+        "seed": seed,
+        "use_covariates": cfg.use_covariates,
+        **cfg.method.params,
+    }
+    if cfg.target_label_names is not None:
+        cfg_dict["target_label_names"] = cfg.target_label_names
+    if cfg.log_label_names is not None:
+        cfg_dict["log_label_names"] = cfg.log_label_names
+    return cfg_dict
+
+
+def _experiment_dataset_path(exp, data_paths: DataPaths, filtrations: list[Filtration], adversarial: bool = False) -> Path:
+    if exp.file_key == "raw_pc":
+        return data_paths.clouds(adversarial=adversarial)
+    feature_name = FILE_KEY_TO_FEATURE_NAME.get(exp.file_key, exp.file_key)
+    return data_paths.feature(filtrations, feature_name, adversarial=adversarial)
+
+
+def _multi_source_dataset_paths(
+    exp, cfg: RunConfig, data_paths: DataPaths, filtrations: list[Filtration], adversarial: bool = False
+) -> dict[str, Any]:
+    multi_k = cfg.method.name in MULTI_K_METHODS
+    paths: dict[str, Any] = {}
+    if "clouds" in exp.file_keys:
+        paths["clouds"] = data_paths.clouds(adversarial=adversarial)
+    if "images" in exp.file_keys:
+        if multi_k:
+            paths["images"] = [data_paths.feature([f], "persistence_image", adversarial=adversarial) for f in filtrations]
+        else:
+            paths["images"] = data_paths.feature(filtrations, "persistence_image", adversarial=adversarial)
+    if "betti" in exp.file_keys:
+        paths["betti"] = data_paths.feature(filtrations, "betti_curve", adversarial=adversarial)
+    return paths
+
+
+def run_experiment_method(
+    cfg: RunConfig, seed: int, data_paths: DataPaths, results_paths: ResultsPaths, filtrations: list[Filtration], force: bool
+) -> None:
+    cfg_dict = build_method_cfg(cfg, seed)
+    if cfg.method.name in MULTI_K_METHODS and "k_values" not in cfg_dict:
+        cfg_dict["k_values"] = [f.params.get("k") for f in filtrations]
+
+    exp = build_experiment(cfg_dict)
+    is_multi_source = isinstance(exp, MultiSourceExperiment)
+    effective_filtrations = (
+        [] if not is_multi_source and exp.file_key in FILTRATION_INDEPENDENT_FILE_KEYS else filtrations
+    )
+    output_dir = results_paths.seed_dir(effective_filtrations, exp.subdir, seed)
+    if is_done(output_dir) and not force:
+        print(f"[{exp.subdir} seed={seed}] already done, skipping ({output_dir}).")
+        return
+
+    adversarial_available = cfg.use_adversarial and data_paths.clouds(adversarial=True).exists()
+
+    if is_multi_source:
+        dataset_paths = _multi_source_dataset_paths(exp, cfg, data_paths, filtrations, adversarial=False)
+        adversarial_paths = (
+            _multi_source_dataset_paths(exp, cfg, data_paths, filtrations, adversarial=True) if adversarial_available else None
+        )
+        exp.run(dataset_paths, output_dir, adversarial_paths=adversarial_paths)
+    else:
+        dataset_path = _experiment_dataset_path(exp, data_paths, effective_filtrations, adversarial=False)
+        adversarial_path = (
+            _experiment_dataset_path(exp, data_paths, effective_filtrations, adversarial=True) if adversarial_available else None
+        )
+        exp.run(dataset_path, output_dir, adversarial_path=adversarial_path)
+
+
+def run_vihrs_method(cfg: RunConfig, seed: int, data_paths: DataPaths, results_paths: ResultsPaths, force: bool) -> None:
+    params = cfg.method.params
+    checkpoint_best = bool(params.get("checkpoint_best", False))
+    subdir = "vihrs_checkpointed" if checkpoint_best else "vihrs"
+    output_dir = results_paths.seed_dir([], subdir, seed)
+    if is_done(output_dir) and not force:
+        print(f"[{subdir} seed={seed}] already done, skipping ({output_dir}).")
+        return
+
+    label_names = tuple(cfg.target_label_names) if cfg.target_label_names else baselines.vihrs.DEFAULT_LABEL_NAMES
+    adversarial_clouds_path = data_paths.clouds(adversarial=True)
+    adversarial_path = adversarial_clouds_path if cfg.use_adversarial and adversarial_clouds_path.exists() else None
+
+    data = baselines.vihrs.prepare_data(
+        data_paths.clouds(), adversarial_path, label_names=label_names,
+        r_max=params.get("r_max", baselines.vihrs.R_MAX), n_r=params.get("n_r", baselines.vihrs.N_R),
+    )
+    baselines.vihrs.run_one_seed(
+        seed,
+        train_records=data["train_records"],
+        train_features=data["train_features"],
+        adversarial_features=data["adversarial_features"],
+        adversarial_path=data["adversarial_path"],
+        r_grid=data["r_grid"],
+        output_root=output_dir.parent,
+        n_epochs=params.get("n_epochs", 20),
+        batch_size=params.get("batch_size", 100),
+        lr=params.get("lr", 1e-3),
+        label_names=label_names,
+        checkpoint_best=checkpoint_best,
+        skip_mincontrast=params.get("skip_mincontrast", False),
+    )
+
+
+def run_classical_baseline(
+    method_name: str, cfg: RunConfig, seed: int, data_paths: DataPaths, results_paths: ResultsPaths, force: bool
+) -> None:
+    module = getattr(baselines, method_name)
+    output_dir = results_paths.seed_dir([], method_name, seed)
+    if is_done(output_dir) and not force:
+        print(f"[{method_name} seed={seed}] already done, skipping ({output_dir}).")
+        return
+
+    clouds = load_pickle(data_paths.clouds())
+    n = len(clouds)
+    label_names = list(cfg.target_label_names) if cfg.target_label_names else list(clouds[0]["params"].keys())
+
+    all_targets = np.array([[c["params"][name] for name in label_names] for c in clouds], dtype=float)
+    train_idx, _, test_idx = train_val_test_indices(n, seed)
+    label_norm = baselines.vihrs.fit_log_zscore(all_targets[train_idx])
+
+    n_starts = int(cfg.method.params.get("n_starts", 10))
+    rng = np.random.default_rng(seed)
+
+    raw_predictions = np.full((len(test_idx), len(label_names)), np.nan)
+    n_fit = 0
+    for row, i in enumerate(test_idx):
+        rec = clouds[i]
+        points = np.asarray(rec["points"], dtype=float)
+        if len(points) < 5:
+            continue
+        reg = rec.get("region", {})
+        low = np.asarray(reg.get("low", [0.0, 0.0]), dtype=float)
+        high = np.asarray(reg.get("high", [1.0, 1.0]), dtype=float)
+        points_unit = module.crop_and_rescale(points, low, high, rng=rng)
+        result = module.fit_multistart(points_unit, n_starts=n_starts, rng=rng)
+        raw_predictions[row] = [result.get(name, np.nan) for name in label_names]
+        n_fit += 1
+    print(f"[{method_name} seed={seed}] fit {n_fit}/{len(test_idx)} test clouds.")
+
+    raw_truth = all_targets[test_idx]
+    valid = np.isfinite(raw_predictions).all(axis=1) & (raw_predictions > 0).all(axis=1)
+    pred_std = np.full_like(raw_predictions, np.nan)
+    pred_std[valid] = baselines.vihrs.apply_log_zscore(raw_predictions[valid], label_norm)
+    truth_std = baselines.vihrs.apply_log_zscore(raw_truth, label_norm)
+
+    per_target_mse = np.nanmean((pred_std - truth_std) ** 2, axis=0)
+    test_loss = float(np.nanmean(per_target_mse))
+    test_loss_per_target = dict(zip(label_names, per_target_mse.tolist()))
+    print(f"[{method_name} seed={seed}] test loss (standardized) {test_loss:.4f}")
+
+    cfg_dict = {"task": "params", "method": method_name, "seed": seed, "n_starts": n_starts}
+    save_results(
+        output_dir, model=None, best_state=None, history={}, cfg=cfg_dict,
+        test_loss=test_loss, label_names=label_names, label_norm=label_norm,
+        test_loss_per_target=test_loss_per_target,
+    )
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("config", type=Path, help="RunConfig YAML path")
+    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="path.to.field=value")
+    parser.add_argument(
+        "--seed", type=int, default=None,
+        help="run only this seed (for SLURM array jobs); default: every seed in the config",
+    )
+    parser.add_argument("--force", action="store_true", help="retrain even if results.pt already exists")
+    args = parser.parse_args(argv)
+
+    cfg = load_config(args.config, overrides=args.overrides)
+    if cfg.method is None:
+        raise ValueError(f"{args.config} has no `method:` section -- nothing to train.")
+
+    data_paths = DataPaths(cfg.process.name, root=cfg.data_root or DEFAULT_DATA_ROOT)
+    results_paths = ResultsPaths(cfg.process.name, root=cfg.results_root or DEFAULT_RESULTS_ROOT)
+    filtrations = build_filtrations(cfg)
+
+    seeds = [args.seed] if args.seed is not None else cfg.seeds
+
+    for seed in seeds:
+        print(f"\n{'#' * 90}\n### {cfg.method.name} | {cfg.process.name} | seed {seed}\n{'#' * 90}")
+        try:
+            if cfg.method.name == "vihrs":
+                run_vihrs_method(cfg, seed, data_paths, results_paths, args.force)
+            elif cfg.method.name in CLASSICAL_BASELINE_NAMES:
+                run_classical_baseline(cfg.method.name, cfg, seed, data_paths, results_paths, args.force)
+            else:
+                run_experiment_method(cfg, seed, data_paths, results_paths, filtrations, args.force)
+        except Exception:
+            print(f"[{cfg.method.name} seed={seed}] FAILED:")
+            traceback.print_exc()
+            continue
+
+    print(f"\nAll {len(seeds)} seed(s) attempted.")
+
+
+if __name__ == "__main__":
+    main()
