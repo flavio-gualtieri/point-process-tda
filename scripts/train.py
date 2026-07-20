@@ -139,12 +139,19 @@ def run_vihrs_method(cfg: RunConfig, seed: int, data_paths: DataPaths, results_p
     params = cfg.method.params
     checkpoint_best = bool(params.get("checkpoint_best", False))
     subdir = "vihrs_checkpointed" if checkpoint_best else "vihrs"
+    # Explicit override for off-paper exploratory runs (e.g. a longer epoch
+    # budget) -- keeps "vihrs"/"vihrs_checkpointed" reserved for the
+    # paper-faithful/fair-comparison variants so results dirs stay unambiguous.
+    subdir = params.get("results_subdir", subdir)
     output_dir = results_paths.seed_dir([], subdir, seed)
     if is_done(output_dir) and not force:
         print(f"[{subdir} seed={seed}] already done, skipping ({output_dir}).")
         return
 
-    label_names = tuple(cfg.target_label_names) if cfg.target_label_names else baselines.vihrs.DEFAULT_LABEL_NAMES
+    # None (no target_label_names in the YAML) lets prepare_data adapt to
+    # whatever labels this process's clouds actually carry, instead of
+    # assuming the original paper's fixed 3-parameter Thomas set.
+    label_names = tuple(cfg.target_label_names) if cfg.target_label_names else None
     adversarial_clouds_path = data_paths.clouds(adversarial=True)
     adversarial_path = adversarial_clouds_path if cfg.use_adversarial and adversarial_clouds_path.exists() else None
 
@@ -152,6 +159,7 @@ def run_vihrs_method(cfg: RunConfig, seed: int, data_paths: DataPaths, results_p
         data_paths.clouds(), adversarial_path, label_names=label_names,
         r_max=params.get("r_max", baselines.vihrs.R_MAX), n_r=params.get("n_r", baselines.vihrs.N_R),
     )
+    label_names = tuple(data["label_names"])
     baselines.vihrs.run_one_seed(
         seed,
         train_records=data["train_records"],
@@ -163,6 +171,7 @@ def run_vihrs_method(cfg: RunConfig, seed: int, data_paths: DataPaths, results_p
         n_epochs=params.get("n_epochs", 20),
         batch_size=params.get("batch_size", 100),
         lr=params.get("lr", 1e-3),
+        early_stopping_patience=params.get("early_stopping_patience"),
         label_names=label_names,
         checkpoint_best=checkpoint_best,
         skip_mincontrast=params.get("skip_mincontrast", False),

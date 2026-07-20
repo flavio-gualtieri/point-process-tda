@@ -61,7 +61,7 @@ def load_multik_split(
     k_values: list[int],
     image_paths: list[Path],
     clouds_path: Path,
-    label_names: tuple[str, ...],
+    label_names: tuple[str, ...] | None,
     tag: str,
 ) -> dict[str, Any] | None:
     payloads = []
@@ -77,8 +77,13 @@ def load_multik_split(
     print(f"  [{tag}] {len(common_seeds)} clouds common to all k in {k_values} (per-k totals: {per_k_totals}).")
 
     # Select target columns by name -- label_names can carry deterministic
-    # bookkeeping fields (e.g. edge_buffer) alongside the real targets.
+    # bookkeeping fields (e.g. edge_buffer) alongside the real targets. None
+    # (no target_label_names configured) means "every label this process
+    # produced" -- adapts to whatever process generated this data instead of
+    # assuming a fixed target set.
     tda_label_names = list(payloads[0]["label_names"])
+    if label_names is None:
+        label_names = tuple(tda_label_names)
     missing = [name for name in label_names if name not in tda_label_names]
     if missing:
         raise KeyError(f"[{tag}] label_names {tda_label_names} is missing {missing} from {label_names}")
@@ -112,6 +117,7 @@ def load_multik_split(
         "n_points": n_points,
         "targets": targets,
         "seeds": common_seeds,
+        "label_names": list(label_names),
     }
 
 
@@ -207,7 +213,10 @@ class PIMultiKExperiment(MultiSourceExperiment):
         output_dir: Path,
         adversarial_paths: dict[str, Any] | None = None,
     ) -> dict:
-        label_names = tuple(self.cfg.get("label_names", vihrs.DEFAULT_LABEL_NAMES))
+        # None (no target_label_names in the YAML) lets load_multik_split
+        # adapt to every label the process's data actually carries.
+        target_label_names = self.cfg.get("target_label_names")
+        label_names = tuple(target_label_names) if target_label_names else None
         k_values = list(self.cfg["k_values"])
         seed = self.cfg["seed"]
         device = prepare_device(seed)
@@ -217,6 +226,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         )
         if train_split is None:
             raise FileNotFoundError(f"images missing for some k in {k_values} under {dataset_paths['images']}.")
+        label_names = tuple(train_split["label_names"])
 
         adv_split = None
         if adversarial_paths is not None:
@@ -265,6 +275,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
         best_val_loss, best_state = float("inf"), None
         n_epochs = self.cfg["n_epochs"]
+        patience = self.cfg.get("early_stopping_patience")
+        epochs_no_improve = 0
 
         for epoch in range(1, n_epochs + 1):
             train_loss, _ = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
@@ -274,8 +286,14 @@ class PIMultiKExperiment(MultiSourceExperiment):
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
             if epoch == 1 or epoch % 25 == 0 or epoch == n_epochs:
                 print(f"[pi_multik seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}")
+            if patience is not None and epochs_no_improve >= patience:
+                print(f"[pi_multik seed={seed}] early stopping at epoch {epoch} (no val improvement for {patience} epochs)")
+                break
 
         model.load_state_dict(best_state)
         test_loss, _ = evaluate(model, test_loader, loss_fn, device)

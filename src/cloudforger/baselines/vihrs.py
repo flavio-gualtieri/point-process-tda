@@ -569,6 +569,7 @@ def run_one_seed(
     lr: float,
     label_names: tuple[str, ...] = DEFAULT_LABEL_NAMES,
     checkpoint_best: bool = False,
+    early_stopping_patience: int | None = None,
     device_pref: str | None = None,
     skip_mincontrast: bool = False,
     mc_cache: dict[Any, Any] | None = None,
@@ -627,6 +628,7 @@ def run_one_seed(
     # matching every other method in this repo's convention instead.
     history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
     best_val_loss, best_state, best_epoch = float("inf"), None, 0
+    epochs_no_improve = 0
 
     for epoch in range(1, n_epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
@@ -636,7 +638,13 @@ def run_one_seed(
         if checkpoint_best and val_loss < best_val_loss:
             best_val_loss, best_epoch = val_loss, epoch
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            epochs_no_improve = 0
+        elif checkpoint_best:
+            epochs_no_improve += 1
         print(f"[vihrs seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}")
+        if checkpoint_best and early_stopping_patience is not None and epochs_no_improve >= early_stopping_patience:
+            print(f"[vihrs seed={seed}] early stopping at epoch {epoch} (no val improvement for {early_stopping_patience} epochs)")
+            break
 
     if checkpoint_best:
         model.load_state_dict(best_state)
@@ -777,7 +785,7 @@ def prepare_data(
     clouds_path: Path,
     adversarial_path: Path | None = None,
     *,
-    label_names: tuple[str, ...] = DEFAULT_LABEL_NAMES,
+    label_names: tuple[str, ...] | None = DEFAULT_LABEL_NAMES,
     r_max: float = R_MAX,
     n_r: int = N_R,
     cache_dir: Path | None = None,
@@ -785,7 +793,14 @@ def prepare_data(
     max_clouds: int | None = None,
 ) -> dict[str, Any]:
     """Load clouds_path (+ adversarial_path, if given) and extract/cache the
-    L(r)-r + n(x) feature set that run_one_seed needs."""
+    L(r)-r + n(x) feature set that run_one_seed needs.
+
+    label_names=None adapts to whatever labels this process's clouds
+    actually carry (every key in the first record's `params`, in that
+    record's own order) instead of assuming a fixed set -- lets callers
+    driven by RunConfig.target_label_names (None when the YAML doesn't pin
+    an explicit target list) pass that straight through. The resolved tuple
+    is echoed back in the return dict so callers know what was used."""
     r_grid = default_r_grid(r_max, n_r)
     cache_dir = cache_dir or clouds_path.parent
 
@@ -794,6 +809,10 @@ def prepare_data(
     if max_clouds is not None:
         train_records = train_records[:max_clouds]
     print(f"  {len(train_records)} clouds loaded.")
+
+    if label_names is None:
+        label_names = tuple(train_records[0]["params"].keys())
+        print(f"  no label_names given -- adapting to this process's own params: {label_names}")
 
     train_cache = cache_dir / (clouds_path.stem + ".lfunc_cache.npz")
     train_features = get_features(
