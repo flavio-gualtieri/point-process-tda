@@ -1,29 +1,4 @@
 # src/cloudforger/nn/experiments/pi_multik.py
-"""Multi-k persistence-image model: per k in cfg["k_values"], the (H0, H1)
-persistence-image pair is fed through a SHARED-WEIGHT CoordConv CNN branch
-(cloudforger.nn.encoders.coordconv_pi.CoordConvPIEncoder) -- one encoder
-instance, called once per k (folded into the batch dimension so it's a
-single conv-stack invocation, not K separate ones) -- producing one
-embedding f_k per k. The f_k's are late-fused by concatenation with
-[log N, ...] extra scalar features, then passed through an MLP regression
-head. This supersedes the old pi_multik design (all k's stacked into one
-wide-channel tensor, seen jointly by a single conv from layer 1 -- i.e.
-EARLY fusion across k) with a late-fusion, Siamese-style alternative; the
-old implementation is preserved verbatim in experiments/delete.py.
-
-Channel order per k (fixed, documented here since nothing in the tensor
-itself labels it): [pi0(k), pi1(k)]. The per-k image tensor built by
-build_pi_tensor has shape (N, K, 2, R, R), K = len(k_values), e.g. for
-k_values = [5, 10, 15]:
-    slice [:, 0] = (H0, H1) at k=5     slice [:, 1] = (H0, H1) at k=10
-    slice [:, 2] = (H0, H1) at k=15
-
-Not an Experiment subclass, for the same reason fusion.py isn't: each k's
-images_dtm_k<k>.pkl survives the empty-diagram filter with a DIFFERENT
-subset of seeds, so the files must be intersected by seed
-(cloudforger.core.io.intersect_seeds) before their channels can be stacked,
-which Experiment.run()'s single dataset_path contract has no hook for.
-"""
 
 from __future__ import annotations
 
@@ -39,7 +14,7 @@ from torch.utils.data import DataLoader, Subset, TensorDataset
 from cloudforger.baselines import vihrs
 from cloudforger.core.io import intersect_seeds
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.nn.encoders.coordconv_pi import CoordConvPIEncoder
+from cloudforger.nn.encoders.persistence_image import PIEncoder
 from cloudforger.nn.experiments.base import register
 from cloudforger.nn.experiments.common import (
     MultiSourceExperiment,
@@ -49,6 +24,7 @@ from cloudforger.nn.experiments.common import (
     save_results,
 )
 from cloudforger.nn.heads.paramest import ParameterEstimator
+from cloudforger.nn.models.single_modal import SingleModalModel
 from cloudforger.nn.train import evaluate, evaluate_per_target, train_one_epoch
 
 
@@ -116,13 +92,9 @@ def load_multik_split(
 
 
 def build_pi_tensor(
-    split: dict[str, Any], k_values: list[int], channel_norms: list[dict[str, float]] | None
+    split: dict[str, Any], channel_norms: list[dict[str, float]] | None
 ) -> tuple[np.ndarray, list[dict[str, float]]]:
-    """(N, K, 2, H, W) float32 tensor, K = len(k_values) -- unlike the old
-    pi_multik's (N, 2*K, H, W) layout (all k's flattened into one channel
-    axis), k is kept as its own axis here so the shared-weight CoordConv
-    branch can fold it into the batch dimension for a single conv-stack call
-    per forward pass. Still one independent z-score per raw (k, H0/H1)
+    """(N, 2*len(k_values), H, W) float32 tensor, one independent z-score per
     channel -- PI pixels are raw Gaussian-kernel sums with a huge dynamic
     range, and different k's have different raw magnitude scales on top of
     that, so per-channel (not global) normalization matters here more than
@@ -130,67 +102,32 @@ def build_pi_tensor(
     fit = channel_norms is None
     if fit:
         channel_norms = []
-    normed_channels = []
+    channels = []
     for i, raw in enumerate(split["pi_channels"]):
         norm = fit_zscore(raw) if fit else channel_norms[i]
         if fit:
             channel_norms.append(norm)
-        normed_channels.append(apply_zscore(raw, norm))
-    # normed_channels is flat: [h0_k0, h1_k0, h0_k1, h1_k1, ...] -- pair up
-    # per k into (N, 2, H, W), then stack those pairs along a new k axis.
-    per_k = [np.stack(normed_channels[2 * i : 2 * i + 2], axis=1) for i in range(len(k_values))]
-    return np.stack(per_k, axis=1).astype(np.float32), channel_norms
+        channels.append(apply_zscore(raw, norm))
+    return np.stack(channels, axis=1).astype(np.float32), channel_norms
 
 
-def build_extra(split: dict[str, Any], n_norm: dict) -> np.ndarray:
-    """(N, 1) [log N] side-vector, concatenated onto the per-k embeddings
-    before the fusion head. Built as a list of (N,) columns stacked at the
-    end, so adding a feature later -- e.g. persistence entropy, already
-    loaded onto split["entropy_cols"] by load_multik_split but unused here
-    for now -- is a one-line append to `cols`."""
+def build_extra(
+    split: dict[str, Any], n_norm: dict, entropy_norms: dict[str, dict] | None, k_values: list[int]
+) -> tuple[np.ndarray, dict[str, dict]]:
+    fit = entropy_norms is None
+    if fit:
+        entropy_norms = {}
     n_std = vihrs.apply_log_zscore(split["n_points"], n_norm).astype(np.float32)
     cols = [n_std]
-    return np.stack(cols, axis=1)
-
-
-class PIMultiK(nn.Module):
-    """SHARED-WEIGHT CoordConv branch: one CoordConvPIEncoder instance,
-    applied independently to each k's (H0, H1) image pair (k folded into
-    the batch dimension, so it's one conv-stack call per forward, not K),
-    producing f_k5, f_k10, f_k15, ... Those are late-fused by concatenation
-    with the extra scalar features, then passed through an MLP fusion head.
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        embedding_dim: int,
-        n_k: int,
-        n_extra: int,
-        n_targets: int,
-        conv_channels: tuple[int, ...] = (32, 64, 128),
-        dropout: float = 0.2,
-        head_hidden_dims: tuple[int, ...] = (64, 32),
-        head_dropout: float = 0.1,
-    ):
-        super().__init__()
-        self.n_k = n_k
-        self.encoder = CoordConvPIEncoder(
-            in_channels=in_channels, embedding_dim=embedding_dim,
-            conv_channels=conv_channels, dropout=dropout,
-        )
-        self.head = ParameterEstimator(
-            embedding_dim=n_k * embedding_dim + n_extra, n_params=n_targets,
-            hidden_dims=head_hidden_dims, dropout=head_dropout,
-        )
-
-    def forward(self, pi_imgs: torch.Tensor, extra: torch.Tensor) -> torch.Tensor:
-        # pi_imgs: (B, K, 2, R, R) -- fold K into the batch dim so the shared
-        # encoder runs once per forward pass instead of K separate calls.
-        b = pi_imgs.shape[0]
-        flat = pi_imgs.reshape(b * self.n_k, *pi_imgs.shape[2:])
-        emb = self.encoder(flat).reshape(b, self.n_k * self.encoder.embedding_dim)
-        return self.head(torch.cat([emb, extra], dim=1))
+    for k in k_values:
+        for dim in (0, 1):
+            name = f"entropy{dim}_k{k}"
+            values = split["entropy_cols"][name]
+            norm = fit_zscore(values) if fit else entropy_norms[name]
+            if fit:
+                entropy_norms[name] = norm
+            cols.append(apply_zscore(values, norm).astype(np.float32))
+    return np.stack(cols, axis=1), entropy_norms
 
 
 @register("pi_multik")
@@ -230,8 +167,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
         n_norm = vihrs.fit_log_zscore(train_split["n_points"])
 
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
-        pi_img, channel_norms = build_pi_tensor(train_split, k_values, channel_norms=None)
-        extra = build_extra(train_split, n_norm)
+        pi_img, channel_norms = build_pi_tensor(train_split, channel_norms=None)
+        extra, entropy_norms = build_extra(train_split, n_norm, entropy_norms=None, k_values=k_values)
 
         full_dataset = TensorDataset(
             torch.from_numpy(pi_img), torch.from_numpy(extra), torch.from_numpy(targets_std),
@@ -243,23 +180,14 @@ class PIMultiKExperiment(MultiSourceExperiment):
 
         train_loader, val_loader, test_loader = _loader(train_idx, True), _loader(val_idx, False), _loader(test_idx, False)
 
-        # PIMultiK.forward(pi_imgs, extra) lines up exactly with
-        # cloudforger.nn.train's (inputs, covariates, labels) 3-tuple batch
-        # convention, so the shared train loop applies as-is.
-        model = PIMultiK(
-            in_channels=2,
-            embedding_dim=self.cfg["embedding_dim"],
-            n_k=len(k_values),
-            n_extra=extra.shape[1],
-            n_targets=len(label_names),
-            conv_channels=tuple(self.cfg.get("conv_channels", (32, 64, 128))),
-            dropout=self.cfg.get("dropout", 0.2),
-            head_hidden_dims=tuple(self.cfg.get("head_hidden_dims", (64, 32))),
-            head_dropout=self.cfg.get("head_dropout", 0.1),
+        # SingleModalModel(encoder, head).forward(x, covariates) lines up
+        # exactly with cloudforger.nn.train's 3-tuple batch convention
+        # (inputs, covariates, labels), so the shared train loop applies as-is.
+        model = SingleModalModel(
+            encoder=PIEncoder(in_channels=pi_img.shape[1], embedding_dim=self.cfg["embedding_dim"]),
+            head=ParameterEstimator(embedding_dim=self.cfg["embedding_dim"] + extra.shape[1], n_params=len(label_names)),
         ).to(device)
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=self.cfg["lr"], weight_decay=self.cfg.get("weight_decay", 1e-4),
-        )
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg["lr"], weight_decay=1e-4)
         loss_fn = nn.MSELoss()
 
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
@@ -286,8 +214,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
         adversarial_loss_per_target = None
         if adv_split is not None:
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
-            adv_pi_img, _ = build_pi_tensor(adv_split, k_values, channel_norms=channel_norms)
-            adv_extra = build_extra(adv_split, n_norm)
+            adv_pi_img, _ = build_pi_tensor(adv_split, channel_norms=channel_norms)
+            adv_extra, _ = build_extra(adv_split, n_norm, entropy_norms=entropy_norms, k_values=k_values)
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_pi_img), torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
             )

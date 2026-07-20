@@ -30,10 +30,11 @@ from torch.utils.data import DataLoader, Subset, TensorDataset
 from cloudforger.baselines import vihrs
 from cloudforger.core.io import align_seeds
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.nn.encoders.persistence_image import PIEncoder
+from cloudforger.nn.encoders.coordconv_pi import CoordConvPIEncoder
 from cloudforger.nn.experiments import pi_multik
 from cloudforger.nn.experiments.base import register
 from cloudforger.nn.experiments.common import MultiSourceExperiment, prepare_device, save_results
+from cloudforger.nn.heads.paramest import ParameterEstimator
 
 
 def load_fusion_split(
@@ -65,8 +66,22 @@ def load_fusion_split(
 
 
 class VihrsPIMultiKFusion(nn.Module):
-    def __init__(self, lr_seq_len: int, in_channels: int, embedding_dim: int, n_extra: int, n_targets: int):
+    def __init__(
+        self,
+        lr_seq_len: int,
+        in_channels: int,
+        embedding_dim: int,
+        n_k: int,
+        n_extra: int,
+        n_targets: int,
+        conv_channels: tuple[int, ...] = (32, 64, 128),
+        dropout: float = 0.2,
+        head_hidden_dims: tuple[int, ...] = (64, 32),
+        head_dropout: float = 0.1,
+    ):
         super().__init__()
+        self.n_k = n_k
+
         # L(r)-r branch -- identical architecture to VihrsCNN's/FusionCNN's own conv stack.
         self.lr_conv = nn.Sequential(
             nn.Conv1d(1, 64, kernel_size=7), nn.ReLU(), nn.MaxPool1d(5),
@@ -77,19 +92,30 @@ class VihrsPIMultiKFusion(nn.Module):
             lr_flat_dim = self.lr_conv(torch.zeros(1, 1, lr_seq_len)).flatten(1).shape[1]
         self.lr_head = nn.Linear(lr_flat_dim, embedding_dim)
 
-        # Multi-k persistence-image branch -- identical to pi_multik's own.
-        self.pi_encoder = PIEncoder(in_channels=in_channels, embedding_dim=embedding_dim)
+        # Multi-k persistence-image branch -- identical to pi_multik's own:
+        # ONE shared-weight CoordConvPIEncoder, applied to each k's (H0, H1)
+        # pair (k folded into the batch dim in forward()), late-fused by
+        # concatenation rather than the old early-fusion wide-channel encoder.
+        self.pi_encoder = CoordConvPIEncoder(
+            in_channels=in_channels, embedding_dim=embedding_dim,
+            conv_channels=conv_channels, dropout=dropout,
+        )
 
-        merge_dim = 2 * embedding_dim + n_extra
-        self.head = nn.Sequential(
-            nn.Linear(merge_dim, 64), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(64, 32), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(32, n_targets),
+        merge_dim = embedding_dim + n_k * embedding_dim + n_extra
+        self.head = ParameterEstimator(
+            embedding_dim=merge_dim, n_params=n_targets,
+            hidden_dims=head_hidden_dims, dropout=head_dropout,
         )
 
     def forward(self, lr_seq: torch.Tensor, pi_img: torch.Tensor, extra: torch.Tensor) -> torch.Tensor:
         lr_emb = self.lr_head(self.lr_conv(lr_seq.unsqueeze(1)).flatten(start_dim=1))
-        pi_emb = self.pi_encoder(pi_img)
+
+        # pi_img: (B, K, 2, R, R) -- fold K into the batch dim so the shared
+        # encoder runs once per forward pass instead of K separate calls.
+        b = pi_img.shape[0]
+        flat = pi_img.reshape(b * self.n_k, *pi_img.shape[2:])
+        pi_emb = self.pi_encoder(flat).reshape(b, self.n_k * self.pi_encoder.embedding_dim)
+
         return self.head(torch.cat([lr_emb, pi_emb, extra], dim=1))
 
 
@@ -179,8 +205,8 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
 
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         lr_seq = vihrs.apply_zscore_global(train_split["lr_seq"], lr_norm).astype(np.float32)
-        pi_img, channel_norms = pi_multik.build_pi_tensor(train_split, channel_norms=None)
-        extra, entropy_norms = pi_multik.build_extra(train_split, n_norm, entropy_norms=None, k_values=k_values)
+        pi_img, channel_norms = pi_multik.build_pi_tensor(train_split, k_values, channel_norms=None)
+        extra = pi_multik.build_extra(train_split, n_norm)
 
         full_dataset = TensorDataset(
             torch.from_numpy(lr_seq), torch.from_numpy(pi_img), torch.from_numpy(extra), torch.from_numpy(targets_std),
@@ -193,10 +219,16 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         train_loader, val_loader, test_loader = _loader(train_idx, True), _loader(val_idx, False), _loader(test_idx, False)
 
         model = VihrsPIMultiKFusion(
-            lr_seq_len=lr_seq.shape[1], in_channels=pi_img.shape[1], embedding_dim=self.cfg["embedding_dim"],
-            n_extra=extra.shape[1], n_targets=len(label_names),
+            lr_seq_len=lr_seq.shape[1], in_channels=pi_img.shape[2], embedding_dim=self.cfg["embedding_dim"],
+            n_k=pi_img.shape[1], n_extra=extra.shape[1], n_targets=len(label_names),
+            conv_channels=tuple(self.cfg.get("conv_channels", (32, 64, 128))),
+            dropout=self.cfg.get("dropout", 0.2),
+            head_hidden_dims=tuple(self.cfg.get("head_hidden_dims", (64, 32))),
+            head_dropout=self.cfg.get("head_dropout", 0.1),
         ).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg["lr"], weight_decay=1e-4)
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=self.cfg["lr"], weight_decay=self.cfg.get("weight_decay", 1e-4),
+        )
         loss_fn = nn.MSELoss()
 
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
@@ -224,8 +256,8 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         if adv_split is not None:
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_lr_seq = vihrs.apply_zscore_global(adv_split["lr_seq"], lr_norm).astype(np.float32)
-            adv_pi_img, _ = pi_multik.build_pi_tensor(adv_split, channel_norms=channel_norms)
-            adv_extra, _ = pi_multik.build_extra(adv_split, n_norm, entropy_norms=entropy_norms, k_values=k_values)
+            adv_pi_img, _ = pi_multik.build_pi_tensor(adv_split, k_values, channel_norms=channel_norms)
+            adv_extra = pi_multik.build_extra(adv_split, n_norm)
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_lr_seq), torch.from_numpy(adv_pi_img),
                 torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
