@@ -28,13 +28,19 @@ class PersistenceImager:
         birth_range: tuple[float, float],
         pers_range: tuple[float, float],
         resolution: int = 64,
-        sigma: float = 0.1,
+        sigma_frac: float = 0.1,
+        sigma_stat: str = "median",
+        min_sigma_pixels: float = 1.0,
+        weight: bool = False,
         weight_fn: Callable[[np.ndarray], np.ndarray] = linear_weight,
     ):
         self._birth_range = birth_range
         self._pers_range = pers_range
         self._resolution = resolution
-        self._sigma = sigma
+        self._sigma_frac = sigma_frac
+        self._sigma_stat = sigma_stat
+        self._min_sigma_pixels = min_sigma_pixels
+        self._weight = weight
         self._weight_fn = weight_fn
 
         # Pixel-center coordinates along each axis, computed once.
@@ -52,14 +58,31 @@ class PersistenceImager:
 
         births = pairs[:, 0]
         persistences = pairs[:, 1] - pairs[:, 0]  # birth-death -> birth-pers
-        weights = self._weight_fn(persistences)
+        if self._sigma_stat == "median":
+            spread = np.median(persistences) 
+        elif self._sigma_stat == "iqr":
+            q1, q3 = np.percentile(persistences, [25, 75])
+            spread = q3 - q1
+        else:
+            raise ValueError(
+                f"Unsupported sigma statistic: {self._sigma_stat!r}. "
+                "Expected 'median' or 'iqr'."
+            )
+        if not np.isfinite(spread) or spread <= 0:
+            spread = np.finfo(float).eps
+    
+        pixel = (self._pers_range[1] - self._pers_range[0]) / self._resolution
+        sigma_floor = self._min_sigma_pixels * pixel
+        sigma_diagram = max(self._sigma_frac * spread, sigma_floor)
+
+        weights = self._weight_fn(persistences) if self._weight else np.ones_like(persistences)
 
         # Gaussian per point, summed onto the grid. Centers outside the
         # grid still deposit their in-range tail; nothing clipped/dropped.
         bb, pp = np.meshgrid(self._birth_axis, self._pers_axis)
         for b, p, w in zip(births, persistences, weights):
             kernel = np.exp(
-                -((bb - b) ** 2 + (pp - p) ** 2) / (2 * self._sigma ** 2)
+                -((bb - b) ** 2 + (pp - p) ** 2) / (2 * sigma_diagram ** 2)
             )
             image += w * kernel
 
@@ -72,6 +95,8 @@ class PersistenceImager:
             "birth_range": self._birth_range,
             "pers_range": self._pers_range,
             "resolution": self._resolution,
-            "sigma": self._sigma,
-            "weight_fn": self._weight_fn.__name__,
+            "weight_fn": self._weight_fn.__name__ if self._weight else None,
+            "sigma_frac": self._sigma_frac,
+            "sigma_stat": self._sigma_stat,
+            "min_sigma_pixels": self._min_sigma_pixels,
         }

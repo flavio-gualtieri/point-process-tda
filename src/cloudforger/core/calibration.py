@@ -78,16 +78,13 @@ def calibrate_report(
 
 
 def axis_bounds(
-    stats: dict, dim: int, degenerate_birth_sigma_mult: float = 4.0, sigma: float = 0.1
+    stats: dict, dim: int, degenerate_birth_frac: float = 0.25
 ) -> tuple[float, float]:
-    """99th-percentile birth/persistence upper bounds for one homology dim,
-    with a fallback for degenerate cases (every bar has birth==0, e.g. Rips
-    H0) where the calibrated birth range would otherwise collapse to zero."""
     axes = stats.get(dim)
     if axes is None:
         return 1.0, 1.0
     birth_hi = axes["birth"].get(99.0, 1.0)
     persistence_hi = axes["persistence"].get(99.0, 1.0)
-    birth_hi = degenerate_birth_sigma_mult * sigma if birth_hi <= 0 else birth_hi
     persistence_hi = 1.0 if persistence_hi <= 0 else persistence_hi
+    birth_hi = degenerate_birth_frac * persistence_hi if birth_hi <= 0 else birth_hi
     return float(birth_hi), float(persistence_hi)
