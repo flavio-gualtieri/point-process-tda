@@ -1,0 +1,58 @@
+# Matern (hard-core type II) -> mass-fraction DTM (7 scales, topo_superset)
+# -> stacked multi-scale persistence images -> pi_multik_scaleconv regression.
+# Diagrams built via scripts/precompute_topo_superset.py (per-cloud
+# k = round(m*N), so NOT the filtration-registry path below -- see that
+# script's docstring); persistence images built via
+# scripts/featurize_topo_superset.py. Mirrors
+# configs/runs/nested_thomas_pi_multik_scale.yaml -- see that file for the
+# fuller design rationale. Compare against the 3-channel (k=5,10,15)
+# baseline in configs/runs/matern_pi_multik.yaml once
+# scripts/featurize.py has been run for that config (data/matern has no
+# dtm_k5/dtm_k10/dtm_k15 yet, only topo_superset).
+
+process:
+  name: matern
+  seed: 47
+  design:
+    mode: random
+    reps: 4  # replicate draws per sampled param vector
+    random:
+      n_param_vectors: 2000
+      ranges:
+        # Region is the unit square (volume 1), so these are absolute units.
+        parent_intensity: {low: 100.0, high: 1000.0, scale: log}
+        hardcore_radius: {low: 0.012, high: 0.04,   scale: log}
+  adversarial:
+    enabled: true
+    fraction: 0.125       # share of clouds held out as the adversarial (OOD) split
+    seed_offset: 100000   # keeps adversarial cloud seeds disjoint from train/test
+
+# Empty on purpose: this method's images are resolved from
+# method.params.m_values (scripts/train.py), not the Filtration registry --
+# same reason precompute_topo_superset.py bypasses it (see header above).
+filtration: []
+
+features:
+  - name: persistence_image
+    params: {resolution: 64, sigma_frac: 0.1, sigma_stat: "median", homology_dims: [0, 1]}
+    # Consumed by scripts/featurize_topo_superset.py, not scripts/train.py.
+
+method:
+  name: pi_multik_scaleconv
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    embedding_dim: 64
+    early_stopping_patience: 30
+    # The 7-channel scale subset -- a live area of work, change freely.
+    # Must match what scripts/featurize_topo_superset.py --m-values built.
+    m_values: [0.01, 0.02, 0.04, 0.10, 0.20, 0.45, 0.90]
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, hardcore_radius]  # the only two params MaternHardCoreProcess exposes
+log_label_names: [parent_intensity, hardcore_radius]     # both swept on a log scale -- log-transform before z-scoring
+use_adversarial: true
+
+# Try it:
+#   python scripts/train.py configs/runs/matern_pi_multik_scale.yaml --seed 9371
