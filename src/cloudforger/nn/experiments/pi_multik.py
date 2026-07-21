@@ -18,10 +18,11 @@ but overrides _build_model to swap in ScaleConvFusion
 (cloudforger.nn.encoders.scaleconv_pi), a small Conv1d block over the
 ordered k axis, before the head -- see PIMultiK(use_fusion=...).
 
-Channel order per k (fixed, documented here since nothing in the tensor
-itself labels it): [pi0(k), pi1(k)]. The per-k image tensor built by
-build_pi_tensor has shape (N, K, 2, R, R), K = len(k_values), e.g. for
-k_values = [5, 10, 15]:
+Channel order per k (documented here since nothing in the tensor itself
+labels it): [pi_d(k) for d in homology_dims], homology_dims configurable via
+cfg["homology_dims"] (default (0, 1)). The per-k image tensor built by
+build_pi_tensor has shape (N, K, D, R, R), K = len(k_values), D =
+len(homology_dims), e.g. for k_values = [5, 10, 15], homology_dims = (0, 1):
     slice [:, 0] = (H0, H1) at k=5     slice [:, 1] = (H0, H1) at k=10
     slice [:, 2] = (H0, H1) at k=15
 
@@ -71,6 +72,7 @@ def load_multik_split(
     clouds_path: Path,
     label_names: tuple[str, ...] | None,
     tag: str,
+    homology_dims: tuple[int, ...] = (0, 1),
 ) -> dict[str, Any] | None:
     payloads = []
     for k, path in zip(k_values, image_paths):
@@ -104,14 +106,23 @@ def load_multik_split(
             f"[{tag}] target mismatch between k={k_values[0]} and k={k} after seed alignment -- alignment bug."
         )
 
-    # Channel order: for k in k_values, [pi0(k), pi1(k)] -- see module docstring.
+    # Channel order: for k in k_values, [pi_d(k) for d in homology_dims] --
+    # see module docstring. homology_dims must be a subset of what was
+    # actually computed at featurize time (payload["image_tensors"].keys()).
     pi_channels: list[np.ndarray] = []
     entropy_cols: dict[str, np.ndarray] = {}
     for k, payload, idx in zip(k_values, payloads, idx_per_k):
-        pi_channels.append(np.asarray(payload["image_tensors"][0], dtype=np.float64)[idx])
-        pi_channels.append(np.asarray(payload["image_tensors"][1], dtype=np.float64)[idx])
-        entropy_cols[f"entropy0_k{k}"] = np.asarray(payload["persistence_entropy"][0], dtype=np.float64)[idx]
-        entropy_cols[f"entropy1_k{k}"] = np.asarray(payload["persistence_entropy"][1], dtype=np.float64)[idx]
+        available = set(payload["image_tensors"].keys())
+        missing_dims = [d for d in homology_dims if d not in available]
+        if missing_dims:
+            raise KeyError(
+                f"[{tag}] homology_dims {homology_dims} requests dims {missing_dims} not present in "
+                f"image_tensors for k={k} (available: {sorted(available)}) -- these must have been computed "
+                f"by the featurize step (features.persistence_image.params.homology_dims)."
+            )
+        for dim in homology_dims:
+            pi_channels.append(np.asarray(payload["image_tensors"][dim], dtype=np.float64)[idx])
+            entropy_cols[f"entropy{dim}_k{k}"] = np.asarray(payload["persistence_entropy"][dim], dtype=np.float64)[idx]
 
     # n(x) doesn't depend on k (same underlying cloud) -- joined once from
     # the sibling clouds.pkl by seed.
@@ -132,11 +143,13 @@ def load_multik_split(
 def build_pi_tensor(
     split: dict[str, Any], k_values: list[int], channel_norms: list[dict[str, float]] | None
 ) -> tuple[np.ndarray, list[dict[str, float]]]:
-    """(N, K, 2, H, W) float32 tensor, K = len(k_values) -- unlike the old
-    pi_multik's (N, 2*K, H, W) layout (all k's flattened into one channel
+    """(N, K, D, H, W) float32 tensor, K = len(k_values), D = number of
+    homology dims selected (split["pi_channels"] has K*D entries, D per k,
+    in homology_dims order -- see load_multik_split) -- unlike the old
+    pi_multik's (N, D*K, H, W) layout (all k's flattened into one channel
     axis), k is kept as its own axis here so the shared-weight CoordConv
     branch can fold it into the batch dimension for a single conv-stack call
-    per forward pass. Still one independent z-score per raw (k, H0/H1)
+    per forward pass. Still one independent z-score per raw (k, dim)
     channel -- PI pixels are raw Gaussian-kernel sums with a huge dynamic
     range, and different k's have different raw magnitude scales on top of
     that, so per-channel (not global) normalization matters here more than
@@ -150,21 +163,39 @@ def build_pi_tensor(
         if fit:
             channel_norms.append(norm)
         normed_channels.append(apply_zscore(raw, norm))
-    # normed_channels is flat: [h0_k0, h1_k0, h0_k1, h1_k1, ...] -- pair up
-    # per k into (N, 2, H, W), then stack those pairs along a new k axis.
-    per_k = [np.stack(normed_channels[2 * i : 2 * i + 2], axis=1) for i in range(len(k_values))]
+    # normed_channels is flat: [dim0_k0, dim1_k0, ..., dim0_k1, dim1_k1, ...]
+    # -- group by k (D consecutive entries each) into (N, D, H, W), then
+    # stack those groups along a new k axis.
+    dims_per_k = len(normed_channels) // len(k_values)
+    per_k = [np.stack(normed_channels[dims_per_k * i : dims_per_k * (i + 1)], axis=1) for i in range(len(k_values))]
     return np.stack(per_k, axis=1).astype(np.float32), channel_norms
 
 
-def build_extra(split: dict[str, Any], n_norm: dict) -> np.ndarray:
-    """(N, 1) [log N] side-vector, concatenated onto the per-k embeddings
-    before the fusion head. Built as a list of (N,) columns stacked at the
-    end, so adding a feature later -- e.g. persistence entropy, already
-    loaded onto split["entropy_cols"] by load_multik_split but unused here
-    for now -- is a one-line append to `cols`."""
+def build_extra(
+    split: dict[str, Any],
+    n_norm: dict,
+    entropy_norms: dict[str, dict[str, float]] | None = None,
+    include_entropy: bool = False,
+) -> tuple[np.ndarray, dict[str, dict[str, float]]]:
+    """(N, 1 + (n_entropy_cols if include_entropy else 0)) side-vector,
+    concatenated onto the per-k embeddings before the fusion head: [log N]
+    always, plus one plain z-scored column per split["entropy_cols"] entry
+    (persistence entropy per (homology dim, k), loaded by load_multik_split)
+    when include_entropy is set. entropy_norms is None to fit (train split),
+    or the train split's returned norms to apply frozen (val/test/adversarial)."""
     n_std = vihrs.apply_log_zscore(split["n_points"], n_norm).astype(np.float32)
     cols = [n_std]
-    return np.stack(cols, axis=1)
+    fit = entropy_norms is None
+    if fit:
+        entropy_norms = {}
+    if include_entropy:
+        for name in sorted(split["entropy_cols"]):
+            raw = split["entropy_cols"][name]
+            norm = fit_zscore(raw) if fit else entropy_norms[name]
+            if fit:
+                entropy_norms[name] = norm
+            cols.append(apply_zscore(raw, norm).astype(np.float32))
+    return np.stack(cols, axis=1), entropy_norms
 
 
 class PIMultiK(nn.Module):
@@ -187,6 +218,9 @@ class PIMultiK(nn.Module):
         head_hidden_dims: tuple[int, ...] = (64, 32),
         head_dropout: float = 0.1,
         use_fusion: bool = False,
+        scale_fusion_hidden: int = 128,
+        scale_fusion_out_dim: int = 128,
+        scale_fusion_kernel_size: int = 3,
     ):
         super().__init__()
         self.n_k = n_k
@@ -196,7 +230,10 @@ class PIMultiK(nn.Module):
             conv_channels=conv_channels, dropout=dropout,
         )
         if self.use_fusion:
-            self.scale_fusion = ScaleConvFusion(embedding_dim, out_dim=128)
+            self.scale_fusion = ScaleConvFusion(
+                embedding_dim, hidden=scale_fusion_hidden, out_dim=scale_fusion_out_dim,
+                kernel_size=scale_fusion_kernel_size,
+            )
             head_in = self.scale_fusion.out_dim + n_extra
         else:
             head_in = n_k * embedding_dim + n_extra
@@ -243,11 +280,18 @@ class PIMultiKExperiment(MultiSourceExperiment):
         target_label_names = self.cfg.get("target_label_names")
         label_names = tuple(target_label_names) if target_label_names else None
         k_values = list(self.cfg["k_values"])
+        # Channel selection: which persistence homology dims to stack per k/m
+        # (must be a subset of what features.persistence_image.params.homology_dims
+        # actually computed at featurize time); include_entropy additionally
+        # appends per-(dim, k) persistence entropy scalars to the extra side-vector.
+        homology_dims = tuple(self.cfg.get("homology_dims", (0, 1)))
+        include_entropy = bool(self.cfg.get("include_entropy", False))
         seed = self.cfg["seed"]
         device = prepare_device(seed)
 
         train_split = load_multik_split(
             k_values, list(dataset_paths["images"]), Path(dataset_paths["clouds"]), label_names, tag="train_test",
+            homology_dims=homology_dims,
         )
         if train_split is None:
             raise FileNotFoundError(f"images missing for some k in {k_values} under {dataset_paths['images']}.")
@@ -257,7 +301,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         if adversarial_paths is not None:
             adv_split = load_multik_split(
                 k_values, list(adversarial_paths["images"]), Path(adversarial_paths["clouds"]),
-                label_names, tag="adversarial",
+                label_names, tag="adversarial", homology_dims=homology_dims,
             )
 
         n = len(train_split["targets"])
@@ -266,7 +310,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
 
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         pi_img, channel_norms = build_pi_tensor(train_split, k_values, channel_norms=None)
-        extra = build_extra(train_split, n_norm)
+        extra, entropy_norms = build_extra(train_split, n_norm, include_entropy=include_entropy)
 
         full_dataset = TensorDataset(
             torch.from_numpy(pi_img), torch.from_numpy(extra), torch.from_numpy(targets_std),
@@ -282,7 +326,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         # cloudforger.nn.train's (inputs, covariates, labels) 3-tuple batch
         # convention, so the shared train loop applies as-is.
         model = self._build_model(
-            in_channels=2,
+            in_channels=len(homology_dims),
             embedding_dim=self.cfg["embedding_dim"],
             n_k=len(k_values),
             n_extra=extra.shape[1],
@@ -291,6 +335,9 @@ class PIMultiKExperiment(MultiSourceExperiment):
             dropout=self.cfg.get("dropout", 0.2),
             head_hidden_dims=tuple(self.cfg.get("head_hidden_dims", (64, 32))),
             head_dropout=self.cfg.get("head_dropout", 0.1),
+            scale_fusion_hidden=self.cfg.get("scale_fusion_hidden", 128),
+            scale_fusion_out_dim=self.cfg.get("scale_fusion_out_dim", 128),
+            scale_fusion_kernel_size=self.cfg.get("scale_fusion_kernel_size", 3),
         ).to(device)
         optimizer = torch.optim.Adam(
             model.parameters(), lr=self.cfg["lr"], weight_decay=self.cfg.get("weight_decay", 1e-4),
@@ -330,7 +377,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         if adv_split is not None:
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_pi_img, _ = build_pi_tensor(adv_split, k_values, channel_norms=channel_norms)
-            adv_extra = build_extra(adv_split, n_norm)
+            adv_extra, _ = build_extra(adv_split, n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy)
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_pi_img), torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
             )
@@ -343,7 +390,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
 
         cfg_meta = {
             **self.cfg,
-            "channels": [f"k{k}_h{d}" for k in k_values for d in (0, 1)],
+            "channels": [f"k{k}_h{d}" for k in k_values for d in homology_dims],
         }
         save_results(
             output_dir, model=model, best_state=best_state, history=history, cfg=cfg_meta,

@@ -9,7 +9,7 @@ import numpy as np
 
 def calibrate(
     diagrams: list[PersistenceDiagram],
-    percentiles: tuple[float, ...] = (95.0, 99.0),
+    percentiles: tuple[float, ...] = (95.0, 99.9),
 ) -> dict[int, dict[str, dict[float, float]]]:
     """Collect birth and persistence statistics across a list of diagrams.
 
@@ -54,7 +54,7 @@ def calibrate(
 
 def calibrate_report(
     diagrams: list[PersistenceDiagram],
-    percentiles: tuple[float, ...] = (95.0, 99.0),
+    percentiles: tuple[float, ...] = (95.0, 99.9),
 ) -> str:
     """Return a human-readable calibration report and suggested imager kwargs."""
     stats = calibrate(diagrams, percentiles)
@@ -63,10 +63,10 @@ def calibrate_report(
         lines.append(f"\nH{dim}")
         for axis, pvals in axes.items():
             row = "  " + axis + ":  " + "  ".join(
-                f"p{int(p)}={v:.4f}" for p, v in sorted(pvals.items())
+                f"p{p:g}={v:.4f}" for p, v in sorted(pvals.items())
             )
             lines.append(row)
-        # Suggest imager kwargs based on 99th percentile.
+        # Suggest imager kwargs based on the upper percentile.
         b_lo = axes["birth"].get(min(percentiles), 0.0)
         b_hi = axes["birth"][max(percentiles)]
         p_hi = axes["persistence"][max(percentiles)]
@@ -83,8 +83,8 @@ def axis_bounds(
     axes = stats.get(dim)
     if axes is None:
         return 1.0, 1.0
-    birth_hi = axes["birth"].get(99.0, 1.0)
-    persistence_hi = axes["persistence"].get(99.0, 1.0)
+    birth_hi = axes["birth"].get(99.9, 1.0)
+    persistence_hi = axes["persistence"].get(99.9, 1.0)
     persistence_hi = 1.0 if persistence_hi <= 0 else persistence_hi
     birth_hi = degenerate_birth_frac * persistence_hi if birth_hi <= 0 else birth_hi
     return float(birth_hi), float(persistence_hi)

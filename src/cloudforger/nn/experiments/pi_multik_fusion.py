@@ -210,7 +210,7 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         lr_seq = vihrs.apply_zscore_global(train_split["lr_seq"], lr_norm).astype(np.float32)
         pi_img, channel_norms = pi_multik.build_pi_tensor(train_split, k_values, channel_norms=None)
-        extra = pi_multik.build_extra(train_split, n_norm)
+        extra, entropy_norms = pi_multik.build_extra(train_split, n_norm)
 
         full_dataset = TensorDataset(
             torch.from_numpy(lr_seq), torch.from_numpy(pi_img), torch.from_numpy(extra), torch.from_numpy(targets_std),
@@ -261,7 +261,7 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_lr_seq = vihrs.apply_zscore_global(adv_split["lr_seq"], lr_norm).astype(np.float32)
             adv_pi_img, _ = pi_multik.build_pi_tensor(adv_split, k_values, channel_norms=channel_norms)
-            adv_extra = pi_multik.build_extra(adv_split, n_norm)
+            adv_extra, _ = pi_multik.build_extra(adv_split, n_norm, entropy_norms=entropy_norms)
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_lr_seq), torch.from_numpy(adv_pi_img),
                 torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
