@@ -11,6 +11,7 @@ for now (see cloudforger.config.RunConfig)."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .filtration import Filtration
@@ -44,13 +45,37 @@ class ExplicitTag:
         return self._tag
 
 
+# Splits a path_tag() into (family_prefix, trailing_numeric_value), e.g.
+# "dtm_m0.01" -> ("dtm_m", "0.01"), "dtm_k10" -> ("dtm_k", "10"). Tags with
+# no trailing number (e.g. "raw") don't match and stay ungrouped.
+_TAG_FAMILY_RE = re.compile(r"^(.*?)(\d[\d.]*)$")
+
+
 def combined_filtration_tag(filtrations: list[Filtration] | None) -> str:
     """Path segment for zero, one, or several Filtration instances (more
-    than one for multi-k sweeps like pi_multik). Each filtration contributes
-    its own path_tag() (e.g. DTM's "dtm_k5"); several are joined with "-"."""
+    than one for multi-channel sweeps like pi_multik/pi_multik_scaleconv).
+    Each filtration contributes its own path_tag() (e.g. DTM's "dtm_k5" or
+    a mass-fraction sweep's "dtm_m0.01"). Consecutive tags sharing the same
+    family prefix are fused into one segment with their values joined by
+    "+" (e.g. "dtm_k5", "dtm_k10", "dtm_k15" -> "dtm_k5+10+15") instead of
+    repeating the prefix per value -- the old "-".join() blew up into
+    unreadable names like "dtm_m0.01-dtm_m0.02-dtm_m0.04-...-dtm_m0.90" for
+    a 7-channel combo. Value order is preserved (it's semantically
+    meaningful for e.g. ScaleConvFusion's ordered-channel-axis convolution),
+    never sorted. Distinct families (or tags with no trailing number) are
+    joined with "-", as before."""
     if not filtrations:
         return RAW_TAG
-    return "-".join(f.path_tag() for f in filtrations)
+    groups: list[tuple[str, list[str]]] = []
+    for f in filtrations:
+        tag = f.path_tag()
+        match = _TAG_FAMILY_RE.match(tag)
+        prefix, value = match.groups() if match else (None, tag)
+        if groups and groups[-1][0] == prefix and prefix is not None:
+            groups[-1][1].append(value)
+        else:
+            groups.append((prefix, [value]))
+    return "-".join((prefix or "") + "+".join(values) for prefix, values in groups)
 
 
 class DataPaths:

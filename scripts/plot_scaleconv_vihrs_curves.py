@@ -8,8 +8,8 @@ neural baseline, for a single seed.
 Per-seed curves, not mean+-std across seeds (only one seed exists for the
 scaleconv variants so far) -- mirrors scripts/evaluate.py's
 plot_training_curves styling, but spans three different results/ filtration
-tags in one plot (pi_multik*/dtm_k5-dtm_k10-dtm_k15,
-pi_multik_scaleconv/dtm_m0.01-...-m0.90, vihrs_500/raw), which
+tags in one plot (pi_multik*/dtm_k5+10+15,
+pi_multik_scaleconv/dtm_m0.01+...+0.90, vihrs_500/raw), which
 evaluate.py's single-tag --methods flag can't do in one invocation.
 
 Usage:
