@@ -1,0 +1,40 @@
+# Matern (hard-core type II) -> vihrs baseline (L(r)-r + n(x) 1D-CNN, Vihrs 2022).
+# Same data as matern_pi_multik.yaml (data/matern/). No filtration/features
+# needed: vihrs reads clouds.pkl directly and computes L(r)-r itself.
+# Mirrors configs/runs/nested_thomas_vihrs.yaml's "vihrs_500" variant
+# (500-epoch budget + checkpoint-best-val, results_subdir pinned so it's
+# directly comparable in naming across processes).
+
+process:
+  name: matern
+  seed: 47
+  design:
+    mode: random
+    reps: 4
+    random:
+      n_param_vectors: 2000
+      ranges:
+        parent_intensity: {low: 100.0, high: 1000.0, scale: log}
+        hardcore_radius: {low: 0.012, high: 0.04,   scale: log}
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+method:
+  name: vihrs
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    checkpoint_best: true       # reload best-val-loss state before final eval, for a fair comparison at this epoch budget
+    early_stopping_patience: 30
+    results_subdir: vihrs_500   # matches nested_thomas_vihrs_500's naming so results stay comparable across processes
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, hardcore_radius]
+log_label_names: [parent_intensity, hardcore_radius]
+use_adversarial: true
+
+# Try it:
+#   python scripts/train.py configs/runs/matern_vihrs.yaml --seed 9371
