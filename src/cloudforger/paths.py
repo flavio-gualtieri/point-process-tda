@@ -29,6 +29,21 @@ RAW_TAG = "raw"
 COMPARE_DIR_NAME = "_compare"
 
 
+class ExplicitTag:
+    """Minimal Filtration stand-in (only .path_tag() is required by
+    combined_filtration_tag()/ResultsPaths) for methods whose diagrams
+    weren't computed via the Filtration registry -- e.g. topo_superset's
+    mass-fraction DTM sweep (scripts/precompute_topo_superset.py), which
+    needs a per-cloud k = round(m*N) the registry's fixed-k contract has no
+    hook for, so it bypasses DataPaths/the registry entirely."""
+
+    def __init__(self, tag: str):
+        self._tag = tag
+
+    def path_tag(self) -> str:
+        return self._tag
+
+
 def combined_filtration_tag(filtrations: list[Filtration] | None) -> str:
     """Path segment for zero, one, or several Filtration instances (more
     than one for multi-k sweeps like pi_multik). Each filtration contributes

@@ -47,7 +47,7 @@ from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
 from cloudforger.filtration.base import Filtration
 from cloudforger.nn.experiments.base import build_experiment
 from cloudforger.nn.experiments.common import MultiSourceExperiment, save_results
-from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths, ResultsPaths, is_done
+from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths, ExplicitTag, ResultsPaths, is_done
 
 MULTI_K_METHODS = {"pi_multik", "pi_multik_fusion", "pi_multik_scaleconv"}
 CLASSICAL_BASELINE_NAMES = {"mincontrast", "palm"}
@@ -84,15 +84,28 @@ def _experiment_dataset_path(exp, data_paths: DataPaths, filtrations: list[Filtr
     return data_paths.feature(filtrations, feature_name, adversarial=adversarial)
 
 
+def _topo_superset_image_paths(data_paths: DataPaths, m_values: list[float], adversarial: bool) -> list[Path]:
+    """topo_superset (scripts/precompute_topo_superset.py +
+    scripts/featurize_topo_superset.py) stores persistence images flat,
+    keyed by mass fraction m, not under the per-k DataPaths.feature()
+    convention -- see ExplicitTag's docstring for why."""
+    prefix = "adversarial_" if adversarial else ""
+    superset_dir = data_paths.process_dir / "topo_superset"
+    return [superset_dir / f"{prefix}dtm_m{m:.2f}_persistence_image.pkl" for m in m_values]
+
+
 def _multi_source_dataset_paths(
     exp, cfg: RunConfig, data_paths: DataPaths, filtrations: list[Filtration], adversarial: bool = False
 ) -> dict[str, Any]:
     multi_k = cfg.method.name in MULTI_K_METHODS
+    m_values = cfg.method.params.get("m_values")
     paths: dict[str, Any] = {}
     if "clouds" in exp.file_keys:
         paths["clouds"] = data_paths.clouds(adversarial=adversarial)
     if "images" in exp.file_keys:
-        if multi_k:
+        if m_values is not None:
+            paths["images"] = _topo_superset_image_paths(data_paths, m_values, adversarial)
+        elif multi_k:
             paths["images"] = [data_paths.feature([f], "persistence_image", adversarial=adversarial) for f in filtrations]
         else:
             paths["images"] = data_paths.feature(filtrations, "persistence_image", adversarial=adversarial)
@@ -105,14 +118,20 @@ def run_experiment_method(
     cfg: RunConfig, seed: int, data_paths: DataPaths, results_paths: ResultsPaths, filtrations: list[Filtration], force: bool
 ) -> None:
     cfg_dict = build_method_cfg(cfg, seed)
-    if cfg.method.name in MULTI_K_METHODS and "k_values" not in cfg_dict:
+    m_values = cfg.method.params.get("m_values")
+    if m_values is not None:
+        cfg_dict["k_values"] = list(m_values)  # k_values is just an ordered scale label list internally
+    elif cfg.method.name in MULTI_K_METHODS and "k_values" not in cfg_dict:
         cfg_dict["k_values"] = [f.params.get("k") for f in filtrations]
 
     exp = build_experiment(cfg_dict)
     is_multi_source = isinstance(exp, MultiSourceExperiment)
-    effective_filtrations = (
-        [] if not is_multi_source and exp.file_key in FILTRATION_INDEPENDENT_FILE_KEYS else filtrations
-    )
+    if m_values is not None:
+        effective_filtrations = [ExplicitTag(f"dtm_m{m:.2f}") for m in m_values]
+    else:
+        effective_filtrations = (
+            [] if not is_multi_source and exp.file_key in FILTRATION_INDEPENDENT_FILE_KEYS else filtrations
+        )
     output_dir = results_paths.seed_dir(effective_filtrations, exp.subdir, seed)
     if is_done(output_dir) and not force:
         print(f"[{exp.subdir} seed={seed}] already done, skipping ({output_dir}).")
