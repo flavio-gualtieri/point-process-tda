@@ -69,6 +69,6 @@ class PIMultiKTowersExperiment(PIMultiKExperiment):
 
     def _build_model(self, **kwargs) -> PIMultiKTowers:
         kwargs["fusion_dropout"] = self.cfg.get("fusion_dropout", 0.1)
-        kwargs["dropout_fusion_conv"] = self.cfg.get("scale_fusion_dropout", 0.0)  # if you also did step 1
+        kwargs["scale_fusion_dropout"] = self.cfg.get("scale_fusion_dropout", 0.0)
         return PIMultiKTowers(**kwargs)
 
