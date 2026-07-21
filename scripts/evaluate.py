@@ -1,17 +1,4 @@
-#!/usr/bin/env python3
 # scripts/evaluate.py
-"""Aggregate saved results.pt across seeds for one or more methods (any mix
-of nn.experiments methods, vihrs, or classical baselines -- they all wrote
-the identical schema, see cloudforger.nn.experiments.common.save_results)
-and compare them: summary statistics, a paired Wilcoxon test against the
-best method, training-dynamics/overfitting diagnostics, and comparison
-plots. Generalizes models/evaluate_seeds.py (previously hardcoded to
-thomas's 3 params under a single models-root) to any process/label set.
-
-Usage:
-    python scripts/evaluate.py configs/runs/thomas_dtm_k5_betti_cnn.yaml \\
-        --methods betti_cnn_01 vihrs mincontrast pi_multik_fusion
-"""
 
 from __future__ import annotations
 

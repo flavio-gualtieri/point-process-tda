@@ -49,7 +49,7 @@ from cloudforger.nn.experiments.base import build_experiment
 from cloudforger.nn.experiments.common import MultiSourceExperiment, save_results
 from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths, ExplicitTag, ResultsPaths, is_done
 
-MULTI_K_METHODS = {"pi_multik", "pi_multik_fusion", "pi_multik_scaleconv"}
+MULTI_K_METHODS = {"pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers"}
 CLASSICAL_BASELINE_NAMES = {"mincontrast", "palm"}
 FILE_KEY_TO_FEATURE_NAME = {"betti": "betti_curve", "pi": "persistence_image", "images": "persistence_image"}
 # file_keys with no filtration dependency -- their results always live under
