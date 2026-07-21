@@ -38,12 +38,14 @@ class ScaleConvFusion(Encoder):
         embedding_dim: int = 64,
         hidden: int = 128,
         out_dim: int = 128,
+        kernel_size: int = 3,
     ):
         super().__init__(embedding_dim=out_dim)
+        padding = kernel_size // 2
         self.net = nn.Sequential(
-            nn.Conv1d(embedding_dim, hidden, kernel_size=3, padding=1),
+            nn.Conv1d(embedding_dim, hidden, kernel_size=kernel_size, padding=padding),
             _ChannelLayerNorm(hidden), nn.ReLU(),
-            nn.Conv1d(hidden, out_dim, kernel_size=3, padding=1),
+            nn.Conv1d(hidden, out_dim, kernel_size=kernel_size, padding=padding),
             _ChannelLayerNorm(out_dim), nn.ReLU(),
         )
         self.pool = nn.AdaptiveAvgPool1d(1)
