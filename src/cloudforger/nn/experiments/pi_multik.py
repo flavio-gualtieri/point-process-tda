@@ -11,6 +11,13 @@ wide-channel tensor, seen jointly by a single conv from layer 1 -- i.e.
 EARLY fusion across k) with a late-fusion, Siamese-style alternative; the
 old implementation is preserved verbatim in experiments/delete.py.
 
+The flat concat above is order-blind to the k axis. pi_multik_scaleconv.py
+registers a scale-aware sibling experiment that reuses everything here
+(PIMultiKExperiment.run, load_multik_split, build_pi_tensor/build_extra)
+but overrides _build_model to swap in ScaleConvFusion
+(cloudforger.nn.encoders.scaleconv_pi), a small Conv1d block over the
+ordered k axis, before the head -- see PIMultiK(use_fusion=...).
+
 Channel order per k (fixed, documented here since nothing in the tensor
 itself labels it): [pi0(k), pi1(k)]. The per-k image tensor built by
 build_pi_tensor has shape (N, K, 2, R, R), K = len(k_values), e.g. for
@@ -40,6 +47,7 @@ from cloudforger.baselines import vihrs
 from cloudforger.core.io import intersect_seeds
 from cloudforger.core.splits import train_val_test_indices
 from cloudforger.nn.encoders.coordconv_pi import CoordConvPIEncoder
+from cloudforger.nn.encoders.scaleconv_pi import ScaleConvFusion
 from cloudforger.nn.experiments.base import register
 from cloudforger.nn.experiments.common import (
     MultiSourceExperiment,
@@ -178,25 +186,36 @@ class PIMultiK(nn.Module):
         dropout: float = 0.2,
         head_hidden_dims: tuple[int, ...] = (64, 32),
         head_dropout: float = 0.1,
+        use_fusion: bool = False,
     ):
         super().__init__()
         self.n_k = n_k
+        self.use_fusion = use_fusion
         self.encoder = CoordConvPIEncoder(
             in_channels=in_channels, embedding_dim=embedding_dim,
             conv_channels=conv_channels, dropout=dropout,
         )
+        if self.use_fusion:
+            self.scale_fusion = ScaleConvFusion(embedding_dim, out_dim=128)
+            head_in = self.scale_fusion.out_dim + n_extra
+        else:
+            head_in = n_k * embedding_dim + n_extra
+
         self.head = ParameterEstimator(
-            embedding_dim=n_k * embedding_dim + n_extra, n_params=n_targets,
+            embedding_dim=head_in, n_params=n_targets,
             hidden_dims=head_hidden_dims, dropout=head_dropout,
         )
 
-    def forward(self, pi_imgs: torch.Tensor, extra: torch.Tensor) -> torch.Tensor:
-        # pi_imgs: (B, K, 2, R, R) -- fold K into the batch dim so the shared
-        # encoder runs once per forward pass instead of K separate calls.
+    def forward(self, pi_imgs, extra):
         b = pi_imgs.shape[0]
         flat = pi_imgs.reshape(b * self.n_k, *pi_imgs.shape[2:])
-        emb = self.encoder(flat).reshape(b, self.n_k * self.encoder.embedding_dim)
-        return self.head(torch.cat([emb, extra], dim=1))
+        emb = self.encoder(flat)                                   # (B*K, C)
+        if self.use_fusion:
+            seq = emb.reshape(b, self.n_k, self.encoder.embedding_dim)  # (B, K, C)
+            pooled = self.scale_fusion(seq)                        # (B, out_dim)
+        else:
+            pooled = emb.reshape(b, self.n_k * self.encoder.embedding_dim)
+        return self.head(torch.cat([pooled, extra], dim=1))
 
 
 @register("pi_multik")
@@ -206,6 +225,12 @@ class PIMultiKExperiment(MultiSourceExperiment):
     @property
     def subdir(self) -> str:
         return "pi_multik"
+
+    def _build_model(self, **kwargs) -> PIMultiK:
+        """Flat-concat baseline. Overridden by PIMultiKScaleConvExperiment
+        to swap in ScaleConvFusion instead -- everything else in run()
+        (data loading, training loop, save_results) is shared verbatim."""
+        return PIMultiK(use_fusion=False, **kwargs)
 
     def run(
         self,
@@ -256,7 +281,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         # PIMultiK.forward(pi_imgs, extra) lines up exactly with
         # cloudforger.nn.train's (inputs, covariates, labels) 3-tuple batch
         # convention, so the shared train loop applies as-is.
-        model = PIMultiK(
+        model = self._build_model(
             in_channels=2,
             embedding_dim=self.cfg["embedding_dim"],
             n_k=len(k_values),
@@ -290,15 +315,15 @@ class PIMultiKExperiment(MultiSourceExperiment):
             else:
                 epochs_no_improve += 1
             if epoch == 1 or epoch % 25 == 0 or epoch == n_epochs:
-                print(f"[pi_multik seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}")
+                print(f"[{self.tag} seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}")
             if patience is not None and epochs_no_improve >= patience:
-                print(f"[pi_multik seed={seed}] early stopping at epoch {epoch} (no val improvement for {patience} epochs)")
+                print(f"[{self.tag} seed={seed}] early stopping at epoch {epoch} (no val improvement for {patience} epochs)")
                 break
 
         model.load_state_dict(best_state)
         test_loss, _ = evaluate(model, test_loader, loss_fn, device)
         test_loss_per_target = dict(zip(label_names, evaluate_per_target(model, test_loader, device).tolist()))
-        print(f"\n[pi_multik seed={seed}] test loss {test_loss:.4f}")
+        print(f"\n[{self.tag} seed={seed}] test loss {test_loss:.4f}")
 
         adversarial_loss = None
         adversarial_loss_per_target = None
@@ -314,11 +339,10 @@ class PIMultiKExperiment(MultiSourceExperiment):
             adversarial_loss_per_target = dict(
                 zip(label_names, evaluate_per_target(model, adv_loader, device).tolist())
             )
-            print(f"[pi_multik seed={seed}] adversarial loss {adversarial_loss:.4f}")
+            print(f"[{self.tag} seed={seed}] adversarial loss {adversarial_loss:.4f}")
 
         cfg_meta = {
             **self.cfg,
-            "method": "pi_multik",
             "channels": [f"k{k}_h{d}" for k in k_values for d in (0, 1)],
         }
         save_results(

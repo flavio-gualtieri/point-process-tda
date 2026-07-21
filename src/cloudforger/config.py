@@ -37,7 +37,7 @@ class FeatureConfig:
 
 @dataclass
 class MethodConfig:
-    name: str  # registry key: betti_cnn, pi, fusion, pi_multik, pi_multik_fusion, vihrs, mincontrast, palm, ...
+    name: str  # registry key: betti_cnn, pi, fusion, pi_multik, pi_multik_fusion, pi_multik_scaleconv, vihrs, mincontrast, palm, ...
     params: dict[str, Any] = field(default_factory=dict)
 
 

@@ -49,7 +49,7 @@ from cloudforger.nn.experiments.base import build_experiment
 from cloudforger.nn.experiments.common import MultiSourceExperiment, save_results
 from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths, ResultsPaths, is_done
 
-MULTI_K_METHODS = {"pi_multik", "pi_multik_fusion"}
+MULTI_K_METHODS = {"pi_multik", "pi_multik_fusion", "pi_multik_scaleconv"}
 CLASSICAL_BASELINE_NAMES = {"mincontrast", "palm"}
 FILE_KEY_TO_FEATURE_NAME = {"betti": "betti_curve", "pi": "persistence_image", "images": "persistence_image"}
 # file_keys with no filtration dependency -- their results always live under
@@ -68,7 +68,6 @@ def build_method_cfg(cfg: RunConfig, seed: int) -> dict[str, Any]:
         "task": "params",
         "method": cfg.method.name,
         "seed": seed,
-        "use_covariates": cfg.use_covariates,
         **cfg.method.params,
     }
     if cfg.target_label_names is not None:

@@ -1,0 +1,54 @@
+# Matern (hard-core type II) -> DTM (k=5,10,15) persistence images -> pi_multik regression.
+# Data built separately via scripts/generate.py configs/runs/matern_pi_multik.yaml
+# (generic generator -- MaternHardCoreProcess is a plain 2-param process, no
+# custom script needed the way nested_thomas needs generate_nested_thomas_v2.py).
+
+process:
+  name: matern
+  seed: 47
+  design:
+    mode: random
+    reps: 4  # replicate draws per sampled param vector
+    random:
+      n_param_vectors: 2000
+      ranges:
+        # Region is the unit square (volume 1), so these are absolute units.
+        # lambda*pi*r^2 (expected parent neighbors within hardcore_radius)
+        # spans ~0.05 to ~5 across this box: from weak thinning (retained
+        # count ~= parent_intensity) to near-jamming (retained count ~=
+        # 1/(pi*hardcore_radius^2)), so both params stay identifiable from
+        # the resulting point pattern instead of one saturating the other.
+        # Simulated against the config seed: min~72, median~229, p95~574,
+        # max~791 points/cloud -- comfortably above the DTM k=15 floor.
+        parent_intensity: {low: 100.0, high: 1000.0, scale: log}
+        hardcore_radius: {low: 0.012, high: 0.04,   scale: log}
+  adversarial:
+    enabled: true
+    fraction: 0.125       # share of clouds held out as the adversarial (OOD) split
+    seed_offset: 100000   # keeps adversarial cloud seeds disjoint from train/test
+
+filtration:
+  - {name: dtm, params: {k: 5,  q: 2.0, maxdim: 1}}   # k = neighbors for the DTM density estimate
+  - {name: dtm, params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm, params: {k: 15, q: 2.0, maxdim: 1}}
+
+features:
+  - name: persistence_image
+    params: {resolution: 64, sigma_frac: 0.1, sigma_stat: "median", homology_dims: [0, 1]}
+    # sigma_frac: Gaussian kernel width, as a fraction of sigma_stat's per-diagram persistence spread
+
+method:
+  name: pi_multik
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    embedding_dim: 64
+    early_stopping_patience: 30  # stop after this many epochs with no val_loss improvement
+    # k_values auto-derived from the filtration list above; override to fuse a subset, e.g. k_values: [5, 15]
+    use_fusion: true
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, hardcore_radius]  # targets to regress -- the only two params MaternHardCoreProcess exposes
+log_label_names: [parent_intensity, hardcore_radius]     # both swept on a log scale -- log-transform before z-scoring
+use_adversarial: true
