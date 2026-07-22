@@ -27,8 +27,14 @@ filtration:
 
 features:
   - name: persistence_image
-    params: {resolution: 64, sigma_frac: 0.1, sigma_stat: "median", homology_dims: [0, 1]}
-    # sigma_frac: Gaussian kernel width, as a fraction of sigma_stat's per-diagram persistence spread
+    params: {resolution: 64, sigma_pixels: 2.0, homology_dims: [0, 1]}
+    # sigma_pixels: Gaussian kernel bandwidth, in pixels, shared by the birth and
+    # persistence axes. 2.0 chosen from a speckle/component-count diagnostic
+    # sweep over the real dtm_k5/10/15 diagrams (0.25-6px): H1 stays heavily
+    # speckled (>0.9 top-1%-energy) below sigma=2, while H0 starts collapsing
+    # to a single blob for a growing share of diagrams above sigma=2-3 --
+    # this is the balance point. Not yet cross-checked against test_loss
+    # (scripts/sweep_pi_sigma.py, still to run).
 
 method:
   name: pi_multik

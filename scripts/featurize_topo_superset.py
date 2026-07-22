@@ -8,7 +8,7 @@ a later step.
 Reuses the exact transform scripts/featurize.py's persistence_image
 feature handler uses (build_calibrated_imager, fit per m on TRAIN diagrams
 only, then .transform per diagram), with the same
-resolution/sigma_frac/sigma_stat/homology_dims as the config's
+resolution/sigma_pixels/homology_dims as the config's
 features.persistence_image block by default, so these channels are
 directly comparable to the existing dtm_k5/dtm_k10/dtm_k15 ones.
 
@@ -47,6 +47,7 @@ from cloudforger.core.records import load_diagrams
 from cloudforger.features import REGISTRY as FEATURE_REGISTRY
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
 from cloudforger.vectorizers.calibrated import build_calibrated_imager
+from cloudforger.vectorizers.persistence_image import DEFAULT_SIGMA_PIXELS
 
 # Even log-spaced coverage of precompute_topo_superset.py's full 11-point m
 # grid (0.01 ... 0.90): fine end matches the existing k=5,10,15 regime,
@@ -65,12 +66,12 @@ def _entropy_by_dim(diagrams: list, homology_dims: tuple[int, ...]) -> dict[int,
 
 def _build_images(
     train_diagrams: list, train_bundle: dict, adv_diagrams: list | None, adv_bundle: dict | None,
-    homology_dims: tuple[int, ...], resolution: int, sigma_frac: float, sigma_stat: str,
+    homology_dims: tuple[int, ...], resolution: int, sigma_pixels: float,
     out_path: Path, adv_out_path: Path,
 ) -> None:
     imager = build_calibrated_imager(
         train_diagrams, homology_dims=homology_dims, resolution=resolution,
-        sigma_frac=sigma_frac, sigma_stat=sigma_stat,
+        sigma_pixels=sigma_pixels,
     )
 
     def _payload(diagrams: list, bundle: dict) -> dict:
@@ -109,11 +110,10 @@ def main(argv: list[str] | None = None) -> None:
         raise ValueError(f"{args.config} has no features: persistence_image entry -- nothing to size the imager from.")
     homology_dims = tuple(pi_cfg.params.get("homology_dims", HOMOLOGY_DIMS))
     resolution = int(pi_cfg.params.get("resolution", 64))
-    sigma_frac = float(pi_cfg.params.get("sigma_frac", 0.1))
-    sigma_stat = str(pi_cfg.params.get("sigma_stat", "median"))
+    sigma_pixels = float(pi_cfg.params.get("sigma_pixels", DEFAULT_SIGMA_PIXELS))
 
     print(f"m channels: {args.m_values}")
-    print(f"imager params: resolution={resolution} sigma_frac={sigma_frac} sigma_stat={sigma_stat} homology_dims={homology_dims}")
+    print(f"imager params: resolution={resolution} sigma_pixels={sigma_pixels} homology_dims={homology_dims}")
 
     for m in args.m_values:
         tag = f"m={m:.2f}"
@@ -136,7 +136,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[{tag}] fitting imager on {len(train_diagrams)} train diagrams ...")
         _build_images(
             train_diagrams, train_bundle, adv_diagrams, adv_bundle,
-            homology_dims, resolution, sigma_frac, sigma_stat, out_path, adv_out_path,
+            homology_dims, resolution, sigma_pixels, out_path, adv_out_path,
         )
 
     print("\nDone.")
