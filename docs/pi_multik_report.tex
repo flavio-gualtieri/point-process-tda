@@ -60,71 +60,111 @@ All variants share the same encoder building block and the same MLP regression
 head; they differ only in \emph{how the per-scale embeddings are fused}.
 
 \subsection{Shared building blocks}
+
+Exact sizes below are what every config in \texttt{configs/runs/} actually
+uses (matérn and nested-Thomas configs are identical on every value here) — not
+just code defaults.
+
 \begin{itemize}
   \item \textbf{CoordConv PI encoder} (\texttt{CoordConvPIEncoder}): input is one
-    $(H_0, H_1)$ image pair (2 channels, $64\times64$) for a single DTM scale.
-    Two constant coordinate channels ($x,y \in [-1,1]$) are concatenated on first,
-    so the conv stack can learn position-dependent features (birth/persistence
-    location, not just local texture). Three \texttt{Conv2d(k=3)--ReLU} blocks
-    (channel widths 32, 64, 128 by default) with \texttt{MaxPool2d}+\texttt{Dropout2d}
-    between them, then global average pooling and a linear layer down to an
-    \texttt{embedding\_dim}-size vector (one embedding per scale).
+    $(H_0, H_1)$ image pair — \texttt{in\_channels}$=2$, resolution $64\times64$ —
+    for a single DTM scale. Two constant coordinate channels ($x,y \in [-1,1]$)
+    are concatenated first, bringing the first \texttt{Conv2d}'s input to
+    $2+2=4$ channels. Three \texttt{Conv2d(k=3)--ReLU} blocks with
+    \texttt{conv\_channels}$=(32, 64, 128)$ (i.e.\ $4\to32\to64\to128$ channels),
+    \texttt{MaxPool2d}+\texttt{Dropout2d}($p=0.2$) between them, then global
+    average pooling ($128\times64\times64 \to 128$) and a final
+    \texttt{Linear(128, 64)} down to a fixed \texttt{embedding\_dim}$=64$ vector
+    — one 64-d embedding per scale.
   \item \textbf{Regression head} (\texttt{ParameterEstimator}): a plain MLP —
-    \texttt{Linear--ReLU--Dropout} $\times 2$ (hidden sizes 64, 32 by default),
-    then a final linear layer to the target dimension (2 for Matérn, 5 for nested
-    Thomas). Identical across every variant below.
-  \item \textbf{Extra scalar side-channel}: $\log N$ (point count) always;
-    optionally per-(dimension, scale) persistence entropy, concatenated onto the
-    fused embedding just before the head.
+    \texttt{Linear--ReLU--Dropout($p=0.1$)} $\times 2$ with
+    \texttt{head\_hidden\_dims}$=(64, 32)$, then a final linear layer to the
+    target dimension ($2$ for Matérn, $5$ for nested Thomas). Identical across
+    every variant below; only its \emph{input} width changes (see each
+    variant's head-input size below).
+  \item \textbf{Extra scalar side-channel}: $\log N$ (point count) always,
+    giving \texttt{n\_extra}$=1$ in every run in this report
+    (\texttt{include\_entropy: false} throughout); optionally, per-(dimension,
+    scale) persistence entropy would add more columns here if turned on.
+    Concatenated onto the fused embedding just before the head.
 \end{itemize}
 
-\subsection{\texttt{pi\_multik} --- flat-concatenation baseline}
+\subsection{\texttt{pi\_multik} --- flat-concatenation (late-fusion) baseline}
 \begin{itemize}
-  \item One \emph{shared-weight} \texttt{CoordConvPIEncoder} instance, applied to
-    every scale's $(H_0,H_1)$ pair independently (scales folded into the batch
-    dimension, so it is one conv-stack call per forward pass, not $K$ separate ones).
-  \item The $K$ resulting embeddings are concatenated flat
-    ($K \times \text{embedding\_dim}$) — order-blind fusion, no notion of scale
-    adjacency.
-  \item Concatenated with the scalar side-channel, then through the shared head.
-  \item Supersedes an older "early-fusion" design that stacked every scale into one
-    wide-channel input seen jointly by a single conv from layer 1; that version is
-    preserved (unused) in the codebase for reference only.
+  \item One \emph{shared-weight} \texttt{CoordConvPIEncoder} instance
+    (\texttt{embedding\_dim}$=64$, as above), applied to every scale's
+    $(H_0,H_1)$ pair independently (scales folded into the batch dimension, so
+    it is one conv-stack call per forward pass, not $K$ separate ones).
+  \item The $K$ resulting 64-d embeddings are concatenated flat into a single
+    $K\times64$ vector — order-blind fusion, no notion of scale adjacency. Head
+    input size is therefore $K\cdot64 + 1$: e.g.\ $193$ for the best nested-Thomas
+    model ($K=3$, $k\in\{5,10,15\}$), or $449$ for the full 7-scale union.
+  \item That $K\cdot64+1$ vector is what the shared head (above) actually
+    consumes.
+  \item \textbf{\texttt{pi\_multik\_earlyfusion}} is the sibling that instead
+    stacks every scale's channels together \emph{before} the first conv layer —
+    one \texttt{CoordConvPIEncoder} with \texttt{in\_channels}$=2K+2$ (e.g.\
+    $8$ for $K=3$, $16$ for $K=7$, including the $+2$ coordinate channels),
+    producing a single fixed $64$-d embedding regardless of $K$ (head input
+    $64+1=65$, \emph{not} $K$-dependent, unlike the late-fusion baseline above).
+    This was the original \texttt{pi\_multik} design; it is registered and
+    actively trained today as its own sibling method (Section~\ref{sec:results}
+    reports real 10-seed results for it, not just an architectural aside).
 \end{itemize}
 
 \subsection{\texttt{pi\_multik\_scaleconv} --- 1D conv fusion over the scale axis}
 \begin{itemize}
-  \item Identical data path and shared-weight encoder as \texttt{pi\_multik}.
-  \item Instead of flat concatenation, the $K$ embeddings are treated as an
-    \emph{ordered sequence} along the scale axis and passed through
-    \texttt{ScaleConvFusion}: two \texttt{Conv1d(k=3)} layers (with a per-channel
-    LayerNorm — chosen over BatchNorm because pooling statistics across a batch
-    \emph{and} a scale axis that spans fine-to-coarse DTM scales produced an erratic
-    validation loss at 7 scales), then global average-pooling over the scale axis
-    down to one fixed-size vector.
-  \item This is the only variant that mixes information \emph{across} adjacent
-    scales before pooling.
+  \item Identical data path and shared-weight encoder as \texttt{pi\_multik}
+    (same \texttt{embedding\_dim}$=64$ per-scale embeddings).
+  \item Instead of flat concatenation, the $K$ 64-d embeddings are treated as
+    an \emph{ordered sequence} $(K, 64)$ along the scale axis and passed
+    through \texttt{ScaleConvFusion}: \texttt{Conv1d}$(64\to\texttt{scale\_fusion\_hidden}{=}128,
+    k{=}3,\text{pad}{=}1)$, LayerNorm, ReLU, then
+    \texttt{Conv1d}$(128\to\texttt{scale\_fusion\_out\_dim}{=}128, k{=}3,\text{pad}{=}1)$,
+    LayerNorm, ReLU — the padding keeps the scale axis at length $K$ throughout —
+    then \texttt{AdaptiveAvgPool1d(1)} collapses it, giving a single fixed
+    $128$-d vector \emph{regardless of $K$}. Head input is therefore always
+    $128+1=129$, whether $K=3$ or $K=7$ — the only one of the four architectures
+    whose head-input size doesn't grow with the number of scales fused.
+  \item This is the only variant that both mixes information \emph{across}
+    adjacent scales (via the \texttt{Conv1d}) \emph{and} pools the scale axis
+    away afterward — \texttt{pi\_multik\_towers} (next) also mixes adjacent
+    scales the same way, but does not pool.
 \end{itemize}
 
 \subsection{\texttt{pi\_multik\_towers} --- independent per-scale encoders + tower fusion}
 \begin{itemize}
   \item Unlike the two variants above, each scale gets its \emph{own}
-    (non-shared-weight) \texttt{CoordConvPIEncoder} — $K$ independent "towers".
-  \item Embeddings are stacked into a sequence and passed through
-    \texttt{TowerConv} (same Conv1d + LayerNorm design as \texttt{ScaleConvFusion}),
-    but \textbf{without} pooling over the scale axis afterward — the per-scale
-    outputs are flattened and kept separate ($\text{out\_dim}\times K$), so
-    scale identity survives all the way to the head instead of being averaged away.
-  \item Strictly more parameters than the other two variants (separate encoder
-    weights per scale).
+    (non-shared-weight) \texttt{CoordConvPIEncoder} — $K$ independent "towers",
+    each still producing a $64$-d embedding, but from $K$ separate sets of
+    conv weights rather than one shared set.
+  \item Embeddings are stacked into a $(K, 64)$ sequence and passed through
+    \texttt{TowerConv} — the identical \texttt{Conv1d}$(64\to128\to128, k{=}3)$
+    + LayerNorm + ReLU recipe as \texttt{ScaleConvFusion} (own weights, not
+    shared with it), plus a \texttt{Dropout1d} — but \textbf{without} the final
+    pooling step: the $(128, K)$ output is flattened, not averaged, to
+    $\texttt{out\_dim}\times K = 128K$. Head input is therefore $128K+1$: $385$
+    for $K=3$ ($k\in\{5,10,15\}$), $897$ for $K=7$ — growing with $K$ exactly
+    the way \texttt{pi\_multik}'s does, just with a $128$-wide block per scale
+    instead of $64$.
+  \item Strictly more parameters than the other three variants: $K$ independent
+    encoders (rather than one shared or one merged-input encoder) \emph{and}
+    the largest head-input width of the four for $K>1$.
 \end{itemize}
 
 \subsection{\texttt{pi\_multik\_fusion} --- TDA + classical-statistics fusion}
 \begin{itemize}
   \item Adds a second branch replicating Vihrs (2022)'s own architecture: a
-    3-layer \texttt{Conv1d} stack over the centred Ripley $L(r)-r$ function,
-    fused by concatenation with the (flat-concat) \texttt{pi\_multik} image branch
-    and the scalar side-channel, before a shared head.
+    3-layer \texttt{Conv1d}$(1\to64\to64\to64, k{=}7)$ stack (with two
+    \texttt{MaxPool1d(5)}s) over the $513$-point centred Ripley $L(r)-r$
+    curve, flattened and passed through a \texttt{Linear} layer down to the
+    \emph{same} \texttt{embedding\_dim}$=64$ used everywhere else in this
+    report, so it can be concatenated on equal footing with the image branch.
+  \item Image branch is the plain \texttt{pi\_multik} flat-concat path verbatim
+    (shared-weight \texttt{CoordConvPIEncoder}, $K\times64$ output).
+  \item All three pieces concatenate into one head input:
+    $\underbrace{64}_{L(r)-r\text{ branch}} + \underbrace{K\cdot64}_{\text{image branch}} + \underbrace{1}_{\log N}$
+    — e.g.\ $64+192+1=257$ for $K=3$.
   \item Implemented and registered, but \textbf{not yet trained on the current
     Matérn / nested-Thomas datasets} (no \texttt{results/} for it under either
     process) — included here for architectural completeness only.
@@ -214,8 +254,16 @@ signal. \textbf{Matérn's 2-parameter task and nested Thomas's 5-parameter task 
 not on the same absolute scale} — compare trends \emph{within} a process, not raw
 numbers \emph{across} processes.
 
-\subsection{Single-scale DTM sweep (method: \texttt{pi\_multik})}
+\subsection{Channel-combination landscape}
+\label{sec:landscape}
 
+Dozens of channel (DTM-scale) combinations were tried; this is not all of them,
+just enough to see the shape of the landscape. Every row below uses the base
+\texttt{pi\_multik} architecture, so the comparison isolates \emph{which
+scale(s) feed the network} from \emph{which fusion architecture} combines them
+(that second axis is examined separately in Section~\ref{sec:bestvsvihrs}).
+
+\paragraph{Single DTM scale.}
 \begin{center}
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
@@ -234,87 +282,151 @@ numbers \emph{across} processes.
 \end{center}
 \emph{$n=3$ seeds per cell.}
 
-\textbf{Reading this table:} finer DTM scales (small $m$) win on both processes.
-Matérn is best at $m=0.01$, then plateaus over $m=0.04$--$0.20$ before a sharp
-drop-off at $m=0.90$ (density estimated over too large a neighborhood to resolve
-the hard-core spacing). Nested Thomas degrades more steadily as $m$ grows — a
-coarser DTM neighborhood increasingly blurs past the fine-cluster scale the
-persistence diagram is trying to resolve.
+\paragraph{Multi-scale unions, and the alternative fixed-$k$ sweep.}
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Channel set} & \textbf{$n$} & \textbf{Matérn} & \textbf{Nested Thomas} \\
+\midrule
+fine union $m\in\{0.01,0.02,0.04\}$              & 3  & 0.0193 $\pm$ 0.0012 & 0.5035 $\pm$ 0.0089 \\
+spread union $m\in\{0.01,0.10,0.90\}$            & 3  & 0.0250 $\pm$ 0.0030 & 0.5111 $\pm$ 0.0092 \\
+coarse union $m\in\{0.20,0.45,0.90\}$            & 3  & 0.0327 $\pm$ 0.0017 & 0.5430 $\pm$ 0.0135 \\
+5-scale union $m\in\{0.01,0.04,0.10,0.20,0.45\}$ & 3  & n/a & 0.5072 $\pm$ 0.0089 \\
+full 7-scale union (all swept $m$)               & 10 & 0.0222 $\pm$ 0.0025 & 0.5069 $\pm$ 0.0087 \\
+\midrule
+\textbf{fixed-$k$ sweep, $k\in\{5,10,15\}$}       & \textbf{10} & n/a & \textbf{0.5039 $\pm$ 0.0082} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\emph{All rows: method \texttt{pi\_multik}. "n/a" = not run for Matérn (its
+sweep covers only the single scales above plus the three mass-fraction unions
+shown). $k\in\{5,10,15\}$ is this repo's original, pre-mass-fraction DTM
+parameterization (fixed neighbor count rather than $m=k/N$ recomputed per
+cloud) — included here for nested Thomas since it predates, and is now
+directly comparable against, the $m$-based sweep.}
 
-\subsection{Multi-scale fusion vs.\ \texttt{vihrs}}
+\textbf{Reading this landscape:} finer DTM scales beat coarser ones, consistently,
+whether used alone or unioned together — Matérn is best at $m=0.01$, then
+plateaus over $m=0.04$--$0.20$ before a sharp drop-off at $m=0.90$; nested
+Thomas degrades more steadily as $m$ grows. \emph{Fusing multiple scales
+together does not clearly beat just using the single best fine scale}: every
+multi-scale union on nested Thomas lands in the same $0.503$--$0.507$ band
+regardless of how many, or which, coarser scales get added to it, and
+Matérn's full 7-scale union ($0.0222$) is actually slightly worse than its
+3-scale fine union ($0.0193$). The fixed-$k$ sweep lands squarely inside that
+same nested-Thomas band ($0.5039$) — switching from a fixed neighbor count to
+a mass-fraction parameterization of DTM scale doesn't change the picture once
+"fine scales" are in use either way. It also happens to be the most heavily
+seeded ($n=10$) nested-Thomas configuration and ties the lowest test loss found
+anywhere in the sweep, which is why it is used as \emph{the} best model in
+Section~\ref{sec:bestvsvihrs}.
 
-Headline comparison at the full 7-scale fused channel set
-($m\in\{0.01,0.02,0.04,0.10,0.20,0.45,0.90\}$, all three \texttt{pi\_multik}
-architectures), against the classical \texttt{vihrs} baseline (single seed;
-no TDA features at all):
+\subsection{Best model vs.\ \texttt{vihrs}}
+\label{sec:bestvsvihrs}
+
+\texttt{vihrs} has now been re-run on nested Thomas with 10 seeds (previously
+just 1); Matérn's \texttt{vihrs} is still a single seed. This turns out to
+matter a great deal.
+
+\paragraph{Nested Thomas.} Best-model channel set: the fixed-$k$ sweep
+($k\in\{5,10,15\}$, Section~\ref{sec:landscape}), all four \texttt{pi\_multik}
+architectures at $n=10$ — matched exactly to \texttt{vihrs}'s own $n=10$:
 
 \begin{center}
-\begin{tabular}{@{}llrrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
-\textbf{Process} & \textbf{Method} & \textbf{$n$ seeds} & \textbf{test loss} & \textbf{adv.\ loss} \\
+\textbf{Method} & \textbf{$n$} & \textbf{test loss} & \textbf{adv.\ loss} \\
 \midrule
-\multirow{4}{*}{Matérn}
- & \texttt{pi\_multik}            & 10 & 0.0222 $\pm$ 0.0025 & 0.0210 $\pm$ 0.0026 \\
- & \texttt{pi\_multik\_scaleconv} & 10 & 0.0196 $\pm$ 0.0025 & 0.0183 $\pm$ 0.0023 \\
- & \texttt{pi\_multik\_towers}    & 10 & 0.0242 $\pm$ 0.0023 & 0.0227 $\pm$ 0.0030 \\
- & \texttt{vihrs}                 & 1  & \textbf{0.0141} & \textbf{0.0131} \\
-\midrule
-\multirow{4}{*}{Nested Thomas}
- & \texttt{pi\_multik}            & 3 & 0.5069 $\pm$ 0.0087 & 0.4981 $\pm$ 0.0017 \\
- & \texttt{pi\_multik\_scaleconv} & 3 & 0.5047 $\pm$ 0.0073 & 0.4945 $\pm$ 0.0029 \\
- & \texttt{pi\_multik\_towers}    & 3 & 0.5284 $\pm$ 0.0052 & 0.5195 $\pm$ 0.0043 \\
- & \texttt{vihrs}                 & 1 & \textbf{0.5020} & 0.5134 \\
+\texttt{pi\_multik}              & 10 & \textbf{0.5039 $\pm$ 0.0082} & \textbf{0.4890 $\pm$ 0.0029} \\
+\texttt{pi\_multik\_scaleconv}   & 10 & 0.5046 $\pm$ 0.0056 & 0.4930 $\pm$ 0.0016 \\
+\texttt{pi\_multik\_earlyfusion} & 10 & 0.5058 $\pm$ 0.0053 & 0.4913 $\pm$ 0.0021 \\
+\texttt{pi\_multik\_towers}      & 10 & 0.5139 $\pm$ 0.0070 & 0.4993 $\pm$ 0.0041 \\
+\texttt{vihrs}                   & 10 & 0.5224 $\pm$ 0.0108 & 0.5149 $\pm$ 0.0034 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{This is the headline finding to flag to advisors:} on both processes,
-the simple classical-statistics baseline (\texttt{vihrs}, $L(r)-r$ + $N$, no
-persistence diagrams) matches or beats every \texttt{pi\_multik} multi-scale TDA
-variant on this standardized loss — clearly on Matérn (0.0141 vs.\ best
-0.0196), and by a smaller margin on nested Thomas (0.5020 vs.\ best 0.5047).
-Two caveats temper this: \texttt{vihrs} here is a single seed vs.\ 3--10 seeds
-for \texttt{pi\_multik}, and the best \emph{single-scale} \texttt{pi\_multik}
-result (Table above, $m=0.01$, or the best restricted multi-scale combination —
-e.g.\ $m\in\{0.01,0.02,0.04\}$ with \texttt{pi\_multik\_scaleconv} reaches
-$0.0185 \pm 0.0006$ on Matérn) is closer to \texttt{vihrs} than the full 7-scale
-fusion is — \textbf{adding more, coarser scales to the fusion does not clearly
-help, and on this data mildly hurts.} \texttt{pi\_multik\_scaleconv} is
-consistently the strongest of the three TDA architectures; \texttt{pi\_multik\_towers}
-(independent per-scale weights) is consistently the weakest, on both processes.
+With both sides now at $n=10$, \textbf{every \texttt{pi\_multik} architecture
+clearly beats \texttt{vihrs}} on nested Thomas — the gap between the best TDA
+model and \texttt{vihrs} ($\approx 0.019$) is now bigger than either side's
+standard deviation, unlike the earlier single-seed comparison.
+\textbf{This reverses the previous version of this report's headline finding
+for nested Thomas}, which had a single-seed \texttt{vihrs} ($0.5020$) looking
+competitive with \texttt{pi\_multik} — that was an artifact of an unusually
+lucky \texttt{vihrs} seed; the 10-seed mean ($0.5224$) is clearly worse than
+every TDA variant tried. Plain \texttt{pi\_multik} (flat-concat late fusion) is,
+somewhat surprisingly, the strongest of the four architectures at this channel
+set — none of the fancier fusion mechanisms (scale-aware convolution, early
+fusion, independent per-scale towers) improve on it here.
 
-\subsection{Per-target breakdown (7-scale fusion vs.\ \texttt{vihrs})}
+\paragraph{Matérn.} \texttt{vihrs} has \emph{not} been re-run with multiple
+seeds on Matérn this round, so this comparison still rests on a single seed —
+given what just happened on nested Thomas, \textbf{treat this as provisional,
+not confirmed}. Best-model channel set: the full 7-scale union (most heavily
+seeded, $n=10$; a 3-scale fine union reaches a nominally lower
+$0.0185\pm0.0006$ but only at $n=3$, statistically indistinguishable from the
+$n=10$ result below):
+
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Method} & \textbf{$n$} & \textbf{test loss} & \textbf{adv.\ loss} \\
+\midrule
+\texttt{pi\_multik}            & 10 & 0.0222 $\pm$ 0.0025 & 0.0210 $\pm$ 0.0026 \\
+\texttt{pi\_multik\_scaleconv} & 10 & \textbf{0.0196 $\pm$ 0.0025} & \textbf{0.0183 $\pm$ 0.0023} \\
+\texttt{pi\_multik\_towers}    & 10 & 0.0242 $\pm$ 0.0023 & 0.0227 $\pm$ 0.0030 \\
+\texttt{vihrs} (1 seed only)   & 1  & 0.0141 & 0.0131 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Taken at face value, \texttt{vihrs} still looks ahead on Matérn — but the
+nested-Thomas result directly above demonstrates that a single \texttt{vihrs}
+seed is not a reliable estimate of its true mean (there, the lucky-seed-vs.\
+10-seed-mean gap was $\approx 0.02$, comparable in size to the entire gap being
+reported here for Matérn). \textbf{Recommended next step: re-run \texttt{vihrs}
+on Matérn with the same 10-seed protocol before drawing any conclusion about
+which approach actually wins there.}
+
+\subsection{Per-target breakdown (best model vs.\ \texttt{vihrs})}
 
 \begin{center}
 \begin{tabular}{@{}llrr@{}}
 \toprule
-\textbf{Process} & \textbf{Target} & \texttt{pi\_multik\_scaleconv} & \texttt{vihrs} \\
+\textbf{Process} & \textbf{Target} & \textbf{best \texttt{pi\_multik} model} & \texttt{vihrs} \\
 \midrule
-\multirow{2}{*}{Matérn}
+\multirow{2}{*}{Matérn (\texttt{scaleconv}, 7-scale; $n{=}10$ vs.\ $n{=}1$)}
  & \texttt{parent\_intensity} & 0.0193 & 0.0159 \\
  & \texttt{hardcore\_radius}  & 0.0198 & 0.0123 \\
 \midrule
-\multirow{5}{*}{Nested Thomas}
- & \texttt{parent\_intensity} (meta-layer density) & 0.8637 & 0.8545 \\
- & \texttt{meta\_offspring}      & 0.8506 & 0.8378 \\
- & \texttt{meta\_cluster\_scale} & 0.5348 & 0.5147 \\
- & \texttt{mean\_offspring}      & 0.2297 & 0.2641 \\
- & \texttt{cluster\_scale}       & 0.0446 & 0.0390 \\
+\multirow{5}{*}{Nested Thomas (\texttt{pi\_multik}, $k{\in}\{5,10,15\}$; $n{=}10$ vs.\ $n{=}10$)}
+ & \texttt{parent\_intensity} (meta-layer density) & 0.8745 & 0.8765 \\
+ & \texttt{meta\_offspring}      & 0.8584 & 0.8600 \\
+ & \texttt{meta\_cluster\_scale} & 0.5356 & 0.5607 \\
+ & \texttt{mean\_offspring}      & 0.2147 & 0.2754 \\
+ & \texttt{cluster\_scale}       & 0.0364 & 0.0395 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{Notable pattern for nested Thomas:} both methods estimate the
-\emph{fine}-layer parameters (\texttt{cluster\_scale}, \texttt{mean\_offspring})
-well (loss $\ll 1$) but struggle badly on the \emph{meta}-layer / coarse
-parameters (\texttt{parent\_intensity}, \texttt{meta\_offspring} — loss
-$\approx 0.85$, barely better than predicting the mean). This is consistent
-across every \texttt{pi\_multik} variant and \texttt{vihrs} alike, and lines up
-with Section~5.1's finding that \emph{coarser} DTM scales don't help: the
-persistence-image / $L(r)-r$ feature sets both seem to carry much more signal
-about the fine (sub-cluster) scale than about the coarse (meta-cluster) scale
-of this two-level process, on the current sweep of DTM scales and $L(r)-r$'s
-fixed $r_{\max}=0.25$ window.
+\textbf{Notable pattern for nested Thomas, now clearer with matched seed
+counts:} on the two \emph{meta}-layer / coarse parameters
+(\texttt{parent\_intensity}, \texttt{meta\_offspring}), \texttt{pi\_multik} and
+\texttt{vihrs} are statistically indistinguishable ($0.86$--$0.88$ for both, on
+both targets) — neither the TDA feature set nor the classical $L(r)-r$ feature
+set is extracting much signal about the coarse scale of this two-level
+process. On the \emph{fine}-layer / geometric parameters
+(\texttt{meta\_cluster\_scale}, \texttt{mean\_offspring},
+\texttt{cluster\_scale}), \texttt{pi\_multik} is consistently ahead of
+\texttt{vihrs}, most visibly on \texttt{mean\_offspring} ($0.21$ vs.\ $0.28$).
+Put together: \texttt{pi\_multik}'s overall advantage over the classical
+baseline (Section~\ref{sec:bestvsvihrs}) is concentrated specifically in the
+fine-scale/geometric targets, not a blanket improvement across every
+parameter — and the shared difficulty on the two coarse parameters looks more
+like a ceiling in the \emph{data or process design} (or in every feature set's
+ability to see the meta-scale at all, at the window sizes tried so far) than
+a model-architecture problem, since it shows up identically in two very
+different feature representations.
 
 \subsection{Note on the adaptive persistence-image sigma}
 \label{sec:sigma}

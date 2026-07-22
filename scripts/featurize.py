@@ -32,6 +32,7 @@ from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
 from cloudforger.filtration.base import Filtration
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
 from cloudforger.vectorizers.calibrated import build_calibrated_imager
+from cloudforger.vectorizers.persistence_image import DEFAULT_SIGMA_PIXELS
 
 
 def _compute_diagrams(clouds_records: list[dict], filtration: Filtration, tag: str) -> list:
@@ -117,8 +118,7 @@ def _compute_persistence_image(
         train_diagrams,
         homology_dims=homology_dims,
         resolution=int(feat_cfg.params.get("resolution", 64)),
-        sigma_frac=float(feat_cfg.params.get("sigma_frac", 0.1)),
-        sigma_stat=str(feat_cfg.params.get("sigma_stat", "median")),
+        sigma_pixels=float(feat_cfg.params.get("sigma_pixels", DEFAULT_SIGMA_PIXELS)),
     )
 
     def _payload(diagrams: list, bundle: dict) -> dict:

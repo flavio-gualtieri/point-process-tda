@@ -34,8 +34,9 @@ filtration:
 
 features:
   - name: persistence_image
-    params: {resolution: 64, sigma_frac: 0.1, sigma_stat: "median", homology_dims: [0, 1]}
-    # sigma_frac: Gaussian kernel width, as a fraction of sigma_stat's per-diagram persistence spread
+    params: {resolution: 64, sigma_pixels: 2.0, homology_dims: [0, 1]}
+    # sigma_pixels: Gaussian kernel bandwidth, in pixels, shared by the birth and
+    # persistence axes -- provisional pending scripts/sweep_pi_sigma.py
 
 method:
   name: pi_multik

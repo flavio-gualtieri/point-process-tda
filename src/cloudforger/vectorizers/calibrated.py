@@ -10,15 +10,14 @@ from __future__ import annotations
 from ..core.calibration import axis_bounds, calibrate, calibrate_report
 from ..core.diagram import PersistenceDiagram
 from .multi_channel import MultiChannelImager
-from .persistence_image import PersistenceImager
+from .persistence_image import PersistenceImager, DEFAULT_SIGMA_PIXELS
 
 
 def build_calibrated_imager(
     diagrams: list[PersistenceDiagram],
     homology_dims: tuple[int, ...] = (0, 1),
     resolution: int = 128,
-    sigma_frac: float = 0.05,
-    sigma_stat: str = "median",
+    sigma_pixels: float = DEFAULT_SIGMA_PIXELS,
     verbose: bool = True,
 ) -> MultiChannelImager:
     if verbose:
@@ -32,10 +31,12 @@ def build_calibrated_imager(
             birth_range=(0.0, birth_hi),
             pers_range=(0.0, pers_hi),
             resolution=resolution,
-            sigma_frac=sigma_frac,
-            sigma_stat=sigma_stat,
+            sigma_pixels=sigma_pixels,
         )
         if verbose:
-            print(f"  [pi] dim={dim}: birth_range=(0.0, {birth_hi:.4f}) pers_range=(0.0, {pers_hi:.4f})")
+            print(
+                f"  [pi] dim={dim}: birth_range=(0.0, {birth_hi:.4f}) "
+                f"pers_range=(0.0, {pers_hi:.4f}) sigma_pixels={sigma_pixels:g}"
+            )
 
     return MultiChannelImager(imagers)
