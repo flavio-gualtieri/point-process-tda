@@ -1,0 +1,356 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{longtable}
+\usepackage{parskip}
+
+\definecolor{linknavy}{HTML}{2a4d8f}
+\hypersetup{colorlinks=true, linkcolor=linknavy, urlcolor=linknavy, citecolor=linknavy}
+
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.6em}{}
+
+\setlist[itemize]{topsep=2pt, itemsep=2pt, parsep=0pt}
+
+\title{\texorpdfstring{\texttt{pi\_multik}}{pi\_multik}: Multi-Scale Persistence-Image Regression\\
+\large Model Architectures, Data Pipeline, and Matérn / Nested-Thomas Comparisons}
+\author{point-process-tda}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-2em}
+
+\tableofcontents
+
+\section{Pipeline overview}
+
+Every model in this report solves the same task: given a 2D point cloud sampled from a
+stochastic point process, estimate the generative parameters that produced it (a
+regression problem, not classification). The shared pipeline is:
+
+\begin{enumerate}
+\item \textbf{Sample} a point cloud from a process (Matérn hard-core, nested Thomas, \ldots)
+  over the unit square.
+\item \textbf{Filter} the cloud through a Distance-to-Measure (DTM) weighted-Rips
+  filtration, at one or more density scales, producing a persistence diagram
+  ($H_0$ + $H_1$ birth--death pairs) per scale.
+\item \textbf{Vectorize} each diagram into a persistence image (PI): a fixed-size
+  raster in (birth, persistence) coordinates, built by summing a Gaussian kernel at
+  each off-diagonal point.
+\item \textbf{Regress} the process parameters from the stacked per-scale PIs (plus a
+  couple of scalar side-features) with a CNN, trained with MSE loss in
+  standardized (log-z-score) target space.
+\end{enumerate}
+
+The \texttt{pi\_multik} family (Section~\ref{sec:architectures}) is this repo's
+name for the family of architectures that fuse \emph{several DTM scales at once}
+per cloud, as opposed to using a single scale in isolation.
+
+\section{Model architectures}
+\label{sec:architectures}
+
+All variants share the same encoder building block and the same MLP regression
+head; they differ only in \emph{how the per-scale embeddings are fused}.
+
+\subsection{Shared building blocks}
+\begin{itemize}
+  \item \textbf{CoordConv PI encoder} (\texttt{CoordConvPIEncoder}): input is one
+    $(H_0, H_1)$ image pair (2 channels, $64\times64$) for a single DTM scale.
+    Two constant coordinate channels ($x,y \in [-1,1]$) are concatenated on first,
+    so the conv stack can learn position-dependent features (birth/persistence
+    location, not just local texture). Three \texttt{Conv2d(k=3)--ReLU} blocks
+    (channel widths 32, 64, 128 by default) with \texttt{MaxPool2d}+\texttt{Dropout2d}
+    between them, then global average pooling and a linear layer down to an
+    \texttt{embedding\_dim}-size vector (one embedding per scale).
+  \item \textbf{Regression head} (\texttt{ParameterEstimator}): a plain MLP —
+    \texttt{Linear--ReLU--Dropout} $\times 2$ (hidden sizes 64, 32 by default),
+    then a final linear layer to the target dimension (2 for Matérn, 5 for nested
+    Thomas). Identical across every variant below.
+  \item \textbf{Extra scalar side-channel}: $\log N$ (point count) always;
+    optionally per-(dimension, scale) persistence entropy, concatenated onto the
+    fused embedding just before the head.
+\end{itemize}
+
+\subsection{\texttt{pi\_multik} --- flat-concatenation baseline}
+\begin{itemize}
+  \item One \emph{shared-weight} \texttt{CoordConvPIEncoder} instance, applied to
+    every scale's $(H_0,H_1)$ pair independently (scales folded into the batch
+    dimension, so it is one conv-stack call per forward pass, not $K$ separate ones).
+  \item The $K$ resulting embeddings are concatenated flat
+    ($K \times \text{embedding\_dim}$) — order-blind fusion, no notion of scale
+    adjacency.
+  \item Concatenated with the scalar side-channel, then through the shared head.
+  \item Supersedes an older "early-fusion" design that stacked every scale into one
+    wide-channel input seen jointly by a single conv from layer 1; that version is
+    preserved (unused) in the codebase for reference only.
+\end{itemize}
+
+\subsection{\texttt{pi\_multik\_scaleconv} --- 1D conv fusion over the scale axis}
+\begin{itemize}
+  \item Identical data path and shared-weight encoder as \texttt{pi\_multik}.
+  \item Instead of flat concatenation, the $K$ embeddings are treated as an
+    \emph{ordered sequence} along the scale axis and passed through
+    \texttt{ScaleConvFusion}: two \texttt{Conv1d(k=3)} layers (with a per-channel
+    LayerNorm — chosen over BatchNorm because pooling statistics across a batch
+    \emph{and} a scale axis that spans fine-to-coarse DTM scales produced an erratic
+    validation loss at 7 scales), then global average-pooling over the scale axis
+    down to one fixed-size vector.
+  \item This is the only variant that mixes information \emph{across} adjacent
+    scales before pooling.
+\end{itemize}
+
+\subsection{\texttt{pi\_multik\_towers} --- independent per-scale encoders + tower fusion}
+\begin{itemize}
+  \item Unlike the two variants above, each scale gets its \emph{own}
+    (non-shared-weight) \texttt{CoordConvPIEncoder} — $K$ independent "towers".
+  \item Embeddings are stacked into a sequence and passed through
+    \texttt{TowerConv} (same Conv1d + LayerNorm design as \texttt{ScaleConvFusion}),
+    but \textbf{without} pooling over the scale axis afterward — the per-scale
+    outputs are flattened and kept separate ($\text{out\_dim}\times K$), so
+    scale identity survives all the way to the head instead of being averaged away.
+  \item Strictly more parameters than the other two variants (separate encoder
+    weights per scale).
+\end{itemize}
+
+\subsection{\texttt{pi\_multik\_fusion} --- TDA + classical-statistics fusion}
+\begin{itemize}
+  \item Adds a second branch replicating Vihrs (2022)'s own architecture: a
+    3-layer \texttt{Conv1d} stack over the centred Ripley $L(r)-r$ function,
+    fused by concatenation with the (flat-concat) \texttt{pi\_multik} image branch
+    and the scalar side-channel, before a shared head.
+  \item Implemented and registered, but \textbf{not yet trained on the current
+    Matérn / nested-Thomas datasets} (no \texttt{results/} for it under either
+    process) — included here for architectural completeness only.
+\end{itemize}
+
+\subsection{\texttt{vihrs} --- classical-statistics baseline (not a \texttt{pi\_multik} variant)}
+\begin{itemize}
+  \item Independent re-implementation of Vihrs (2022): a single-scale
+    \texttt{Conv1d} CNN over the isotropic-edge-corrected $L(r)-r$ curve
+    (513 points, $r_{\max}=0.25$) concatenated with $\log N$, no persistence
+    diagrams or TDA features at all.
+  \item Used throughout this report purely as an external reference point — "does
+    the TDA machinery beat a much simpler classical-statistics feature set?"
+\end{itemize}
+
+\section{How the data is used}
+
+\begin{itemize}
+  \item \textbf{Input cloud}: 2D points in $[0,1]^2$, $N$ ranging from tens to
+    roughly a thousand depending on the process and sampled parameters.
+  \item \textbf{DTM scale}: parameterized by a \emph{mass fraction} $m \in (0,1]$
+    rather than a fixed neighbor count $k$, because a fixed $k$ means a very
+    different fraction of each cloud once $N$ varies across the parameter sweep.
+    Per cloud, $k = \mathrm{round}(m \cdot N)$ is recomputed from its own $N$, so
+    the same $m$ means "the same relative neighborhood size" for every cloud
+    regardless of point count. The swept grid used throughout this report is
+    $m \in \{0.01, 0.02, 0.04, 0.10, 0.20, 0.45, 0.90\}$ — fine (small, local,
+    noise-sensitive neighborhoods) to coarse (large, smoothed, near-parent-scale
+    neighborhoods).
+  \item \textbf{Persistence image}: $64\times64$ raster per (scale, homology
+    dimension); axis bounds (birth/persistence range) are calibrated once from
+    percentiles of the \emph{training} diagrams' own distribution (95th/99.9th),
+    not hand-picked. Gaussian kernel width $\sigma$ is set \emph{per diagram}
+    (\texttt{sigma\_frac}$\times$ the diagram's own median off-diagonal
+    persistence), floored at 1 pixel — see Section~\ref{sec:sigma} for a
+    caveat on how often that floor actually binds.
+  \item \textbf{Channel stacking across scales}: per-scale PI pairs are aligned by
+    cloud seed and intersected (a diagram can be empty and get filtered out at one
+    scale but not another) before being stacked into the $(N, K, 2, 64, 64)$ tensor
+    the network consumes.
+  \item \textbf{Targets}: the process's own generative parameters — 2 for Matérn
+    (\texttt{parent\_intensity}, \texttt{hardcore\_radius}), 5 for nested Thomas
+    (\texttt{parent\_intensity} [meta-layer density], \texttt{meta\_offspring},
+    \texttt{meta\_cluster\_scale}, \texttt{mean\_offspring}, \texttt{cluster\_scale}).
+    All are log-transformed then z-scored, with the transform fit on the training
+    split only and frozen for val/test/adversarial.
+  \item \textbf{Splits}: 70/15/15 train/val/test (seeded per run), plus a separate
+    \emph{frozen adversarial} 12.5\% hold-out whose underlying parameter vectors
+    never appear in train/test at all (not just different noise realizations) —
+    it tests generalization to unseen parameter combinations, not memorization.
+\end{itemize}
+
+\section{Key hyperparameters}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Hyperparameter} & \textbf{Role / value used here} \\
+\midrule
+DTM scale grid ($m$ values) & the single most consequential knob — see Section~\ref{sec:results} \\
+Homology dimensions & $H_0$, $H_1$ (both used everywhere in this report) \\
+PI resolution & $64 \times 64$ \\
+\texttt{sigma\_frac} / \texttt{sigma\_stat} & $0.1$ / \texttt{median} — adaptive kernel width factor \\
+\texttt{min\_sigma\_pixels} & $1.0$ (floor on kernel width, in pixel units) \\
+\texttt{embedding\_dim} & 64 (per-scale CoordConv embedding size) \\
+\texttt{conv\_channels} & $(32, 64, 128)$ \\
+\texttt{scale\_fusion\_hidden} / \texttt{out\_dim} & 128 / 128 (scaleconv, towers) \\
+\texttt{scale\_fusion\_kernel\_size} & 3 \\
+Head \texttt{hidden\_dims} / dropout & $(64, 32)$ / $0.1$ \\
+Batch size & 32 \\
+Optimizer & Adam, $\text{lr}=10^{-3}$, weight decay $10^{-4}$ \\
+Max epochs / early-stop patience & 500 / 30 (no val-loss improvement) \\
+Seeds & up to 10 per configuration (see per-table $n$) \\
+Train/val/test split & 70/15/15 \\
+Adversarial hold-out & 12.5\% of parameter vectors, disjoint from train/test \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Results: Matérn vs. Nested Thomas (vs.\ \texttt{vihrs})}
+\label{sec:results}
+
+Loss is MSE in standardized (log-z-score) target space, averaged over targets —
+$1.0$ is roughly what predicting the training mean would score, so lower is
+better and values noticeably below 1 indicate the model is extracting real
+signal. \textbf{Matérn's 2-parameter task and nested Thomas's 5-parameter task are
+not on the same absolute scale} — compare trends \emph{within} a process, not raw
+numbers \emph{across} processes.
+
+\subsection{Single-scale DTM sweep (method: \texttt{pi\_multik})}
+
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{\textbf{Matérn}} & \multicolumn{2}{c}{\textbf{Nested Thomas}} \\
+\textbf{DTM scale $m$} & test loss & adv.\ loss & test loss & adv.\ loss \\
+\midrule
+0.01 & 0.0220 $\pm$ 0.0021 & 0.0207 $\pm$ 0.0025 & 0.5152 $\pm$ 0.0095 & 0.5053 $\pm$ 0.0020 \\
+0.02 & 0.0266 $\pm$ 0.0013 & 0.0281 $\pm$ 0.0005 & 0.5126 $\pm$ 0.0086 & 0.5037 $\pm$ 0.0011 \\
+0.04 & 0.0359 $\pm$ 0.0039 & 0.0342 $\pm$ 0.0013 & 0.5217 $\pm$ 0.0071 & 0.5088 $\pm$ 0.0006 \\
+0.10 & 0.0363 $\pm$ 0.0016 & 0.0326 $\pm$ 0.0013 & 0.5334 $\pm$ 0.0069 & 0.5239 $\pm$ 0.0004 \\
+0.20 & 0.0359 $\pm$ 0.0012 & 0.0336 $\pm$ 0.0015 & 0.5460 $\pm$ 0.0108 & 0.5344 $\pm$ 0.0015 \\
+0.45 & 0.0387 $\pm$ 0.0016 & 0.0367 $\pm$ 0.0005 & 0.5981 $\pm$ 0.0102 & 0.5852 $\pm$ 0.0016 \\
+0.90 & 0.0658 $\pm$ 0.0012 & 0.0611 $\pm$ 0.0009 & 0.6307 $\pm$ 0.0051 & 0.6218 $\pm$ 0.0041 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\emph{$n=3$ seeds per cell.}
+
+\textbf{Reading this table:} finer DTM scales (small $m$) win on both processes.
+Matérn is best at $m=0.01$, then plateaus over $m=0.04$--$0.20$ before a sharp
+drop-off at $m=0.90$ (density estimated over too large a neighborhood to resolve
+the hard-core spacing). Nested Thomas degrades more steadily as $m$ grows — a
+coarser DTM neighborhood increasingly blurs past the fine-cluster scale the
+persistence diagram is trying to resolve.
+
+\subsection{Multi-scale fusion vs.\ \texttt{vihrs}}
+
+Headline comparison at the full 7-scale fused channel set
+($m\in\{0.01,0.02,0.04,0.10,0.20,0.45,0.90\}$, all three \texttt{pi\_multik}
+architectures), against the classical \texttt{vihrs} baseline (single seed;
+no TDA features at all):
+
+\begin{center}
+\begin{tabular}{@{}llrrr@{}}
+\toprule
+\textbf{Process} & \textbf{Method} & \textbf{$n$ seeds} & \textbf{test loss} & \textbf{adv.\ loss} \\
+\midrule
+\multirow{4}{*}{Matérn}
+ & \texttt{pi\_multik}            & 10 & 0.0222 $\pm$ 0.0025 & 0.0210 $\pm$ 0.0026 \\
+ & \texttt{pi\_multik\_scaleconv} & 10 & 0.0196 $\pm$ 0.0025 & 0.0183 $\pm$ 0.0023 \\
+ & \texttt{pi\_multik\_towers}    & 10 & 0.0242 $\pm$ 0.0023 & 0.0227 $\pm$ 0.0030 \\
+ & \texttt{vihrs}                 & 1  & \textbf{0.0141} & \textbf{0.0131} \\
+\midrule
+\multirow{4}{*}{Nested Thomas}
+ & \texttt{pi\_multik}            & 3 & 0.5069 $\pm$ 0.0087 & 0.4981 $\pm$ 0.0017 \\
+ & \texttt{pi\_multik\_scaleconv} & 3 & 0.5047 $\pm$ 0.0073 & 0.4945 $\pm$ 0.0029 \\
+ & \texttt{pi\_multik\_towers}    & 3 & 0.5284 $\pm$ 0.0052 & 0.5195 $\pm$ 0.0043 \\
+ & \texttt{vihrs}                 & 1 & \textbf{0.5020} & 0.5134 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{This is the headline finding to flag to advisors:} on both processes,
+the simple classical-statistics baseline (\texttt{vihrs}, $L(r)-r$ + $N$, no
+persistence diagrams) matches or beats every \texttt{pi\_multik} multi-scale TDA
+variant on this standardized loss — clearly on Matérn (0.0141 vs.\ best
+0.0196), and by a smaller margin on nested Thomas (0.5020 vs.\ best 0.5047).
+Two caveats temper this: \texttt{vihrs} here is a single seed vs.\ 3--10 seeds
+for \texttt{pi\_multik}, and the best \emph{single-scale} \texttt{pi\_multik}
+result (Table above, $m=0.01$, or the best restricted multi-scale combination —
+e.g.\ $m\in\{0.01,0.02,0.04\}$ with \texttt{pi\_multik\_scaleconv} reaches
+$0.0185 \pm 0.0006$ on Matérn) is closer to \texttt{vihrs} than the full 7-scale
+fusion is — \textbf{adding more, coarser scales to the fusion does not clearly
+help, and on this data mildly hurts.} \texttt{pi\_multik\_scaleconv} is
+consistently the strongest of the three TDA architectures; \texttt{pi\_multik\_towers}
+(independent per-scale weights) is consistently the weakest, on both processes.
+
+\subsection{Per-target breakdown (7-scale fusion vs.\ \texttt{vihrs})}
+
+\begin{center}
+\begin{tabular}{@{}llrr@{}}
+\toprule
+\textbf{Process} & \textbf{Target} & \texttt{pi\_multik\_scaleconv} & \texttt{vihrs} \\
+\midrule
+\multirow{2}{*}{Matérn}
+ & \texttt{parent\_intensity} & 0.0193 & 0.0159 \\
+ & \texttt{hardcore\_radius}  & 0.0198 & 0.0123 \\
+\midrule
+\multirow{5}{*}{Nested Thomas}
+ & \texttt{parent\_intensity} (meta-layer density) & 0.8637 & 0.8545 \\
+ & \texttt{meta\_offspring}      & 0.8506 & 0.8378 \\
+ & \texttt{meta\_cluster\_scale} & 0.5348 & 0.5147 \\
+ & \texttt{mean\_offspring}      & 0.2297 & 0.2641 \\
+ & \texttt{cluster\_scale}       & 0.0446 & 0.0390 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Notable pattern for nested Thomas:} both methods estimate the
+\emph{fine}-layer parameters (\texttt{cluster\_scale}, \texttt{mean\_offspring})
+well (loss $\ll 1$) but struggle badly on the \emph{meta}-layer / coarse
+parameters (\texttt{parent\_intensity}, \texttt{meta\_offspring} — loss
+$\approx 0.85$, barely better than predicting the mean). This is consistent
+across every \texttt{pi\_multik} variant and \texttt{vihrs} alike, and lines up
+with Section~5.1's finding that \emph{coarser} DTM scales don't help: the
+persistence-image / $L(r)-r$ feature sets both seem to carry much more signal
+about the fine (sub-cluster) scale than about the coarse (meta-cluster) scale
+of this two-level process, on the current sweep of DTM scales and $L(r)-r$'s
+fixed $r_{\max}=0.25$ window.
+
+\subsection{Note on the adaptive persistence-image sigma}
+\label{sec:sigma}
+
+The per-diagram adaptive $\sigma$ (Section~3) is meant to replace a single
+hand-picked kernel width. Empirically (checked on nested Thomas, $m=0.10$): for
+$H_0$, the 1-pixel floor binds for essentially \emph{every} diagram at the
+current resolution (64) and \texttt{sigma\_frac} (0.1) — i.e.\ $\sigma$ is
+already at its floor almost everywhere, so it is not meaningfully "adaptive" for
+$H_0$ on this data. For $H_1$, the floor binds $\approx$99.7\% of the time, with
+adaptivity only engaging on the long tail of unusually high-persistence-spread
+diagrams (see \texttt{figures/pi\_adaptive\_sigma\_comparison.png}). Worth
+raising with advisors: the current \texttt{sigma\_frac}/resolution combination
+means the adaptive mechanism is doing real work only on a small minority of
+clouds — a smaller \texttt{min\_sigma\_pixels} floor or a higher resolution would
+let it engage more broadly, if that's judged worth revisiting.
+
+\section{Figures prepared for the presentation}
+
+Four standalone PNGs are in \texttt{docs/figures/}, generated directly from this
+repo's own data/pipeline code (not mockups):
+
+\begin{itemize}
+  \item \textbf{\texttt{nested\_thomas\_example.png}} --- one realized nested
+    Thomas cloud (an actual dataset cloud, not synthetic), points colored by
+    meta-cluster, with a zoomed inset on one meta-cluster showing its fine
+    sub-clusters.
+  \item \textbf{\texttt{persistence\_diagram\_example.png}} --- the $H_0$/$H_1$
+    DTM persistence diagram ($m=0.10$) for that same cloud.
+  \item \textbf{\texttt{persistence\_images\_multiscale.png}} --- that same
+    cloud's persistence images across all 7 swept DTM scales, $H_0$ and $H_1$,
+    showing the fine$\to$coarse progression.
+  \item \textbf{\texttt{pi\_adaptive\_sigma\_comparison.png}} --- at one fixed
+    DTM scale, fixed vs.\ adaptive $\sigma$ side by side on three clouds spanning
+    the adaptive-$\sigma$ range, illustrating Section~\ref{sec:sigma}'s finding
+    directly.
+\end{itemize}
+
+\end{document}
