@@ -1,0 +1,74 @@
+# Matern (hard-core type II) -> mass-fraction DTM (7 scales, topo_superset)
+# -> per-scale tower encoders (TowerConv) -> pi_multik_towers regression.
+# Mirrors configs/runs/nested_thomas/nested_thomas_pi_multik_towers.yaml's
+# architecture/training hyperparameters verbatim (this repo had no
+# matern-specific tuning for the towers architecture yet); process/targets
+# and m_values mirror configs/runs/matern/matern_pi_multik_scale.yaml
+# instead, so all three matern multik methods (pi_multik via --set
+# method.name=pi_multik, pi_multik_scaleconv, pi_multik_towers here) train
+# on the identical 7-channel scale grid already featurized under
+# data/matern/topo_superset/.
+#
+# python scripts/train.py configs/runs/matern/matern_pi_multik_towers.yaml --seed 9371
+
+process:
+  name: matern
+  seed: 47
+  design:
+    mode: random
+    reps: 4
+    random:
+      n_param_vectors: 2000
+      ranges:
+        parent_intensity: {low: 100.0, high: 1000.0, scale: log}
+        hardcore_radius: {low: 0.012, high: 0.04,   scale: log}
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration: []
+
+features:
+  - name: persistence_image
+    params:
+      resolution: 64
+      sigma_frac: 0.1
+      sigma_stat: median
+      homology_dims: [0, 1]
+
+method:
+  name: pi_multik_towers
+  params:
+  # ============================== channels =================================
+    m_values: [0.01, 0.02, 0.04, 0.10, 0.20, 0.45, 0.90]
+    homology_dims: [0, 1]
+    include_entropy: false
+
+    # ========================= per-k encoder (shared) ========================
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+
+    # ============================ scale fusion ============================
+    scale_fusion_hidden: 128
+    scale_fusion_out_dim: 128
+    scale_fusion_kernel_size: 3
+
+    # ========================== regression head ============================
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    # ============================ optimization =============================
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 30
+    fusion_dropout: 0.2
+    scale_fusion_dropout: 0.1
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, hardcore_radius]
+log_label_names: [parent_intensity, hardcore_radius]
+use_adversarial: true
