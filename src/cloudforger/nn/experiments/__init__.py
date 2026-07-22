@@ -13,6 +13,7 @@ from .pi_multik import PIMultiKExperiment
 from .pi_multik_fusion import PIMultiKFusionExperiment
 from .pi_multik_scaleconv import PIMultiKScaleConvExperiment
 from .pi_multik_towers import PIMultiKTowersExperiment
+from .pi_multik_earlyfusion import PIMultiKEarlyFusionExperiment
 
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "PIMultiKFusionExperiment",
     "PIMultiKScaleConvExperiment",
     "PIMultiKTowersExperiment",
+    "PIMultiKEarlyFusionExperiment",
 ]
