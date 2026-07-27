@@ -17,7 +17,7 @@ def build_calibrated_betti_curves(
     weight_by_persistence: bool = False,
     range_pad: float = 1.1,
 ) -> dict[int, BettiCurve]:
-    stats = calibrate(diagrams)
+    stats = calibrate(diagrams=diagrams, homology_dims=homology_dims)
     betti_by_dim: dict[int, BettiCurve] = {}
     for dim in homology_dims:
         birth_hi, pers_hi = axis_bounds(stats, dim)

@@ -15,15 +15,20 @@ class CoordConvPIEncoder(Encoder):
         embedding_dim: int = 64,
         conv_channels: tuple[int, ...] = (32, 64, 128),
         dropout: float = 0.2,
+        pool_type: str = "max",
     ):
         super().__init__(embedding_dim=embedding_dim)
         layers: list[nn.Module] = []
         prev = in_channels + 2  # +2 for the coordinate channels appended in forward()
+        if pool_type == "max":
+            pooler = nn.MaxPool2d(2)
+        elif pool_type == "avg":
+            pooler = nn.AvgPool2d(2)
         for i, ch in enumerate(conv_channels):
             layers.append(nn.Conv2d(prev, ch, kernel_size=3, padding=1))
             layers.append(nn.ReLU())
             if i < len(conv_channels) - 1:
-                layers.append(nn.MaxPool2d(2))
+                layers.append(pooler)
                 layers.append(nn.Dropout2d(dropout))
             prev = ch
         layers.append(nn.AdaptiveAvgPool2d(1))

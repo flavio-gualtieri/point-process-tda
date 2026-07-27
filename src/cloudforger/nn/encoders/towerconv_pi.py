@@ -26,7 +26,7 @@ class TowerConv(Encoder):
         hidden: int = 128,
         out_dim: int = 128,
         kernel_size: int = 3,
-        dropout: float = 0.0,
+        dropout: float = 0.2,
     ):
         super().__init__(embedding_dim=(out_dim * n_k))
         padding = kernel_size // 2

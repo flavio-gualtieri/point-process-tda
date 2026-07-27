@@ -1,12 +1,11 @@
-# Nested Thomas -> DTM (k=5,10,15) persistence images -> pi_multik regression.
-# Data built separately via scripts/generate_nested_thomas_v2.py.
+# python scripts/train.py configs/runs/nested_thomas/nested_thomas_pi_multik.yaml --seed 9371
 
 process:
   name: nested_thomas
   seed: 0
   design:
     mode: random
-    reps: 4  # replicate draws per sampled param vector
+    reps: 4
     random:
       n_param_vectors: 2000
       ranges:
@@ -17,45 +16,56 @@ process:
         cluster_scale:         {low: 0.003, high: 0.008, scale: log}
   adversarial:
     enabled: true
-    fraction: 0.125       # share of clouds held out as the adversarial (OOD) split
-    seed_offset: 100000   # keeps adversarial cloud seeds disjoint from train/test
+    fraction: 0.125
+    seed_offset: 100000
 
-filtration:
-  - {name: dtm, params: {k: 5,  q: 2.0, maxdim: 1}}   # k = neighbors for the DTM density estimate
-  - {name: dtm, params: {k: 10, q: 2.0, maxdim: 1}}
-  - {name: dtm, params: {k: 15, q: 2.0, maxdim: 1}}
+filtration: []
 
 features:
   - name: persistence_image
-    params: {resolution: 64, sigma_pixels: 2.0, homology_dims: [0, 1]}
-    # sigma_pixels: Gaussian kernel bandwidth, in pixels, shared by the birth and
-    # persistence axes. 2.0 chosen from a speckle/component-count diagnostic
-    # sweep over the real dtm_k5/10/15 diagrams (0.25-6px): H1 stays heavily
-    # speckled (>0.9 top-1%-energy) below sigma=2, while H0 starts collapsing
-    # to a single blob for a growing share of diagrams above sigma=2-3 --
-    # this is the balance point. Not yet cross-checked against test_loss
-    # (scripts/sweep_pi_sigma.py, still to run).
+    params:
+      resolution: 64
+      sigma_pixels: 2.0
+      homology_dims: [0, 1]
+      pd_calibration_coverage: 0.99
 
 method:
   name: pi_multik
   params:
+  # ============================== channels =================================
+    m_values: [0.01, 0.04, 0.10, 0.20, 0.45]
+    homology_dims: [0, 1]
+    include_entropy: false
+
+    # ============================ normalization ============================
+    #   - each (m, homology_dim) persistence-image channel: independent
+    #     zscore, fit on this seed's TRAIN split only (raw PI pixels are
+    #     Gaussian-kernel sums with wildly different magnitude across scales).
+    #   - the extra side-vector (log N, and entropy columns if enabled
+    #     above): log-zscore for log N, plain zscore for entropy, both fit
+    #     on TRAIN only.
+    #   - targets: log-zscore, fit on TRAIN only; log_label_names below picks
+    #     which target columns get the log leg of that transform.
+    # All norms fit on train are reused frozen for val/test/adversarial.
+
+    # ========================= per-k encoder (shared) ========================
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    # ========================== regression head ============================
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    # ============================ optimization =============================
     batch_size: 32
     n_epochs: 500
     lr: 0.001
-    embedding_dim: 64
-    early_stopping_patience: 30  # stop after this many epochs with no val_loss improvement
-    # k_values auto-derived from the filtration list above; override to fuse a subset, e.g. k_values: [5, 15]
+    weight_decay: 0.0003
+    early_stopping_patience: 50
 
 seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
-target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]  # targets to regress
-log_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]     # subset of targets to log-transform before z-scoring
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
 use_adversarial: true
-
-# method.name above (pi_multik) is the flat-concat-across-k baseline.
-# pi_multik_scaleconv is a registered sibling method -- same data/config,
-# fuses the per-k embeddings with a Conv1d block over the ordered k axis
-# instead. Run it on this same YAML via an override, no new config needed:
-#   python scripts/train.py configs/runs/nested_thomas_pi_multik.yaml \
-#       --seed 9371 --set method.name=pi_multik_scaleconv
-# Results land in results/nested_thomas/dtm_k5-dtm_k10-dtm_k15/pi_multik_scaleconv/,
-# never touching the pi_multik/ baseline.

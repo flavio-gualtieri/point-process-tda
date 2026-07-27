@@ -221,6 +221,7 @@ class PIMultiK(nn.Module):
         scale_fusion_hidden: int = 128,
         scale_fusion_out_dim: int = 128,
         scale_fusion_kernel_size: int = 3,
+        pool_type: str = "max",
     ):
         super().__init__()
         self.n_k = n_k
@@ -228,6 +229,7 @@ class PIMultiK(nn.Module):
         self.encoder = CoordConvPIEncoder(
             in_channels=in_channels, embedding_dim=embedding_dim,
             conv_channels=conv_channels, dropout=dropout,
+            pool_type=pool_type,
         )
         if self.use_fusion:
             self.scale_fusion = ScaleConvFusion(
@@ -338,10 +340,10 @@ class PIMultiKExperiment(MultiSourceExperiment):
             scale_fusion_hidden=self.cfg.get("scale_fusion_hidden", 128),
             scale_fusion_out_dim=self.cfg.get("scale_fusion_out_dim", 128),
             scale_fusion_kernel_size=self.cfg.get("scale_fusion_kernel_size", 3),
+            pool_type=str(self.cfg.get("pool_type", "max"))
         ).to(device)
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=self.cfg["lr"], weight_decay=self.cfg.get("weight_decay", 1e-4),
-        )
+        optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
+        # optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
         loss_fn = nn.MSELoss()
 
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}

@@ -17,6 +17,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from cloudforger.provenance import append_ledger_entry, provenance_stamp
+
 
 def prepare_device(seed: int) -> str:
     torch.manual_seed(seed)
@@ -111,6 +113,13 @@ def save_results(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Provenance: exact commit + dirty-tree flag + when + which run_tag
+    # archive this belongs to (cfg["run_tag"]/cfg["results_root"] are set by
+    # scripts/train.py, not part of the method's own hyperparameters) -- see
+    # cloudforger.provenance for why this needs to be recoverable from
+    # results.json alone, without loading the torch file.
+    stamp = provenance_stamp(run_tag=cfg.get("run_tag"))
+
     torch.save(
         {
             "model_state": best_state,
@@ -126,6 +135,7 @@ def save_results(
             "adversarial_loss": adversarial_loss,
             "adversarial_loss_per_target": adversarial_loss_per_target,
             "adversarial_path": adversarial_path,
+            **stamp,
         },
         output_dir / "results.pt",
     )
@@ -138,6 +148,8 @@ def save_results(
         "test_loss": test_loss,
         "test_loss_per_target": test_loss_per_target,
         "seed": cfg["seed"],
+        **stamp,
+        "config": cfg,
         **(extra_meta or {}),
     }
     if adversarial_loss is not None:
@@ -146,7 +158,17 @@ def save_results(
         json_payload["adversarial_path"] = str(adversarial_path)
 
     with open(output_dir / "results.json", "w") as f:
-        json.dump(json_payload, f, indent=2)
+        json.dump(json_payload, f, indent=2, default=str)
+
+    append_ledger_entry(
+        output_dir=output_dir,
+        results_root=cfg.get("results_root"),
+        method=cfg["method"],
+        seed=cfg["seed"],
+        test_loss=test_loss,
+        adversarial_loss=adversarial_loss,
+        stamp=stamp,
+    )
 
 
 class MultiSourceExperiment(ABC):
