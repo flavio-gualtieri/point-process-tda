@@ -1,0 +1,82 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.5056130458627428,
+  "test_loss_per_target": {
+    "parent_intensity": 0.861441969871521,
+    "meta_offspring": 0.8614081740379333,
+    "meta_cluster_scale": 0.5376724600791931,
+    "mean_offspring": 0.2205030471086502,
+    "cluster_scale": 0.04703951254487038
+  },
+  "seed": 9372,
+  "git_commit": "b3ff6ca2ca2dd7ca35607a5a7f843e594f5d327b",
+  "git_dirty": true,
+  "timestamp": "2026-07-27T16:22:58.961372+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9372,
+    "homology_dims": [
+      0,
+      1
+    ],
+    "include_entropy": false,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "target_label_names": [
+      "parent_intensity",
+      "meta_offspring",
+      "meta_cluster_scale",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "log_label_names": [
+      "parent_intensity",
+      "meta_offspring",
+      "meta_cluster_scale",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5,
+      10,
+      15
+    ],
+    "channels": [
+      "k5_h0",
+      "k5_h1",
+      "k10_h0",
+      "k10_h1",
+      "k15_h0",
+      "k15_h1"
+    ]
+  },
+  "adversarial_loss": 0.4891445164680481,
+  "adversarial_loss_per_target": {
+    "parent_intensity": 0.8239908218383789,
+    "meta_offspring": 0.8568710088729858,
+    "meta_cluster_scale": 0.5110583305358887,
+    "mean_offspring": 0.2099422663450241,
+    "cluster_scale": 0.04386035352945328
+  },
+  "adversarial_path": "/gpfs/scratch/qp252676/globus/point-process-tda/data/nested_thomas/sigma_sweep/sigma0.75_cov0.999/adversarial_clouds.pkl"
+}

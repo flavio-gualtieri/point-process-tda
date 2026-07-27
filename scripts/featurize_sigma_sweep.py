@@ -55,7 +55,9 @@ SWEEP_DIR_NAME = "sigma_sweep"
 
 # Live area of work -- override with --sigma-pixels/--coverage rather than
 # editing these; they're just sane defaults for an unparameterized run.
-DEFAULT_SIGMA_PIXELS = [1.5, 2.0, 3.0]
+# Extended below 1.5 after the first sweep (1.5/2.0/3.0) found monotonically
+# decreasing loss as sigma shrank, with no sign of turning over yet.
+DEFAULT_SIGMA_PIXELS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
 DEFAULT_COVERAGE = [0.95, 0.99, 0.999]
 
 
