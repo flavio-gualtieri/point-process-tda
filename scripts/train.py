@@ -2,7 +2,14 @@
 # scripts/train.py
 """Train (or fit, for classical baselines) one configured method for one or
 more seeds, saving results.pt / results.json / (model.pt if trainable)
-under results/<process>/<filtration_tag>/<method>/seed_<seed>/.
+under results/<process>/<filtration_tag>/<method>/seed_<seed>/ (or .../
+<method>/_runs/<run_tag>/seed_<seed>/ if --run-tag is given -- see
+scripts/archive_run.py to move an existing method's results into one of
+these slots before retraining, so the previous results aren't overwritten).
+
+Every result also gets a provenance stamp (git commit, dirty-tree flag,
+timestamp, run_tag) written into results.json/results.pt and appended as a
+row to results/experiments.jsonl -- see cloudforger.provenance.
 
 One method name (RunConfig's method.name) selects the estimator regardless
 of whether it's a CNN (cloudforger.nn.experiments), a classical estimator
@@ -24,6 +31,7 @@ Usage:
     python scripts/train.py configs/runs/thomas_dtm_k5_betti_cnn.yaml
     python scripts/train.py configs/runs/foo.yaml --seed 9371   # single seed, for SLURM array jobs
     python scripts/train.py configs/runs/foo.yaml --force        # retrain even if results.pt exists
+    python scripts/train.py configs/runs/foo.yaml --run-tag candidate_b  # keep results.pt at a labeled path
 """
 
 from __future__ import annotations
@@ -115,9 +123,18 @@ def _multi_source_dataset_paths(
 
 
 def run_experiment_method(
-    cfg: RunConfig, seed: int, data_paths: DataPaths, results_paths: ResultsPaths, filtrations: list[Filtration], force: bool
+    cfg: RunConfig,
+    seed: int,
+    data_paths: DataPaths,
+    results_paths: ResultsPaths,
+    filtrations: list[Filtration],
+    force: bool,
+    run_tag: str | None = None,
 ) -> None:
     cfg_dict = build_method_cfg(cfg, seed)
+    cfg_dict["results_root"] = str(results_paths.root)
+    if run_tag:
+        cfg_dict["run_tag"] = run_tag
     m_values = cfg.method.params.get("m_values")
     if m_values is not None:
         cfg_dict["k_values"] = list(m_values)  # k_values is just an ordered scale label list internally
@@ -132,7 +149,7 @@ def run_experiment_method(
         effective_filtrations = (
             [] if not is_multi_source and exp.file_key in FILTRATION_INDEPENDENT_FILE_KEYS else filtrations
         )
-    output_dir = results_paths.seed_dir(effective_filtrations, exp.subdir, seed)
+    output_dir = results_paths.seed_dir(effective_filtrations, exp.subdir, seed, run_tag=run_tag)
     if is_done(output_dir) and not force:
         print(f"[{exp.subdir} seed={seed}] already done, skipping ({output_dir}).")
         return
@@ -153,7 +170,14 @@ def run_experiment_method(
         exp.run(dataset_path, output_dir, adversarial_path=adversarial_path)
 
 
-def run_vihrs_method(cfg: RunConfig, seed: int, data_paths: DataPaths, results_paths: ResultsPaths, force: bool) -> None:
+def run_vihrs_method(
+    cfg: RunConfig,
+    seed: int,
+    data_paths: DataPaths,
+    results_paths: ResultsPaths,
+    force: bool,
+    run_tag: str | None = None,
+) -> None:
     params = cfg.method.params
     checkpoint_best = bool(params.get("checkpoint_best", False))
     subdir = "vihrs_checkpointed" if checkpoint_best else "vihrs"
@@ -161,7 +185,7 @@ def run_vihrs_method(cfg: RunConfig, seed: int, data_paths: DataPaths, results_p
     # budget) -- keeps "vihrs"/"vihrs_checkpointed" reserved for the
     # paper-faithful/fair-comparison variants so results dirs stay unambiguous.
     subdir = params.get("results_subdir", subdir)
-    output_dir = results_paths.seed_dir([], subdir, seed)
+    output_dir = results_paths.seed_dir([], subdir, seed, run_tag=run_tag)
     if is_done(output_dir) and not force:
         print(f"[{subdir} seed={seed}] already done, skipping ({output_dir}).")
         return
@@ -193,14 +217,22 @@ def run_vihrs_method(cfg: RunConfig, seed: int, data_paths: DataPaths, results_p
         label_names=label_names,
         checkpoint_best=checkpoint_best,
         skip_mincontrast=params.get("skip_mincontrast", False),
+        results_root=results_paths.root,
+        run_tag=run_tag,
     )
 
 
 def run_classical_baseline(
-    method_name: str, cfg: RunConfig, seed: int, data_paths: DataPaths, results_paths: ResultsPaths, force: bool
+    method_name: str,
+    cfg: RunConfig,
+    seed: int,
+    data_paths: DataPaths,
+    results_paths: ResultsPaths,
+    force: bool,
+    run_tag: str | None = None,
 ) -> None:
     module = getattr(baselines, method_name)
-    output_dir = results_paths.seed_dir([], method_name, seed)
+    output_dir = results_paths.seed_dir([], method_name, seed, run_tag=run_tag)
     if is_done(output_dir) and not force:
         print(f"[{method_name} seed={seed}] already done, skipping ({output_dir}).")
         return
@@ -243,7 +275,9 @@ def run_classical_baseline(
     test_loss_per_target = dict(zip(label_names, per_target_mse.tolist()))
     print(f"[{method_name} seed={seed}] test loss (standardized) {test_loss:.4f}")
 
-    cfg_dict = {"task": "params", "method": method_name, "seed": seed, "n_starts": n_starts}
+    cfg_dict = {"task": "params", "method": method_name, "seed": seed, "n_starts": n_starts, "results_root": str(results_paths.root)}
+    if run_tag:
+        cfg_dict["run_tag"] = run_tag
     save_results(
         output_dir, model=None, best_state=None, history={}, cfg=cfg_dict,
         test_loss=test_loss, label_names=label_names, label_norm=label_norm,
@@ -260,6 +294,12 @@ def main(argv: list[str] | None = None) -> None:
         help="run only this seed (for SLURM array jobs); default: every seed in the config",
     )
     parser.add_argument("--force", action="store_true", help="retrain even if results.pt already exists")
+    parser.add_argument(
+        "--run-tag", default=None,
+        help="write results under <method>/_runs/<run-tag>/ instead of the default path, so a labeled "
+             "variant (e.g. a candidate model change) lives alongside the current results instead of "
+             "overwriting them -- compare the two later with evaluate.py's method@run-tag syntax",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, overrides=args.overrides)
@@ -276,11 +316,11 @@ def main(argv: list[str] | None = None) -> None:
         print(f"\n{'#' * 90}\n### {cfg.method.name} | {cfg.process.name} | seed {seed}\n{'#' * 90}")
         try:
             if cfg.method.name == "vihrs":
-                run_vihrs_method(cfg, seed, data_paths, results_paths, args.force)
+                run_vihrs_method(cfg, seed, data_paths, results_paths, args.force, run_tag=args.run_tag)
             elif cfg.method.name in CLASSICAL_BASELINE_NAMES:
-                run_classical_baseline(cfg.method.name, cfg, seed, data_paths, results_paths, args.force)
+                run_classical_baseline(cfg.method.name, cfg, seed, data_paths, results_paths, args.force, run_tag=args.run_tag)
             else:
-                run_experiment_method(cfg, seed, data_paths, results_paths, filtrations, args.force)
+                run_experiment_method(cfg, seed, data_paths, results_paths, filtrations, args.force, run_tag=args.run_tag)
         except Exception:
             print(f"[{cfg.method.name} seed={seed}] FAILED:")
             traceback.print_exc()

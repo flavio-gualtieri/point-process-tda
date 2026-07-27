@@ -29,6 +29,12 @@ RAW_TAG = "raw"
 # evaluate.py's aggregate output can never collide with a method name.
 COMPARE_DIR_NAME = "_compare"
 
+# Leading-underscore reserved child of every real method dir, holding named
+# archives of that method's results (see ResultsPaths.method_dir's run_tag).
+# Same collision-avoidance reasoning as COMPARE_DIR_NAME: no method or run
+# tag can ever be named "_runs".
+RUN_ARCHIVE_DIR_NAME = "_runs"
+
 
 class ExplicitTag:
     """Minimal Filtration stand-in (only .path_tag() is required by
@@ -109,17 +115,26 @@ class DataPaths:
 
 
 class ResultsPaths:
-    """results/<process>/<filtration_tag>/<method>/seed_<seed>/... layout."""
+    """results/<process>/<filtration_tag>/<method>/seed_<seed>/... layout,
+    or results/<process>/<filtration_tag>/<method>/_runs/<run_tag>/seed_<seed>/...
+    when run_tag is given -- a named, non-overwritten archive of that
+    method's results living alongside the current (untagged) ones, so
+    comparing "old vs new" after a code change never requires manually
+    copying a whole results tree aside (see scripts/archive_run.py, which
+    moves a method's current results into one of these slots)."""
 
     def __init__(self, process: str, root: Path | str = DEFAULT_RESULTS_ROOT):
         self.process = process
         self.root = Path(root)
 
-    def method_dir(self, filtrations: list[Filtration] | None, method: str) -> Path:
-        return self.root / self.process / combined_filtration_tag(filtrations) / method
+    def method_dir(self, filtrations: list[Filtration] | None, method: str, run_tag: str | None = None) -> Path:
+        base = self.root / self.process / combined_filtration_tag(filtrations) / method
+        return base / RUN_ARCHIVE_DIR_NAME / run_tag if run_tag else base
 
-    def seed_dir(self, filtrations: list[Filtration] | None, method: str, seed: int) -> Path:
-        return self.method_dir(filtrations, method) / f"seed_{seed}"
+    def seed_dir(
+        self, filtrations: list[Filtration] | None, method: str, seed: int, run_tag: str | None = None
+    ) -> Path:
+        return self.method_dir(filtrations, method, run_tag) / f"seed_{seed}"
 
     def compare_dir(self, filtrations: list[Filtration] | None, name: str) -> Path:
         return self.root / self.process / combined_filtration_tag(filtrations) / COMPARE_DIR_NAME / name

@@ -14,7 +14,6 @@ from scipy.special import erf
 # this value, H0 starts collapsing to a single blob above it. Not yet
 # cross-checked against training loss (scripts/sweep_pi_sigma.py); revisit if
 # that sweep, or a similar check on a different dataset, says otherwise.
-DEFAULT_SIGMA_PIXELS = 2.0
 
 
 def linear_weight(persistence: np.ndarray) -> np.ndarray:
@@ -68,7 +67,7 @@ class PersistenceImager:
         birth_range: tuple[float, float],
         pers_range: tuple[float, float],
         resolution: int = 64,
-        sigma_pixels: float = DEFAULT_SIGMA_PIXELS,
+        sigma_pixels: float = 2.0,
         weight_fn: Callable[[np.ndarray], np.ndarray] = linear_weight,
     ):
         if sigma_pixels <= 0:

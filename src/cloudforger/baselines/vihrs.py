@@ -111,6 +111,7 @@ import matplotlib.pyplot as plt
 
 from ..core import metrics as classical_evaluate  # marginal/paired metric formulas, shared with every method
 from ..core.splits import train_val_test_indices
+from ..provenance import append_ledger_entry, provenance_stamp
 from . import mincontrast as mc
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -574,6 +575,8 @@ def run_one_seed(
     skip_mincontrast: bool = False,
     mc_cache: dict[Any, Any] | None = None,
     mc_rng: np.random.Generator | None = None,
+    results_root: Path | None = None,
+    run_tag: str | None = None,
 ) -> dict[str, Any]:
     output_dir = output_root / f"seed_{seed}"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -686,7 +689,15 @@ def run_one_seed(
         "r_max": float(r_grid[-1]),
         "n_r": len(r_grid),
         "output_dir": str(output_dir),
+        "results_root": str(results_root) if results_root else None,
+        "run_tag": run_tag,
     }
+
+    # Provenance: same stamp shape cloudforger.nn.experiments.common.save_results
+    # uses, so results.json is self-sufficient (commit/dirty/when/run_tag)
+    # without loading the torch file, and this run gets a row in the shared
+    # results/experiments.jsonl ledger regardless of which code path wrote it.
+    stamp = provenance_stamp(run_tag=run_tag)
 
     torch.save(
         {
@@ -705,6 +716,7 @@ def run_one_seed(
             "adversarial_loss": adversarial_loss,
             "adversarial_loss_per_target": adversarial_loss_per_target,
             "adversarial_path": str(adversarial_path) if adversarial_path else None,
+            **stamp,
         },
         output_dir / "results.pt",
     )
@@ -718,6 +730,8 @@ def run_one_seed(
         "test_loss": test_loss,
         "test_loss_per_target": test_loss_per_target,
         "seed": seed,
+        **stamp,
+        "config": cfg,
     }
     if checkpoint_best:
         json_payload["best_epoch"] = best_epoch
@@ -727,7 +741,17 @@ def run_one_seed(
         json_payload["adversarial_loss_per_target"] = adversarial_loss_per_target
         json_payload["adversarial_path"] = str(adversarial_path)
     with open(output_dir / "results.json", "w") as f:
-        json.dump(json_payload, f, indent=2)
+        json.dump(json_payload, f, indent=2, default=str)
+
+    append_ledger_entry(
+        output_dir=output_dir,
+        results_root=results_root,
+        method="vihrs",
+        seed=seed,
+        test_loss=test_loss,
+        adversarial_loss=adversarial_loss,
+        stamp=stamp,
+    )
 
     # ---- same marginal metrics as cloudforger.core.metrics, on de-standardized test predictions ----
     test_pred_std = predict_all(model, test_loader, device)

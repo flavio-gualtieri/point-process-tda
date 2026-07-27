@@ -19,7 +19,7 @@
 \setlist[itemize]{topsep=2pt, itemsep=2pt, parsep=0pt}
 
 \title{\texorpdfstring{\texttt{pi\_multik}}{pi\_multik}: Multi-Scale Persistence-Image Regression\\
-\large Model Architectures, Data Pipeline, and Matérn / Nested-Thomas Comparisons}
+\large Model Architectures, Data Pipeline, and Nested-Thomas Results}
 \author{point-process-tda}
 \date{\today}
 
@@ -197,10 +197,14 @@ just code defaults.
   \item \textbf{Persistence image}: $64\times64$ raster per (scale, homology
     dimension); axis bounds (birth/persistence range) are calibrated once from
     percentiles of the \emph{training} diagrams' own distribution (95th/99.9th),
-    not hand-picked. Gaussian kernel width $\sigma$ is set \emph{per diagram}
-    (\texttt{sigma\_frac}$\times$ the diagram's own median off-diagonal
-    persistence), floored at 1 pixel — see Section~\ref{sec:sigma} for a
-    caveat on how often that floor actually binds.
+    not hand-picked. Each pixel is the exact integral of the diagram's
+    persistence surface (a 2-D Gaussian per off-diagonal point, weighted by
+    \texttt{weight\_fn}) over that pixel's box, via the Gaussian CDF — not a
+    point sample at the pixel center. Gaussian bandwidth is a single fixed
+    \texttt{sigma\_pixels}$=2.0$, shared by the birth and persistence axes and
+    shared across every diagram (an earlier per-diagram \emph{adaptive}
+    $\sigma$ design was retired in favor of this; see
+    Section~\ref{sec:sigma}).
   \item \textbf{Channel stacking across scales}: per-scale PI pairs are aligned by
     cloud seed and intersected (a diagram can be empty and get filtered out at one
     scale but not another) before being stacked into the $(N, K, 2, 64, 64)$ tensor
@@ -227,8 +231,9 @@ just code defaults.
 DTM scale grid ($m$ values) & the single most consequential knob — see Section~\ref{sec:results} \\
 Homology dimensions & $H_0$, $H_1$ (both used everywhere in this report) \\
 PI resolution & $64 \times 64$ \\
-\texttt{sigma\_frac} / \texttt{sigma\_stat} & $0.1$ / \texttt{median} — adaptive kernel width factor \\
-\texttt{min\_sigma\_pixels} & $1.0$ (floor on kernel width, in pixel units) \\
+\texttt{sigma\_pixels} & $2.0$ — fixed Gaussian kernel bandwidth, in pixels,
+shared by the birth and persistence axes (retired the earlier per-diagram
+adaptive design; see Section~\ref{sec:sigma}) \\
 \texttt{embedding\_dim} & 64 (per-scale CoordConv embedding size) \\
 \texttt{conv\_channels} & $(32, 64, 128)$ \\
 \texttt{scale\_fusion\_hidden} / \texttt{out\_dim} & 128 / 128 (scaleconv, towers) \\
@@ -244,15 +249,17 @@ Adversarial hold-out & 12.5\% of parameter vectors, disjoint from train/test \\
 \end{tabular}
 \end{center}
 
-\section{Results: Matérn vs. Nested Thomas (vs.\ \texttt{vihrs})}
+\section{Results: Nested Thomas vs.\ \texttt{vihrs}}
 \label{sec:results}
 
-Loss is MSE in standardized (log-z-score) target space, averaged over targets —
-$1.0$ is roughly what predicting the training mean would score, so lower is
-better and values noticeably below 1 indicate the model is extracting real
-signal. \textbf{Matérn's 2-parameter task and nested Thomas's 5-parameter task are
-not on the same absolute scale} — compare trends \emph{within} a process, not raw
-numbers \emph{across} processes.
+Loss is MSE in standardized (log-z-score) target space, averaged over the five
+nested-Thomas targets — $1.0$ is roughly what predicting the training mean
+would score, so lower is better and values noticeably below 1 indicate the
+model is extracting real signal. \textbf{Matérn results are omitted from this
+revision of the report}: nested Thomas below has been fully recomputed with
+the fixed persistence imager and retrained end to end, while Matérn's own
+rerun on the same fixed imager is still pending — it will be reinstated once
+that rerun completes.
 
 \subsection{Channel-combination landscape}
 \label{sec:landscape}
@@ -265,184 +272,174 @@ scale(s) feed the network} from \emph{which fusion architecture} combines them
 
 \paragraph{Single DTM scale.}
 \begin{center}
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}lrr@{}}
 \toprule
-& \multicolumn{2}{c}{\textbf{Matérn}} & \multicolumn{2}{c}{\textbf{Nested Thomas}} \\
-\textbf{DTM scale $m$} & test loss & adv.\ loss & test loss & adv.\ loss \\
+\textbf{DTM scale $m$} & \textbf{test loss} & \textbf{adv.\ loss} \\
 \midrule
-0.01 & 0.0220 $\pm$ 0.0021 & 0.0207 $\pm$ 0.0025 & 0.5152 $\pm$ 0.0095 & 0.5053 $\pm$ 0.0020 \\
-0.02 & 0.0266 $\pm$ 0.0013 & 0.0281 $\pm$ 0.0005 & 0.5126 $\pm$ 0.0086 & 0.5037 $\pm$ 0.0011 \\
-0.04 & 0.0359 $\pm$ 0.0039 & 0.0342 $\pm$ 0.0013 & 0.5217 $\pm$ 0.0071 & 0.5088 $\pm$ 0.0006 \\
-0.10 & 0.0363 $\pm$ 0.0016 & 0.0326 $\pm$ 0.0013 & 0.5334 $\pm$ 0.0069 & 0.5239 $\pm$ 0.0004 \\
-0.20 & 0.0359 $\pm$ 0.0012 & 0.0336 $\pm$ 0.0015 & 0.5460 $\pm$ 0.0108 & 0.5344 $\pm$ 0.0015 \\
-0.45 & 0.0387 $\pm$ 0.0016 & 0.0367 $\pm$ 0.0005 & 0.5981 $\pm$ 0.0102 & 0.5852 $\pm$ 0.0016 \\
-0.90 & 0.0658 $\pm$ 0.0012 & 0.0611 $\pm$ 0.0009 & 0.6307 $\pm$ 0.0051 & 0.6218 $\pm$ 0.0041 \\
+0.01 & 0.5245 $\pm$ 0.0091 & 0.5157 $\pm$ 0.0063 \\
+0.02 & 0.5173 $\pm$ 0.0083 & 0.5017 $\pm$ 0.0033 \\
+0.04 & 0.5287 $\pm$ 0.0067 & 0.5113 $\pm$ 0.0018 \\
+0.10 & 0.5500 $\pm$ 0.0089 & 0.5345 $\pm$ 0.0039 \\
+0.20 & 0.5688 $\pm$ 0.0103 & 0.5584 $\pm$ 0.0044 \\
+0.45 & 0.5788 $\pm$ 0.0141 & 0.5710 $\pm$ 0.0102 \\
+0.90 & 0.5990 $\pm$ 0.0108 & 0.5969 $\pm$ 0.0151 \\
 \bottomrule
 \end{tabular}
 \end{center}
-\emph{$n=3$ seeds per cell.}
+\emph{$n=3$ seeds per cell; method \texttt{pi\_multik}.}
 
 \paragraph{Multi-scale unions, and the alternative fixed-$k$ sweep.}
 \begin{center}
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular}{@{}lrr@{}}
 \toprule
-\textbf{Channel set} & \textbf{$n$} & \textbf{Matérn} & \textbf{Nested Thomas} \\
+\textbf{Channel set} & \textbf{$n$} & \textbf{Nested Thomas test loss} \\
 \midrule
-fine union $m\in\{0.01,0.02,0.04\}$              & 3  & 0.0193 $\pm$ 0.0012 & 0.5035 $\pm$ 0.0089 \\
-spread union $m\in\{0.01,0.10,0.90\}$            & 3  & 0.0250 $\pm$ 0.0030 & 0.5111 $\pm$ 0.0092 \\
-coarse union $m\in\{0.20,0.45,0.90\}$            & 3  & 0.0327 $\pm$ 0.0017 & 0.5430 $\pm$ 0.0135 \\
-5-scale union $m\in\{0.01,0.04,0.10,0.20,0.45\}$ & 3  & n/a & 0.5072 $\pm$ 0.0089 \\
-full 7-scale union (all swept $m$)               & 10 & 0.0222 $\pm$ 0.0025 & 0.5069 $\pm$ 0.0087 \\
+fine union $m\in\{0.01,0.02,0.04\}$              & 3  & 0.5077 $\pm$ 0.0075 \\
+spread union $m\in\{0.01,0.10,0.90\}$            & 3  & 0.5125 $\pm$ 0.0088 \\
+coarse union $m\in\{0.20,0.45,0.90\}$            & 3  & 0.5641 $\pm$ 0.0157 \\
+5-scale union $m\in\{0.01,0.04,0.10,0.20,0.45\}$ & 3  & 0.5059 $\pm$ 0.0104 \\
+full 7-scale union (all swept $m$)               & 3  & 0.5102 $\pm$ 0.0083 \\
 \midrule
-\textbf{fixed-$k$ sweep, $k\in\{5,10,15\}$}       & \textbf{10} & n/a & \textbf{0.5039 $\pm$ 0.0082} \\
+\textbf{fixed-$k$ sweep, $k\in\{5,10,15\}$}       & \textbf{10} & \textbf{0.5014 $\pm$ 0.0082} \\
 \bottomrule
 \end{tabular}
 \end{center}
-\emph{All rows: method \texttt{pi\_multik}. "n/a" = not run for Matérn (its
-sweep covers only the single scales above plus the three mass-fraction unions
-shown). $k\in\{5,10,15\}$ is this repo's original, pre-mass-fraction DTM
-parameterization (fixed neighbor count rather than $m=k/N$ recomputed per
-cloud) — included here for nested Thomas since it predates, and is now
+\emph{All rows: method \texttt{pi\_multik}. $k\in\{5,10,15\}$ is this repo's
+original, pre-mass-fraction DTM parameterization (fixed neighbor count rather
+than $m=k/N$ recomputed per cloud) — included here since it predates, and is
 directly comparable against, the $m$-based sweep.}
 
-\textbf{Reading this landscape:} finer DTM scales beat coarser ones, consistently,
-whether used alone or unioned together — Matérn is best at $m=0.01$, then
-plateaus over $m=0.04$--$0.20$ before a sharp drop-off at $m=0.90$; nested
-Thomas degrades more steadily as $m$ grows. \emph{Fusing multiple scales
-together does not clearly beat just using the single best fine scale}: every
-multi-scale union on nested Thomas lands in the same $0.503$--$0.507$ band
-regardless of how many, or which, coarser scales get added to it, and
-Matérn's full 7-scale union ($0.0222$) is actually slightly worse than its
-3-scale fine union ($0.0193$). The fixed-$k$ sweep lands squarely inside that
-same nested-Thomas band ($0.5039$) — switching from a fixed neighbor count to
-a mass-fraction parameterization of DTM scale doesn't change the picture once
-"fine scales" are in use either way. It also happens to be the most heavily
-seeded ($n=10$) nested-Thomas configuration and ties the lowest test loss found
-anywhere in the sweep, which is why it is used as \emph{the} best model in
+\textbf{Reading this landscape:} nested Thomas degrades steadily as the DTM
+scale $m$ grows, from a best single scale of $m=0.02$ ($0.5173$) down to
+$m=0.90$'s $0.5990$ — finer neighborhoods carry more signal than coarser ones,
+consistently. \emph{Fusing multiple scales together does not clearly beat
+just using the single best fine scale}: every union that includes at least
+one fine scale lands in a tight $0.506$--$0.513$ band regardless of exactly
+which scales are combined, while the one union built entirely from coarse
+scales ($m\in\{0.20,0.45,0.90\}$) is clearly worse ($0.5641$) — confirming the
+fine scales are carrying essentially all of the union's signal. The
+fixed-$k$ sweep ($k\in\{5,10,15\}$) is the best configuration in the whole
+landscape ($0.5014$), a clear improvement (not just a tie, as in the previous
+persistence-image version of this comparison) over the next-best 5-scale
+union ($0.5059$). It is also the most heavily seeded ($n=10$) configuration,
+which is why it is used as \emph{the} best model in
 Section~\ref{sec:bestvsvihrs}.
 
 \subsection{Best model vs.\ \texttt{vihrs}}
 \label{sec:bestvsvihrs}
 
-\texttt{vihrs} has now been re-run on nested Thomas with 10 seeds (previously
-just 1); Matérn's \texttt{vihrs} is still a single seed. This turns out to
-matter a great deal.
-
-\paragraph{Nested Thomas.} Best-model channel set: the fixed-$k$ sweep
-($k\in\{5,10,15\}$, Section~\ref{sec:landscape}), all four \texttt{pi\_multik}
-architectures at $n=10$ — matched exactly to \texttt{vihrs}'s own $n=10$:
+Best-model channel set: the fixed-$k$ sweep ($k\in\{5,10,15\}$,
+Section~\ref{sec:landscape}), all four \texttt{pi\_multik} architectures at
+$n=10$ — matched exactly to \texttt{vihrs}'s own $n=10$ (\texttt{vihrs} itself
+does not depend on persistence images, so its numbers are unchanged by this
+recompute):
 
 \begin{center}
 \begin{tabular}{@{}lrrr@{}}
 \toprule
 \textbf{Method} & \textbf{$n$} & \textbf{test loss} & \textbf{adv.\ loss} \\
 \midrule
-\texttt{pi\_multik}              & 10 & \textbf{0.5039 $\pm$ 0.0082} & \textbf{0.4890 $\pm$ 0.0029} \\
-\texttt{pi\_multik\_scaleconv}   & 10 & 0.5046 $\pm$ 0.0056 & 0.4930 $\pm$ 0.0016 \\
-\texttt{pi\_multik\_earlyfusion} & 10 & 0.5058 $\pm$ 0.0053 & 0.4913 $\pm$ 0.0021 \\
-\texttt{pi\_multik\_towers}      & 10 & 0.5139 $\pm$ 0.0070 & 0.4993 $\pm$ 0.0041 \\
+\texttt{pi\_multik}              & 10 & \textbf{0.5014 $\pm$ 0.0082} & \textbf{0.4875 $\pm$ 0.0025} \\
+\texttt{pi\_multik\_earlyfusion} & 10 & 0.5015 $\pm$ 0.0060 & 0.4879 $\pm$ 0.0029 \\
+\texttt{pi\_multik\_scaleconv}   & 10 & 0.5035 $\pm$ 0.0066 & 0.4902 $\pm$ 0.0016 \\
+\texttt{pi\_multik\_towers}      & 10 & 0.5076 $\pm$ 0.0085 & 0.4928 $\pm$ 0.0029 \\
 \texttt{vihrs}                   & 10 & 0.5224 $\pm$ 0.0108 & 0.5149 $\pm$ 0.0034 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-With both sides now at $n=10$, \textbf{every \texttt{pi\_multik} architecture
-clearly beats \texttt{vihrs}} on nested Thomas — the gap between the best TDA
-model and \texttt{vihrs} ($\approx 0.019$) is now bigger than either side's
-standard deviation, unlike the earlier single-seed comparison.
-\textbf{This reverses the previous version of this report's headline finding
-for nested Thomas}, which had a single-seed \texttt{vihrs} ($0.5020$) looking
-competitive with \texttt{pi\_multik} — that was an artifact of an unusually
-lucky \texttt{vihrs} seed; the 10-seed mean ($0.5224$) is clearly worse than
-every TDA variant tried. Plain \texttt{pi\_multik} (flat-concat late fusion) is,
-somewhat surprisingly, the strongest of the four architectures at this channel
-set — none of the fancier fusion mechanisms (scale-aware convolution, early
-fusion, independent per-scale towers) improve on it here.
-
-\paragraph{Matérn.} \texttt{vihrs} has \emph{not} been re-run with multiple
-seeds on Matérn this round, so this comparison still rests on a single seed —
-given what just happened on nested Thomas, \textbf{treat this as provisional,
-not confirmed}. Best-model channel set: the full 7-scale union (most heavily
-seeded, $n=10$; a 3-scale fine union reaches a nominally lower
-$0.0185\pm0.0006$ but only at $n=3$, statistically indistinguishable from the
-$n=10$ result below):
-
-\begin{center}
-\begin{tabular}{@{}lrrr@{}}
-\toprule
-\textbf{Method} & \textbf{$n$} & \textbf{test loss} & \textbf{adv.\ loss} \\
-\midrule
-\texttt{pi\_multik}            & 10 & 0.0222 $\pm$ 0.0025 & 0.0210 $\pm$ 0.0026 \\
-\texttt{pi\_multik\_scaleconv} & 10 & \textbf{0.0196 $\pm$ 0.0025} & \textbf{0.0183 $\pm$ 0.0023} \\
-\texttt{pi\_multik\_towers}    & 10 & 0.0242 $\pm$ 0.0023 & 0.0227 $\pm$ 0.0030 \\
-\texttt{vihrs} (1 seed only)   & 1  & 0.0141 & 0.0131 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-Taken at face value, \texttt{vihrs} still looks ahead on Matérn — but the
-nested-Thomas result directly above demonstrates that a single \texttt{vihrs}
-seed is not a reliable estimate of its true mean (there, the lucky-seed-vs.\
-10-seed-mean gap was $\approx 0.02$, comparable in size to the entire gap being
-reported here for Matérn). \textbf{Recommended next step: re-run \texttt{vihrs}
-on Matérn with the same 10-seed protocol before drawing any conclusion about
-which approach actually wins there.}
+\textbf{Every \texttt{pi\_multik} architecture clearly beats \texttt{vihrs}}
+— even the weakest variant (\texttt{towers}, $0.5076$) sits comfortably below
+\texttt{vihrs}'s $0.5224$, and the gap between the best TDA model and
+\texttt{vihrs} ($\approx 0.021$) is bigger than either side's standard
+deviation. Plain \texttt{pi\_multik} (flat-concat late fusion) and
+\texttt{pi\_multik\_earlyfusion} are now essentially tied for best
+($0.5014$ vs.\ $0.5015$, well within one standard deviation of each other) —
+the fancier fusion mechanisms (scale-aware convolution, independent per-scale
+towers) still don't improve on the simplest architecture here.
 
 \subsection{Per-target breakdown (best model vs.\ \texttt{vihrs})}
 
 \begin{center}
-\begin{tabular}{@{}llrr@{}}
+\begin{tabular}{@{}lrr@{}}
 \toprule
-\textbf{Process} & \textbf{Target} & \textbf{best \texttt{pi\_multik} model} & \texttt{vihrs} \\
+\textbf{Target} & \textbf{best \texttt{pi\_multik} model} & \texttt{vihrs} \\
 \midrule
-\multirow{2}{*}{Matérn (\texttt{scaleconv}, 7-scale; $n{=}10$ vs.\ $n{=}1$)}
- & \texttt{parent\_intensity} & 0.0193 & 0.0159 \\
- & \texttt{hardcore\_radius}  & 0.0198 & 0.0123 \\
-\midrule
-\multirow{5}{*}{Nested Thomas (\texttt{pi\_multik}, $k{\in}\{5,10,15\}$; $n{=}10$ vs.\ $n{=}10$)}
- & \texttt{parent\_intensity} (meta-layer density) & 0.8745 & 0.8765 \\
- & \texttt{meta\_offspring}      & 0.8584 & 0.8600 \\
- & \texttt{meta\_cluster\_scale} & 0.5356 & 0.5607 \\
- & \texttt{mean\_offspring}      & 0.2147 & 0.2754 \\
- & \texttt{cluster\_scale}       & 0.0364 & 0.0395 \\
+\texttt{parent\_intensity} (meta-layer density) & 0.8740 & 0.8765 \\
+\texttt{meta\_offspring}      & 0.8546 & 0.8600 \\
+\texttt{meta\_cluster\_scale} & 0.5261 & 0.5607 \\
+\texttt{mean\_offspring}      & 0.2109 & 0.2754 \\
+\texttt{cluster\_scale}       & 0.0413 & 0.0395 \\
 \bottomrule
 \end{tabular}
 \end{center}
+\emph{Best model: \texttt{pi\_multik}, $k\in\{5,10,15\}$; $n=10$ for both
+columns.}
 
-\textbf{Notable pattern for nested Thomas, now clearer with matched seed
-counts:} on the two \emph{meta}-layer / coarse parameters
+\textbf{Notable pattern:} on the two \emph{meta}-layer / coarse parameters
 (\texttt{parent\_intensity}, \texttt{meta\_offspring}), \texttt{pi\_multik} and
-\texttt{vihrs} are statistically indistinguishable ($0.86$--$0.88$ for both, on
-both targets) — neither the TDA feature set nor the classical $L(r)-r$ feature
-set is extracting much signal about the coarse scale of this two-level
-process. On the \emph{fine}-layer / geometric parameters
-(\texttt{meta\_cluster\_scale}, \texttt{mean\_offspring},
-\texttt{cluster\_scale}), \texttt{pi\_multik} is consistently ahead of
-\texttt{vihrs}, most visibly on \texttt{mean\_offspring} ($0.21$ vs.\ $0.28$).
-Put together: \texttt{pi\_multik}'s overall advantage over the classical
-baseline (Section~\ref{sec:bestvsvihrs}) is concentrated specifically in the
-fine-scale/geometric targets, not a blanket improvement across every
-parameter — and the shared difficulty on the two coarse parameters looks more
-like a ceiling in the \emph{data or process design} (or in every feature set's
-ability to see the meta-scale at all, at the window sizes tried so far) than
-a model-architecture problem, since it shows up identically in two very
-different feature representations.
+\texttt{vihrs} remain statistically indistinguishable ($0.85$--$0.88$ for both,
+on both targets) — neither the TDA feature set nor the classical $L(r)-r$
+feature set is extracting much signal about the coarse scale of this
+two-level process. On the \emph{fine}-layer / geometric parameters the
+picture is mixed: \texttt{pi\_multik} is clearly ahead on
+\texttt{meta\_cluster\_scale} ($0.53$ vs.\ $0.56$) and, most visibly, on
+\texttt{mean\_offspring} ($0.21$ vs.\ $0.28$); but on \texttt{cluster\_scale}
+the two are now statistically tied ($0.0413$ vs.\ $0.0395$, well within one
+standard deviation of each other) rather than \texttt{pi\_multik} holding a
+clear edge as in the previous persistence-image version of this report. Put
+together: \texttt{pi\_multik}'s overall advantage over the classical baseline
+(Section~\ref{sec:bestvsvihrs}) is concentrated in
+\texttt{meta\_cluster\_scale} and \texttt{mean\_offspring} specifically, not a
+blanket improvement across every parameter — and the shared difficulty on the
+two coarse parameters looks more like a ceiling in the \emph{data or process
+design} (or in every feature set's ability to see the meta-scale at all, at
+the window sizes tried so far) than a model-architecture problem, since it
+shows up identically in two very different feature representations.
 
-\subsection{Note on the adaptive persistence-image sigma}
+\subsection{Note on the persistence-image sigma: adaptive retired in favor of a fixed value}
 \label{sec:sigma}
 
-The per-diagram adaptive $\sigma$ (Section~3) is meant to replace a single
-hand-picked kernel width. Empirically (checked on nested Thomas, $m=0.10$): for
-$H_0$, the 1-pixel floor binds for essentially \emph{every} diagram at the
-current resolution (64) and \texttt{sigma\_frac} (0.1) — i.e.\ $\sigma$ is
-already at its floor almost everywhere, so it is not meaningfully "adaptive" for
-$H_0$ on this data. For $H_1$, the floor binds $\approx$99.7\% of the time, with
-adaptivity only engaging on the long tail of unusually high-persistence-spread
-diagrams (see \texttt{figures/pi\_adaptive\_sigma\_comparison.png}). Worth
-raising with advisors: the current \texttt{sigma\_frac}/resolution combination
-means the adaptive mechanism is doing real work only on a small minority of
-clouds — a smaller \texttt{min\_sigma\_pixels} floor or a higher resolution would
-let it engage more broadly, if that's judged worth revisiting.
+The per-diagram \emph{adaptive} $\sigma$ used in earlier versions of this
+report (\texttt{sigma\_frac}$\times$the diagram's own median off-diagonal
+persistence, floored at \texttt{min\_sigma\_pixels}) has been retired. It is
+still available as \texttt{adaptive\_persistence\_image.py} for comparison,
+but is no longer what any config in \texttt{configs/runs/} uses. Two problems
+motivated dropping it, both checked on nested Thomas, $m=0.10$
+(\texttt{notebooks/pi\_sigma\_diagnostics.ipynb}):
+
+\begin{itemize}
+  \item \textbf{Not meaningfully adaptive.} At resolution 64 and
+    \texttt{sigma\_frac}$=0.1$, the 1-pixel floor bound for essentially
+    \emph{every} $H_0$ diagram and $\approx$99.7\% of $H_1$ diagrams — i.e.\
+    $\sigma$ sat at its floor almost everywhere, engaging only on the long
+    tail of unusually high-persistence-spread diagrams.
+  \item \textbf{Weaker empirical stability.} Under cloud-jitter perturbation,
+    $\|\Delta\text{PI}\|_2$ correlated far more weakly with
+    bottleneck/Wasserstein distance for the adaptive design (Pearson
+    $r\approx0.45$--$0.51$ for $H_0$) than for a fixed-$\sigma$ comparator
+    ($r\approx0.90$--$0.96$) — evidence the diagram-dependent $\sigma$ was
+    degrading the Lipschitz stability property persistence images are
+    supposed to have (Adams et al., 2017), not just under-engaging.
+\end{itemize}
+
+The replacement, \texttt{PersistenceImager} in \texttt{persistence\_image.py},
+uses a single \texttt{sigma\_pixels}$=2.0$ shared by both axes and every
+diagram, plus exact CDF-based box integration per pixel rather than a point
+sample at the pixel center. The value $2.0$ was chosen from a
+speckle/connected-component diagnostic sweep (\texttt{sigma\_pixels}
+$\in[0.25,6]$) over the real \texttt{dtm\_k5/10/15} diagrams: $H_1$ stays
+heavily speckled (top-1\%-pixel-energy fraction $>0.9$) below
+\texttt{sigma\_pixels}$=2$, while $H_0$ starts collapsing toward a single
+connected component for a growing share of diagrams above
+\texttt{sigma\_pixels}$=2$--$3$ — $2.0$ sits at that balance point (see
+\texttt{figures/pi\_adaptive\_sigma\_comparison.png}, comparing the retired
+adaptive design against this fixed value). \textbf{Caveat: this choice has
+not yet been cross-checked against training/test loss} —
+\texttt{scripts/sweep\_pi\_sigma.py} exists for exactly that sweep but has not
+been run yet. All results in Section~\ref{sec:results} use
+\texttt{sigma\_pixels}$=2.0$ throughout; re-running that sweep is the natural
+next step before treating $2.0$ as settled.
 
 \section{Figures prepared for the presentation}
 

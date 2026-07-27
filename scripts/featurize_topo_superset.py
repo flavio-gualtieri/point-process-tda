@@ -47,7 +47,6 @@ from cloudforger.core.records import load_diagrams
 from cloudforger.features import REGISTRY as FEATURE_REGISTRY
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
 from cloudforger.vectorizers.calibrated import build_calibrated_imager
-from cloudforger.vectorizers.persistence_image import DEFAULT_SIGMA_PIXELS
 
 # Even log-spaced coverage of precompute_topo_superset.py's full 11-point m
 # grid (0.01 ... 0.90): fine end matches the existing k=5,10,15 regime,
@@ -110,7 +109,7 @@ def main(argv: list[str] | None = None) -> None:
         raise ValueError(f"{args.config} has no features: persistence_image entry -- nothing to size the imager from.")
     homology_dims = tuple(pi_cfg.params.get("homology_dims", HOMOLOGY_DIMS))
     resolution = int(pi_cfg.params.get("resolution", 64))
-    sigma_pixels = float(pi_cfg.params.get("sigma_pixels", DEFAULT_SIGMA_PIXELS))
+    sigma_pixels = float(pi_cfg.params.get("sigma_pixels", 2.0))
 
     print(f"m channels: {args.m_values}")
     print(f"imager params: resolution={resolution} sigma_pixels={sigma_pixels} homology_dims={homology_dims}")

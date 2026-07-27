@@ -10,6 +10,7 @@ import numpy as np
 def calibrate(
     diagrams: list[PersistenceDiagram],
     percentiles: tuple[float, ...] = (95.0, 99.9),
+    homology_dims: tuple[int, ...] = (0, 1),
 ) -> dict[int, dict[str, dict[float, float]]]:
     """Collect birth and persistence statistics across a list of diagrams.
 
@@ -23,12 +24,9 @@ def calibrate(
         stats = calibrate(diagrams)
         # stats[1]["persistence"][99.0] -> suggested upper bound for pers_range
     """
-    all_dims: set[int] = set()
-    for d in diagrams:
-        all_dims.update(d.dimensions())
 
     result: dict[int, dict[str, dict[float, float]]] = {}
-    for dim in sorted(all_dims):
+    for dim in homology_dims:
         births_list: list[np.ndarray] = []
         pers_list: list[np.ndarray] = []
         for d in diagrams:
@@ -50,6 +48,21 @@ def calibrate(
         }
 
     return result
+
+
+def diagram_stats(
+        diagrams: list[PersistenceDiagram],
+        homology_dim: int,
+) -> np.ndarray:
+    rows = []
+    for d in diagrams:
+        pairs = d.finite_pairs(homology_dim)
+        if len(pairs) == 0:
+            continue
+        b, pers = pairs[:, 0],  pairs[:, 1] - pairs[:, 0]
+        rows.append((b.min(), b.max(), pers.max(), pers.sum(), len(pairs)))
+
+    return np.asarray(rows) if rows else np.empty((0, 5))
 
 
 def calibrate_report(
@@ -77,7 +90,7 @@ def calibrate_report(
     return "\n".join(lines)
 
 
-def axis_bounds(
+""" def axis_bounds(
     stats: dict, dim: int, degenerate_birth_frac: float = 0.25
 ) -> tuple[float, float]:
     axes = stats.get(dim)
@@ -87,4 +100,18 @@ def axis_bounds(
     persistence_hi = axes["persistence"].get(99.9, 1.0)
     persistence_hi = 1.0 if persistence_hi <= 0 else persistence_hi
     birth_hi = degenerate_birth_frac * persistence_hi if birth_hi <= 0 else birth_hi
-    return float(birth_hi), float(persistence_hi)
+    return float(birth_hi), float(persistence_hi) """
+
+
+def axis_bounds(diagrams, homology_dim, coverage: float = 0.99, pad: float = 1.05):
+    """Bounds containing the FULL support of `coverage` of diagrams."""
+    s = diagram_stats(diagrams, homology_dim)
+    if len(s) == 0:
+        return (0.0, 1.0), (0.0, 1.0)
+    q = 100.0 * coverage
+    birth_lo = float(np.percentile(s[:, 0], 100.0 - q))
+    birth_hi = float(pad * np.percentile(s[:, 1], q))
+    pers_hi  = float(pad * np.percentile(s[:, 2], q))
+    if birth_hi <= birth_lo:          # degenerate axis — don't fabricate one
+        raise ValueError(f"H{homology_dim} birth axis is degenerate; use a 1-D vectorizer")
+    return (birth_lo, birth_hi), (0.0, pers_hi)

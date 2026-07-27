@@ -39,13 +39,26 @@ SURFACE_COLOR = "#fcfcfb"
 # Loading
 # ══════════════════════════════════════════════════════════════════════════════
 
-def result_path(results_paths: ResultsPaths, filtrations: list, method: str, seed: int) -> Path:
+def parse_method_spec(spec: str) -> tuple[str, str | None]:
+    """"method" (current/untagged results) or "method@run_tag" (an archived
+    variant under <method>/_runs/<run_tag>/ -- see scripts/archive_run.py),
+    so old-vs-new comparisons after a code change don't require the two
+    variants to have different method names."""
+    if "@" in spec:
+        method, run_tag = spec.split("@", 1)
+        return method, run_tag
+    return spec, None
+
+
+def result_path(results_paths: ResultsPaths, filtrations: list, method: str, seed: int, run_tag: str | None = None) -> Path:
     tag_filtrations = [] if method in RAW_TAG_METHODS else filtrations
-    return results_paths.seed_dir(tag_filtrations, method, seed) / "results.pt"
+    return results_paths.seed_dir(tag_filtrations, method, seed, run_tag=run_tag) / "results.pt"
 
 
-def load_seed_result(results_paths: ResultsPaths, filtrations: list, method: str, seed: int) -> dict[str, Any] | None:
-    path = result_path(results_paths, filtrations, method, seed)
+def load_seed_result(
+    results_paths: ResultsPaths, filtrations: list, method: str, seed: int, run_tag: str | None = None
+) -> dict[str, Any] | None:
+    path = result_path(results_paths, filtrations, method, seed, run_tag=run_tag)
     if not path.exists():
         return None
     return torch.load(path, map_location="cpu", weights_only=False)
@@ -54,16 +67,21 @@ def load_seed_result(results_paths: ResultsPaths, filtrations: list, method: str
 def collect_method_results(
     results_paths: ResultsPaths, filtrations: list, methods: list[str], seeds: list[int]
 ) -> dict[str, dict[int, dict[str, Any]]]:
+    """methods: specs as accepted by parse_method_spec (plain method name, or
+    "method@run_tag"). The full spec string is used as the results dict key
+    (and downstream plot/table label), so "pi_multik_towers" and
+    "pi_multik_towers@old" can be compared side by side."""
     results: dict[str, dict[int, dict[str, Any]]] = {}
-    for method in methods:
+    for spec in methods:
+        method, run_tag = parse_method_spec(spec)
         by_seed: dict[int, dict[str, Any]] = {}
         for seed in seeds:
-            result = load_seed_result(results_paths, filtrations, method, seed)
+            result = load_seed_result(results_paths, filtrations, method, seed, run_tag=run_tag)
             if result is None:
-                print(f"  ! missing results.pt for method={method!r} seed={seed}; skipping")
+                print(f"  ! missing results.pt for method={spec!r} seed={seed}; skipping")
                 continue
             by_seed[seed] = result
-        results[method] = by_seed
+        results[spec] = by_seed
     return results
 
 
@@ -323,7 +341,12 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("config", type=Path, help="RunConfig YAML path (process/filtration/seeds source)")
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="path.to.field=value")
-    parser.add_argument("--methods", nargs="+", required=True, help="method subdirectories to compare")
+    parser.add_argument(
+        "--methods", nargs="+", required=True,
+        help="method subdirectories to compare; each is either a plain method name (current/untagged "
+             "results) or method@run_tag to load an archived variant (see scripts/archive_run.py), e.g. "
+             "--methods pi_multik_towers pi_multik_towers@old",
+    )
     parser.add_argument("--name", default="compare", help="name for this comparison's output subdirectory")
     args = parser.parse_args(argv)
 

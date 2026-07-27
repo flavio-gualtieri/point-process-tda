@@ -1,0 +1,64 @@
+# python scripts/train.py configs/runs/nested_thomas/nested_thomas_pi_multik_k5k10k15.yaml --seed 9371
+#
+# Same design as nested_thomas_pi_multik.yaml (mass-fraction m_values channels)
+# but with the original k=5,10,15 DTM channels instead -- for the pool_type
+# (max/avg) x optimizer (Adam/AdamW, toggled in PIMultiKExperiment.run(), not
+# here) assessment. k_values below are auto-derived from the filtration list
+# (no method.params.m_values set), matching the multi-k convention.
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 4
+    random:
+      n_param_vectors: 2000
+      ranges:
+        meta_parent_intensity: {low: 8.0,   high: 13.0,  scale: log}
+        meta_offspring:        {low: 2.5,   high: 4.0,   scale: log}
+        meta_cluster_scale:    {low: 0.05,  high: 0.15,  scale: log}
+        mean_offspring:        {low: 7.0,   high: 12.0,  scale: log}
+        cluster_scale:         {low: 0.003, high: 0.008, scale: log}
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: dtm, params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm, params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm, params: {k: 15, q: 2.0, maxdim: 1}}
+
+features:
+  - name: persistence_image
+    params:
+      resolution: 64
+      sigma_pixels: 2.0
+      homology_dims: [0, 1]
+      pd_calibration_coverage: 0.99
+
+method:
+  name: pi_multik
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+use_adversarial: true
