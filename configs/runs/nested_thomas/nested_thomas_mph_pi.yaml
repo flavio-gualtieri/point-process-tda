@@ -1,0 +1,91 @@
+# python scripts/train.py configs/runs/nested_thomas/nested_thomas_mph_pi.yaml --seed 9371
+#
+# Same process/bifiltration/features block as nested_thomas_mph.yaml (kept
+# identical on purpose: bifiltration name+params determine the path_tag
+# ("mph_dtm0.05") that dataset paths resolve under, so this must match
+# exactly to reuse the already-computed data/nested_thomas/mph_dtm0.05/
+# {mph_image,adversarial_mph_image}.pkl rather than silently pointing at a
+# different, uncomputed bundle). Adds a method: block -- mph_pi is the CNN
+# in src/cloudforger/nn/experiments/mph_pi.py, same CoordConv+ParameterEstimator
+# architecture as pi_multik (see that module's docstring), applied to the
+# mph_image feature instead of pi_multik's several single-k images.
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration: []
+
+bifiltration:
+  - name: mph_dtm
+    params:
+      dtm_mass: 0.05
+      homology_dims: [0, 1]
+      threshold_radius: 0.40
+
+features:
+  - name: mph_image
+    params:
+      resolution: 64
+      sigma_pixels: 0.75
+      clip_mass: true
+
+method:
+  name: mph_pi
+  params:
+    homology_dims: [0, 1]
+
+    # ===================== CoordConv encoder (matches pi_multik's per-branch encoder) =====================
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    # ============================ regression head ============================
+    # head_hidden_dims/head_dropout aren't wired through the shared single-source
+    # Experiment runner (nn/experiments/base.py always builds ParameterEstimator
+    # with its own defaults). Those defaults are (64, 32) / 0.1 -- already what
+    # pi_multik configures explicitly -- so architecture parity holds without
+    # setting them here; see mph_pi.py's docstring.
+
+    # ============================ optimization =============================
+    # 500 epochs to match vihrs's budget (nested_thomas_vihrs.yaml) for the
+    # comparison. The shared Experiment runner trains with plain Adam
+    # (weight_decay fixed at 1e-4) and no early stopping, unlike pi_multik's
+    # own AdamW + early_stopping_patience loop -- a training-recipe
+    # difference from pi_multik, not an architecture one. Smoke-tested at
+    # 25 epochs/1 seed first (loss 0.85->0.35 train, sane) before committing
+    # to this budget.
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+
+seeds: [9371, 9372, 9373]
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names:    [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+use_adversarial: true

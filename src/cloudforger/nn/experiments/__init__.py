@@ -5,6 +5,7 @@ from .common import MultiSourceExperiment
 from .raw_pc import RawPointCloudExperiment
 from .pairwise import PairwiseExperiment
 from .persistence_image import PersistenceImageExperiment
+from .mph_pi import MPHImageExperiment
 from .betti import BettiCurveExperiment
 from .betti_cnn import BettiCurveCNNExperiment
 from .ph_combined import PHCombinedExperiment
@@ -25,6 +26,7 @@ __all__ = [
     "RawPointCloudExperiment",
     "PairwiseExperiment",
     "PersistenceImageExperiment",
+    "MPHImageExperiment",
     "BettiCurveExperiment",
     "BettiCurveCNNExperiment",
     "PHCombinedExperiment",

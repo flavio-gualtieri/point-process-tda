@@ -51,7 +51,7 @@ from cloudforger import baselines
 from cloudforger.config import RunConfig, load_config
 from cloudforger.core.io import load_pickle
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
+from cloudforger.filtration import BIFILTRATION_REGISTRY, REGISTRY as FILTRATION_REGISTRY
 from cloudforger.filtration.base import Filtration
 from cloudforger.nn.experiments.base import build_experiment
 from cloudforger.nn.experiments.common import MultiSourceExperiment, save_results
@@ -69,6 +69,15 @@ FILTRATION_INDEPENDENT_FILE_KEYS = {"raw_pc", "pairwise"}
 
 def build_filtrations(cfg: RunConfig) -> list[Filtration]:
     return [FILTRATION_REGISTRY.build(f.name, **f.params) for f in cfg.filtration]
+
+
+def build_bifiltrations(cfg: RunConfig) -> list[Filtration]:
+    """Bifiltration counterpart of build_filtrations -- Bifiltration only
+    implements .path_tag() of the Filtration interface, but that's all
+    DataPaths/ResultsPaths (paths.py) ever call, same as ExplicitTag's
+    stand-in, so these are interchangeable wherever a list[Filtration] is
+    used purely for path resolution below."""
+    return [BIFILTRATION_REGISTRY.build(b.name, **b.params) for b in cfg.bifiltration]
 
 
 def build_method_cfg(cfg: RunConfig, seed: int) -> dict[str, Any]:
@@ -309,6 +318,15 @@ def main(argv: list[str] | None = None) -> None:
     data_paths = DataPaths(cfg.process.name, root=cfg.data_root or DEFAULT_DATA_ROOT)
     results_paths = ResultsPaths(cfg.process.name, root=cfg.results_root or DEFAULT_RESULTS_ROOT)
     filtrations = build_filtrations(cfg)
+    bifiltrations = build_bifiltrations(cfg)
+    # A config sets `filtration:` (single-parameter) or `bifiltration:`
+    # (mph_*), never both -- whichever is non-empty is what dataset/results
+    # paths get tagged with below. Every existing config only ever sets
+    # `filtration:`, so this is a no-op (path_filtrations == filtrations)
+    # for all of them; bifiltrations only becomes non-empty for configs
+    # like nested_thomas_mph.yaml that couldn't reach run_experiment_method
+    # at all before (no `method:` block).
+    path_filtrations = bifiltrations or filtrations
 
     seeds = [args.seed] if args.seed is not None else cfg.seeds
 
@@ -320,7 +338,7 @@ def main(argv: list[str] | None = None) -> None:
             elif cfg.method.name in CLASSICAL_BASELINE_NAMES:
                 run_classical_baseline(cfg.method.name, cfg, seed, data_paths, results_paths, args.force, run_tag=args.run_tag)
             else:
-                run_experiment_method(cfg, seed, data_paths, results_paths, filtrations, args.force, run_tag=args.run_tag)
+                run_experiment_method(cfg, seed, data_paths, results_paths, path_filtrations, args.force, run_tag=args.run_tag)
         except Exception:
             print(f"[{cfg.method.name} seed={seed}] FAILED:")
             traceback.print_exc()
