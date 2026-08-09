@@ -1,8 +1,16 @@
 # src/cloudforger/filtration/bifiltration.py
 
 from __future__ import annotations
+from typing import Any
 from abc import ABC, abstractmethod
 
+import numpy as np
+import multipers as mp
+import multipers.filtrations as F
+
+from multipers.filtrations.density import DTM
+
+from ..core.signed_measure import SignedMeasure
 from ..core.cloud import PointCloud
 
 class Bifiltration(ABC):
