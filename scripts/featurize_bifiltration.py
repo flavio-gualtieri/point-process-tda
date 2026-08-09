@@ -56,7 +56,7 @@ from cloudforger.vectorizers.signed_measure_image import build_signed_measure_im
 # beat looser ones on every fine-scale target; the same reasoning applies to the
 # codensity axis here.
 GRID_RESOLUTION_MIN = 50
-GRID_RESOLUTION_MAX = 512
+GRID_RESOLUTION_MAX = 600
 GRID_COVERAGE = 0.95
 GRID_SAMPLE = 500
 
