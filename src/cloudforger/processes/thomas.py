@@ -1,6 +1,9 @@
 # src/cloudforger/processes/thomas.py
 
+import math
+
 import numpy as np
+
 from .neyman_scott import NeymanScottProcess, gaussian_displacements, poisson_counts
 
 
@@ -25,5 +28,6 @@ class ThomasProcess(NeymanScottProcess):
             param_dict={
                 "mean_offspring": mean_offspring,
                 "cluster_scale": cluster_scale,
+                "c1": 2.0 * cluster_scale * math.sqrt(parent_intensity),
             },
         )

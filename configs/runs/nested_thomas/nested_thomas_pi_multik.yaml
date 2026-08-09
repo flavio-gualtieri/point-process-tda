@@ -5,15 +5,25 @@ process:
   seed: 0
   design:
     mode: random
-    reps: 4
+    reps: 1                          # was 4
     random:
-      n_param_vectors: 2000
+      n_param_vectors: 8000          # was 2000
       ranges:
-        meta_parent_intensity: {low: 8.0,   high: 13.0,  scale: log}
-        meta_offspring:        {low: 2.5,   high: 4.0,   scale: log}
-        meta_cluster_scale:    {low: 0.05,  high: 0.15,  scale: log}
-        mean_offspring:        {low: 7.0,   high: 12.0,  scale: log}
-        cluster_scale:         {low: 0.003, high: 0.008, scale: log}
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
   adversarial:
     enabled: true
     fraction: 0.125
