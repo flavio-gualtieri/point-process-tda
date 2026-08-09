@@ -1,42 +1,60 @@
 # python scripts/train.py configs/runs/nested_thomas/nested_thomas_pi_multik_k5k10k15.yaml --seed 9371
 #
-# Same design as nested_thomas_pi_multik.yaml (mass-fraction m_values channels)
-# but with the original k=5,10,15 DTM channels instead -- for the pool_type
-# (max/avg) x optimizer (Adam/AdamW, toggled in PIMultiKExperiment.run(), not
-# here) assessment. k_values below are auto-derived from the filtration list
-# (no method.params.m_values set), matching the multi-k convention.
+# Same design as nested_thomas_pi_multik.yaml (mass-fraction m_values
+# channels) but with rips + DTM k=5,10,15 channels instead -- for the
+# pool_type (max/avg) x optimizer (Adam/AdamW, toggled in
+# PIMultiKExperiment.run(), not here) assessment. k_values below are
+# auto-derived from the filtration list (no method.params.m_values set),
+# matching the multi-k convention.
+#
+# process.design kept in sync with nested_thomas_pi_multik.yaml's K/mu1/EN/
+# c1/c2 reparametrization (was the old flat meta_parent_intensity/etc.
+# ranges) -- descriptive only, since data/nested_thomas/clouds.pkl already
+# exists and both scripts/featurize.py and slurm/featurize_diagrams_slurm.py
+# key data/nested_thomas/ off process.name alone, not this design block.
 
 process:
   name: nested_thomas
   seed: 0
   design:
     mode: random
-    reps: 4
+    reps: 1
     random:
-      n_param_vectors: 2000
+      n_param_vectors: 8000
       ranges:
-        meta_parent_intensity: {low: 8.0,   high: 13.0,  scale: log}
-        meta_offspring:        {low: 2.5,   high: 4.0,   scale: log}
-        meta_cluster_scale:    {low: 0.05,  high: 0.15,  scale: log}
-        mean_offspring:        {low: 7.0,   high: 12.0,  scale: log}
-        cluster_scale:         {low: 0.003, high: 0.008, scale: log}
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
   adversarial:
     enabled: true
     fraction: 0.125
     seed_offset: 100000
 
 filtration:
-  - {name: dtm, params: {k: 5,  q: 2.0, maxdim: 1}}
-  - {name: dtm, params: {k: 10, q: 2.0, maxdim: 1}}
-  - {name: dtm, params: {k: 15, q: 2.0, maxdim: 1}}
+  - {name: rips, params: {maxdim: 1}}
+  - {name: dtm,  params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 15, q: 2.0, maxdim: 1}}
 
 features:
   - name: persistence_image
     params:
       resolution: 64
-      sigma_pixels: 2.0
+      sigma_pixels: 0.75
       homology_dims: [0, 1]
-      pd_calibration_coverage: 0.99
+      pd_calibration_coverage: 0.95
 
 method:
   name: pi_multik

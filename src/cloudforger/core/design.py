@@ -8,18 +8,34 @@ using cloudforger.processes.REGISTRY instead of a duplicate local mapping."""
 
 from __future__ import annotations
 
+import math
 import inspect
 import itertools
-from dataclasses import dataclass
-from typing import Any, Iterable, Iterator
 
 import numpy as np
+
+from dataclasses import dataclass
+from typing import Any, Iterable, Iterator
 
 from ..processes import REGISTRY as PROCESS_REGISTRY
 from .cloud import PointCloud
 from .region import Box, Region
 
 DEFAULT_ADVERSARIAL_SEED_OFFSET = 100_000
+
+_SAFE = {"sqrt": math.sqrt, "log": math.log, "exp": math.exp, "pi": math.pi}
+
+
+def apply_derived(params: dict, derived: dict | None) -> dict:
+    out = dict(params)
+    for name, expr in (derived or {}).items():
+        out[name] = float(eval(expr, {"__builtins__": {}}, {**_SAFE, **out}))
+    return out
+
+
+def passes(params: dict, constraints: list[str] | None) -> bool:
+    return all(bool(eval(c, {"__builtins__": {}}, {**_SAFE, **params}))
+               for c in (constraints or []))
 
 
 def default_region(dimension: int = 2) -> Region:
@@ -90,9 +106,19 @@ def build_param_vectors(design: dict[str, Any], design_rng: np.random.Generator)
 
     if mode == "random":
         random_cfg = design["random"]
-        n_param_vectors = int(random_cfg["n_param_vectors"])
-        ranges = random_cfg["ranges"]
-        return [sample_param_vector(ranges, design_rng) for _ in range(n_param_vectors)]
+        n = int(random_cfg["n_param_vectors"])
+        ranges     = random_cfg["ranges"]
+        derived    = random_cfg.get("derived")
+        constraints = random_cfg.get("constraints")
+        out, tries = [], 0
+        while len(out) < n:
+            tries += 1
+            if tries > 200 * n:
+                raise RuntimeError("constraints reject nearly everything; loosen them")
+            p = apply_derived(sample_param_vector(ranges, design_rng), derived)
+            if passes(p, constraints):
+                out.append(p)
+        return out
 
     raise ValueError(f"Unknown design.mode {mode!r}; use 'grid' or 'random'.")
 

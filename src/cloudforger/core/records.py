@@ -165,3 +165,33 @@ def features_to_record(cf: CorrelationFeatures) -> dict[str, Any]:
         "process": cf.generator_name,
         "statistic_params": dict(cf.statistic_params),
     }
+
+
+# ---------------------------------------------------------------------------
+# Signed measure
+# ---------------------------------------------------------------------------
+
+def signed_measure_to_record(sm: SignedMeasure) -> dict[str, Any]:
+    return {
+        "measures": {int(dim): (np.asarray(a), np.asarray(w)) for dim, (a, w) in sm.measures.items()},
+        "grid": (np.asarray(sm.grid[0]), np.asarray(sm.grid[1])),
+        "axis_names": sm.axis_names,
+        "params": dict(sm.generator_params),
+        "seed": sm.seed,
+        "process": sm.generator_name,
+        "filtration": sm.filtration_name,
+        "filtration_params": dict(sm.filtration_params),
+    }
+
+
+def record_to_signed_measure(record: dict[str, Any]) -> SignedMeasure:
+    return SignedMeasure(
+        measures={int(dim): (np.asarray(a), np.asarray(w)) for dim, (a, w) in record["measures"].items()},
+        grid=(np.asarray(record["grid"][0]), np.asarray(record["grid"][1])),
+        axis_names=tuple(record.get("axis_names", ("x", "y"))),
+        generator_name=record.get("process", ""),
+        generator_params=dict(record.get("params", {})),
+        seed=record.get("seed"),
+        filtration_name=record.get("filtration", ""),
+        filtration_params=dict(record.get("filtration_params", {})),
+    )
