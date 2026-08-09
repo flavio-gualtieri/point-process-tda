@@ -19,6 +19,7 @@ from .features import CorrelationFeatures
 from .region import Box
 from .io import load_pickle
 from ..features.result import BettiCurveFeature
+from .signed_measure import SignedMeasure
 
 
 # ---------------------------------------------------------------------------
@@ -195,3 +196,18 @@ def record_to_signed_measure(record: dict[str, Any]) -> SignedMeasure:
         filtration_name=record.get("filtration", ""),
         filtration_params=dict(record.get("filtration_params", {})),
     )
+
+
+def load_signed_measure_bundle(path: Path) -> dict[str, Any]:
+    data = load_pickle(path)
+    if not (isinstance(data, dict) and "signed_measures" in data):
+        raise ValueError(
+            f"{path} is not a signed-measure bundle "
+            f"(keys: {sorted(data) if isinstance(data, dict) else type(data).__name__})."
+        )
+    return data
+
+
+def load_signed_measures(path: Path) -> tuple[list[SignedMeasure], dict[str, Any]]:
+    bundle = load_signed_measure_bundle(path)
+    return [record_to_signed_measure(r) for r in bundle["signed_measures"]], bundle

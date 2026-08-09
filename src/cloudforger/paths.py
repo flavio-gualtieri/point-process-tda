@@ -109,6 +109,10 @@ class DataPaths:
         prefix = "adversarial_" if adversarial else ""
         return self.filtration_dir(filtrations) / f"{prefix}diagrams.pkl"
 
+    def signed_measures(self, bifiltrations, adversarial: bool = False) -> Path:
+        prefix = "adversarial_" if adversarial else ""
+        return self.filtration_dir(bifiltrations) / f"{prefix}signed_measures.pkl"
+
     def feature(self, filtrations: list[Filtration] | None, feature_name: str, adversarial: bool = False) -> Path:
         prefix = "adversarial_" if adversarial else ""
         return self.filtration_dir(filtrations) / f"{prefix}{feature_name}.pkl"

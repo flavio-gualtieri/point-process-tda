@@ -115,3 +115,52 @@ def axis_bounds(diagrams, homology_dim, coverage: float = 0.99, pad: float = 1.0
     if birth_hi <= birth_lo:          # degenerate axis — don't fabricate one
         raise ValueError(f"H{homology_dim} birth axis is degenerate; use a 1-D vectorizer")
     return (birth_lo, birth_hi), (0.0, pers_hi)
+
+def bifiltration_grid(
+    clouds,
+    bifiltration,
+    resolution: int = 50,
+    coverage: float = 0.95,
+    n_sample: int | None = 500,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Choose the shared computation grid for a bifiltration, from TRAIN clouds only.
+
+    Unlike axis_bounds (which sizes a picture to already-computed diagrams),
+    this runs BEFORE any persistence computation, because the grid determines
+    which module is computed: a grid coarser than the smallest feature scale
+    rounds fine structure away entirely, silently.
+
+    Axis 0 (geometric scale) is fixed by the bifiltration's own radius cutoff,
+    so the complex and the grid cannot disagree about what the axis means.
+    Axis 1 is set by pooled percentiles of the vertex function -- pooled, not
+    per-cloud extrema, matching what the coverage sweep showed for images.
+
+    Cheap: touches only the vertex function, never builds a complex.
+    """
+    if not clouds:
+        raise ValueError("bifiltration_grid needs at least one cloud.")
+    if n_sample is not None and len(clouds) > n_sample:
+        idx = np.random.default_rng(seed).choice(len(clouds), n_sample, replace=False)
+        clouds = [clouds[i] for i in idx]
+
+    values = np.concatenate([np.asarray(bifiltration.vertex_function(c)).ravel()
+                             for c in clouds])
+    q = 100.0 * coverage
+    lo, hi = np.percentile(values, [100.0 - q, q])
+    if not np.isfinite([lo, hi]).all() or hi <= lo:
+        raise ValueError(f"Degenerate vertex-function range: ({lo}, {hi}).")
+
+    thresh = float(bifiltration.params["threshold_radius"])
+    return (np.linspace(0.0, thresh, resolution),
+            np.linspace(float(lo), float(hi), resolution))
+
+
+def check_grid_resolves(grid, cluster_scale_min: float) -> None:
+    step = float(grid[0][1] - grid[0][0])
+    if step > cluster_scale_min:
+        raise ValueError(
+            f"Grid step {step:.5f} exceeds the smallest cluster scale "
+            f"{cluster_scale_min:.5f}; fine structure will be rounded away. "
+            f"Need resolution >= {int(np.ceil(grid[0][-1] / cluster_scale_min))}."
+        )
