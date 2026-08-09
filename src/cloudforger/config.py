@@ -87,7 +87,15 @@ class RunConfig:
         if method_raw is not None:
             method = method_raw if isinstance(method_raw, MethodConfig) else MethodConfig(**method_raw)
 
-        return cls(process=process, filtration=filtration, features=features, method=method, **d)
+        bifiltration_raw = d.pop("bifiltration", [])
+        if isinstance(bifiltration_raw, dict):
+            bifiltration_raw = [bifiltration_raw]
+        bifiltration = [
+            b if isinstance(b, BifiltrationConfig) else BifiltrationConfig(**b)
+            for b in bifiltration_raw
+        ]
+
+        return cls(process=process, filtration=filtration, features=features, method=method, bifiltration=bifiltration, **d)
 
 
 def _set_by_dotted_path(target: dict[str, Any], dotted_key: str, value: Any) -> None:

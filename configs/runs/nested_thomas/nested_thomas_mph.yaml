@@ -1,0 +1,49 @@
+# python scripts/featurize_bifiltration.py configs/runs/nested_thomas/nested_thomas_mph.yaml --limit 500
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration: []
+
+bifiltration:
+  - name: mph_dtm
+    params:
+      dtm_mass: 0.05
+      homology_dims: [0]
+      threshold_radius: 0.25
+
+features:
+  - name: mph_image
+    params:
+      resolution: 64
+      sigma_pixels: 0.75
+      clip_mass: true
+
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names:    [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
