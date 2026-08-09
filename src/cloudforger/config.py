@@ -30,6 +30,12 @@ class FiltrationConfig:
 
 
 @dataclass
+class BifiltrationConfig:
+    name: str  # registry key: dtm_bifiltration
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class FeatureConfig:
     name: str  # registry key: betti_curve, persistence_image, persistence_entropy
     params: dict[str, Any] = field(default_factory=dict)
@@ -45,6 +51,7 @@ class MethodConfig:
 class RunConfig:
     process: ProcessConfig
     filtration: list[FiltrationConfig] = field(default_factory=list)  # empty for raw_pc/vihrs/mincontrast/palm
+    bifiltration: list[BifiltrationConfig] = field(default_factory=list)  # empty for raw_pc/vihrs/mincontrast/palm
     features: list[FeatureConfig] = field(default_factory=list)
     method: MethodConfig | None = None
     seeds: list[int] = field(default_factory=lambda: [0])
