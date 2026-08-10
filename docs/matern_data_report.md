@@ -52,7 +52,7 @@ constraint (§4).
 | Frozen held-out (`adversarial_clouds.pkl`) | 1,000 | 250 | 4 |
 
 2,000 parameter vectors are drawn once from the ranges in §4, then split 12.5% /
-87.5% **before** repetition via `cloudforger.core.design.split_adversarial_vectors`
+87.5% **before** repetition via `cloudforger.data_generation.design.split_adversarial_vectors`
 (seeded independently via `base_seed + 100_000`), then each surviving vector is
 realized 4 times with different point-process seeds (`reps: 4`) — the same
 `n_param_vectors: 2000` / `reps: 4` / `fraction: 0.125` convention as
@@ -164,7 +164,7 @@ a consequence of the range choice in §4.
 - Base seed 47 (`process.seed` in `configs/runs/matern_pi_multik.yaml`) drives the
   design RNG (parameter-vector sampling) and every train/test cloud's seed; the
   frozen set uses `seed + 100_000`, this repo's standard adversarial-holdout offset
-  (`cloudforger.core.design.DEFAULT_ADVERSARIAL_SEED_OFFSET`).
+  (`cloudforger.data_generation.design.DEFAULT_ADVERSARIAL_SEED_OFFSET`).
 - Re-running `python scripts/generate.py configs/runs/matern_pi_multik.yaml` without
   `--force` is a no-op if `data/matern/clouds.pkl` already exists; `--force`
   regenerates deterministically from the same seed.

@@ -51,7 +51,7 @@ lets the point-count constraint (§3) and the scale-separation constraint
 
 2,000 parameter vectors are drawn once from the ranges in §4, then split
 12.5% / 87.5% **before** repetition, using the repo's existing
-adversarial-holdout mechanism (`cloudforger.core.design.split_adversarial_vectors`,
+adversarial-holdout mechanism (`cloudforger.data_generation.design.split_adversarial_vectors`,
 seeded independently via `base_seed + 100_000`). Each surviving vector is
 then realized 4 times with different point-process seeds (`reps: 4`), giving
 7,000 + 1,000 clouds from 1,750 + 250 underlying parameter draws.
