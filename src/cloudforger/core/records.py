@@ -18,7 +18,7 @@ from .diagram import PersistenceDiagram
 from .features import CorrelationFeatures
 from .region import Box
 from .io import load_pickle
-from ..features.result import BettiCurveFeature
+from ..vectorization.scalar_features.result import BettiCurveFeature
 from .signed_measure import SignedMeasure
 
 
