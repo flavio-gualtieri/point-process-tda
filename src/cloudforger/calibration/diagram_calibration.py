@@ -1,8 +1,8 @@
-# src/cloudforger/core/calibration.py
+# src/cloudforger/calibration/diagram_calibration.py
 
 from __future__ import annotations
 
-from .diagram import PersistenceDiagram
+from ..core.diagram import PersistenceDiagram
 
 import numpy as np
 
