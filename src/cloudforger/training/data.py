@@ -1,4 +1,4 @@
-# src/cloudforger/nn/data.py
+# src/cloudforger/training/data.py
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 
 from ..core.cloud import PointCloud
 from ..core.features import CorrelationFeatures
-from ..features.result import BettiCurveFeature
+from ..vectorization.scalar_features.result import BettiCurveFeature
 
 
 def _parse_dim_key(key: Any) -> int | None:
