@@ -1,0 +1,65 @@
+# python scripts/train.py configs/runs/thomas/thomas_mph_fusion.yaml
+#
+# thomas counterpart of nested_thomas/nested_thomas_mph_fusion.yaml -- same
+# mph_fusion method (src/cloudforger/nn/experiments/mph_fusion.py: vihrs
+# L(r)-r branch + mph_pi CoordConv branch, late-fused).
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration: []
+
+bifiltration:
+  - name: mph_dtm
+    params:
+      dtm_mass: 0.05
+      homology_dims: [0, 1]
+      threshold_radius: 0.40
+
+features:
+  - name: mph_image
+    params:
+      resolution: 64
+      sigma_pixels: 0.75
+      clip_mass: true
+
+method:
+  name: mph_fusion
+  params:
+    homology_dims: [0, 1]
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0001
+
+seeds: [9371, 9372, 9373]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names:    [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true

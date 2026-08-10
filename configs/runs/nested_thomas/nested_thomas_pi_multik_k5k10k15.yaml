@@ -43,7 +43,12 @@ process:
     seed_offset: 100000
 
 filtration:
-  - {name: rips, params: {maxdim: 1}}
+  # rips deliberately excluded: its H0 birth axis is degenerate (every Rips
+  # H0 feature is born at filtration value 0), which build_calibrated_imager
+  # rejects outright ("H0 birth axis is degenerate; use a 1-D vectorizer") --
+  # confirmed by running featurize.py against this file with rips included.
+  # pi_multik's channel format is uniformly 2D persistence images, so rips
+  # isn't usable here regardless; matches the k5/k10/k15-only name/request.
   - {name: dtm,  params: {k: 5,  q: 2.0, maxdim: 1}}
   - {name: dtm,  params: {k: 10, q: 2.0, maxdim: 1}}
   - {name: dtm,  params: {k: 15, q: 2.0, maxdim: 1}}

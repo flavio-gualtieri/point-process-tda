@@ -1,0 +1,31 @@
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Method & Test loss & Adversarial loss \\
+\midrule
+\texttt{vihrs} & 0.2171 $\pm$ 0.0037 & 0.2194 $\pm$ 0.0055 \\
+\texttt{mph\_pi} & 0.2095 $\pm$ 0.0045 & 0.2186 $\pm$ 0.0031 \\
+\texttt{mph\_fusion} & 0.1965 $\pm$ 0.0022 & 0.1966 $\pm$ 0.0009 \\
+\bottomrule
+\end{tabular}
+\caption{Nested Thomas: overall test/adversarial loss, mean $\pm$ std over 3 seeds.}
+\label{tab:nested-thomas-overall}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lccccc}
+\toprule
+Method & parent\_intensity & meta\_offspring & meta\_cluster\_scale & mean\_offspring & cluster\_scale \\
+\midrule
+\texttt{vihrs} & 0.320 & 0.494 & 0.132 & 0.112 & 0.028 \\
+\texttt{mph\_pi} & 0.289 & 0.449 & 0.158 & 0.109 & 0.042 \\
+\texttt{mph\_fusion} & 0.280 & 0.445 & 0.131 & 0.097 & 0.029 \\
+\bottomrule
+\end{tabular}
+\caption{Nested Thomas: per-target test loss, mean over 3 seeds (see Fig.~ for error bars).}
+\label{tab:nested-thomas-per-target}
+\end{table}

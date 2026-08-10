@@ -15,8 +15,24 @@ Usage:
 
 from __future__ import annotations
 
+import os
+
+# Single-threaded BLAS/OpenMP per process, set before numpy is imported
+# anywhere in the chain below (including in ProcessPoolExecutor workers,
+# which re-import this module under macOS's 'spawn' start method) --
+# _compute_diagrams's per-cloud DTM/Rips computation turned out to already
+# be internally multi-threaded, so N worker PROCESSES x M internal threads
+# each was oversubscribing the machine's cores far worse than N alone would
+# (observed: a single diagram computation took 58s under 2-process
+# contention vs ~2-4s typical) -- one thread per worker process instead.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import argparse
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -34,13 +50,35 @@ from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
 from cloudforger.vectorizers.calibrated import build_calibrated_imager
 
 
+def _compute_one_diagram(rec: dict, filtration: Filtration):
+    """Module-level (picklable) target for ProcessPoolExecutor workers --
+    a bound/nested function can't cross the process boundary."""
+    return filtration.compute(to_pointcloud(rec))
+
+
 def _compute_diagrams(clouds_records: list[dict], filtration: Filtration, tag: str) -> list:
-    diagrams = []
-    for i, rec in enumerate(clouds_records):
-        cloud = to_pointcloud(rec)
-        diagrams.append(filtration.compute(cloud))
-        if (i + 1) % 500 == 0 or i + 1 == len(clouds_records):
-            print(f"  [{tag}] {i + 1}/{len(clouds_records)} diagrams computed", flush=True)
+    n = len(clouds_records)
+    workers = max(1, os.cpu_count() or 1)
+    # Small workloads (e.g. a --limit smoke run) aren't worth process-pool
+    # spawn overhead -- plain sequential loop, same as before.
+    if workers <= 1 or n < 200:
+        diagrams = []
+        for i, rec in enumerate(clouds_records):
+            diagrams.append(_compute_one_diagram(rec, filtration))
+            if (i + 1) % 500 == 0 or i + 1 == n:
+                print(f"  [{tag}] {i + 1}/{n} diagrams computed", flush=True)
+        return diagrams
+
+    diagrams: list = [None] * n
+    done = 0
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_compute_one_diagram, rec, filtration): i for i, rec in enumerate(clouds_records)}
+        for future in as_completed(futures):
+            i = futures[future]
+            diagrams[i] = future.result()
+            done += 1
+            if done % 500 == 0 or done == n:
+                print(f"  [{tag}] {done}/{n} diagrams computed ({workers} workers)", flush=True)
     return diagrams
 
 

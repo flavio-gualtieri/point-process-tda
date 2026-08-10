@@ -116,6 +116,12 @@ def _multi_source_dataset_paths(
 ) -> dict[str, Any]:
     multi_k = cfg.method.name in MULTI_K_METHODS
     m_values = cfg.method.params.get("m_values")
+    # bifiltration-based multi-source methods (mph_fusion) read mph_image.pkl,
+    # not persistence_image.pkl -- same cfg.bifiltration branch build_bifiltrations
+    # uses for path tagging above, kept as a presence check (not a method-name
+    # allowlist) so any future bifiltration-based multi-source method picks
+    # this up automatically.
+    image_feature_name = "mph_image" if cfg.bifiltration else "persistence_image"
     paths: dict[str, Any] = {}
     if "clouds" in exp.file_keys:
         paths["clouds"] = data_paths.clouds(adversarial=adversarial)
@@ -125,7 +131,7 @@ def _multi_source_dataset_paths(
         elif multi_k:
             paths["images"] = [data_paths.feature([f], "persistence_image", adversarial=adversarial) for f in filtrations]
         else:
-            paths["images"] = data_paths.feature(filtrations, "persistence_image", adversarial=adversarial)
+            paths["images"] = data_paths.feature(filtrations, image_feature_name, adversarial=adversarial)
     if "betti" in exp.file_keys:
         paths["betti"] = data_paths.feature(filtrations, "betti_curve", adversarial=adversarial)
     return paths

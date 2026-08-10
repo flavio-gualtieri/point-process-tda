@@ -1,0 +1,89 @@
+# python scripts/train.py configs/runs/nested_thomas/nested_thomas_mph_fusion.yaml
+#
+# vihrs (L(r)-r + n(x)) + mph_pi (CoordConv over the mph_dtm bifiltration
+# image) fused by concatenating both branch embeddings before a shared head
+# -- see src/cloudforger/nn/experiments/mph_fusion.py. Same process/
+# bifiltration/features block as nested_thomas_mph.yaml/nested_thomas_mph_pi.yaml
+# on purpose (bifiltration name+params determine the path_tag ("mph_dtm0.05")
+# dataset paths resolve under -- must match exactly to reuse the already-
+# computed data/nested_thomas/mph_dtm0.05/{mph_image,adversarial_mph_image}.pkl).
+#
+# Motivation: mph_pi and vihrs, run separately for 3 seeds each, split wins by
+# target -- mph_pi better at parent_intensity/meta_offspring, vihrs better at
+# cluster_scale/meta_cluster_scale (see results/nested_thomas/{mph_dtm0.05/
+# mph_pi,raw/vihrs_checkpointed}). This tests whether fusing them gets both.
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration: []
+
+bifiltration:
+  - name: mph_dtm
+    params:
+      dtm_mass: 0.05
+      homology_dims: [0, 1]
+      threshold_radius: 0.40
+
+features:
+  - name: mph_image
+    params:
+      resolution: 64
+      sigma_pixels: 0.75
+      clip_mass: true
+
+method:
+  name: mph_fusion
+  params:
+    homology_dims: [0, 1]
+
+    # ===================== mph_pi branch (CoordConvPIEncoder) ======================
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    # ============================ regression head ============================
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    # ============================ optimization =============================
+    # Same 500-epoch budget as the standalone mph_pi/vihrs comparison runs.
+    # This module has its own bespoke training loop (mph_fusion.py, mirrors
+    # pi_multik_fusion.py) -- plain Adam with configurable weight_decay,
+    # no early stopping, best-val-loss checkpoint reloaded before final eval.
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0001
+
+seeds: [9371, 9372, 9373]
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names:    [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+use_adversarial: true
