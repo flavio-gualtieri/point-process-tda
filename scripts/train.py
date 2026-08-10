@@ -12,9 +12,9 @@ timestamp, run_tag) written into results.json/results.pt and appended as a
 row to results/experiments.jsonl -- see cloudforger.provenance.
 
 One method name (RunConfig's method.name) selects the estimator regardless
-of whether it's a CNN (cloudforger.nn.experiments), a classical estimator
+of whether it's a CNN (cloudforger.experiments), a classical estimator
 (mincontrast/palm), or the vihrs neural baseline -- all three write the
-identical output schema (cloudforger.nn.experiments.common.save_results),
+identical output schema (cloudforger.experiments.common.save_results),
 so scripts/evaluate.py has exactly one code path no matter which one
 produced the numbers.
 
@@ -51,10 +51,10 @@ from cloudforger import baselines
 from cloudforger.config import RunConfig, load_config
 from cloudforger.core.io import load_pickle
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.filtration import BIFILTRATION_REGISTRY, REGISTRY as FILTRATION_REGISTRY
-from cloudforger.filtration.base import Filtration
-from cloudforger.nn.experiments.base import build_experiment
-from cloudforger.nn.experiments.common import MultiSourceExperiment, save_results
+from cloudforger.data_generation.filtration import BIFILTRATION_REGISTRY, REGISTRY as FILTRATION_REGISTRY
+from cloudforger.data_generation.filtration.base import Filtration
+from cloudforger.experiments.base import build_experiment
+from cloudforger.experiments.common import MultiSourceExperiment, save_results
 from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths, ExplicitTag, ResultsPaths, is_done
 
 MULTI_K_METHODS = {"pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers", "pi_multik_earlyfusion"}

@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.config import load_config
-from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
+from cloudforger.data_generation.filtration import REGISTRY as FILTRATION_REGISTRY
 from cloudforger.paths import DEFAULT_RESULTS_ROOT, RUN_ARCHIVE_DIR_NAME, ResultsPaths
 from cloudforger.provenance import provenance_stamp
 

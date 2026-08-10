@@ -46,10 +46,10 @@ sys.path.insert(0, str(ROOT / "src"))
 from cloudforger.config import load_config
 from cloudforger.core.io import dump_pickle
 from cloudforger.core.records import load_diagrams
-from cloudforger.features import REGISTRY as FEATURE_REGISTRY
-from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
+from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
+from cloudforger.data_generation.filtration import REGISTRY as FILTRATION_REGISTRY
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
-from cloudforger.vectorizers.calibrated import build_calibrated_imager
+from cloudforger.vectorization.persistence_images.calibrated import build_calibrated_imager
 
 SWEEP_DIR_NAME = "sigma_sweep"
 

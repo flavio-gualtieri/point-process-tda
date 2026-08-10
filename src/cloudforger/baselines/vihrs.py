@@ -17,8 +17,9 @@ in the same results.pt / results.json / model.pt schema so it drops straight
 into a comparison alongside every other method (see cloudforger's train/
 evaluate CLI scripts).
 
-This module does NOT import or modify anything under cloudforger.nn -- it is
-a fully independent implementation of the paper's own recipe. It DOES reuse
+This module does NOT import or modify anything under cloudforger.experiments/
+encoders/models/training -- it is a fully independent implementation of the
+paper's own recipe. It DOES reuse
 two small, framework-agnostic pieces of this package, on purpose, for a fair
 and exact comparison: cloudforger.core.metrics' marginal-metric formulas (so
 "same metrics" means literally the same code, not a re-derivation that could
@@ -67,7 +68,7 @@ differs, on each of these)
 * Target and n(x) standardization: the paper's step 2(d) is explicit here
   too — plain (non-log) z-score, fit on the training split only and frozen
   for test/adversarial (item 3b). We deliberately deviate and log-transform
-  first, matching cloudforger.nn.experiments.base._normalize_labels_by_name:
+  first, matching cloudforger.experiments.base._normalize_labels_by_name:
   this repo's process designs sample parameters on wide, log-uniform ranges
   (e.g. parent_intensity 10-200, cluster_scale 0.005-0.1), where plain
   z-score would leave MSE dominated by the top of the range. Same reasoning
@@ -79,7 +80,7 @@ differs, on each of these)
   evaluates the final network. Pass checkpoint_best=True to instead select
   the best-val-loss checkpoint before the final test/adversarial evaluation,
   matching the convention every other method in this repo uses (see
-  cloudforger.nn.experiments.base._train_and_eval) -- useful when you want
+  cloudforger.experiments.base._train_and_eval) -- useful when you want
   vihrs's test loss to get the same fair treatment every other method here
   gets, rather than the paper's literal no-checkpointing recipe.
 
@@ -294,11 +295,11 @@ def get_features(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Label / input normalization (mirrors cloudforger.nn.experiments.base)
+# Label / input normalization (mirrors cloudforger.experiments.base)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def fit_log_zscore(values: np.ndarray) -> dict[str, np.ndarray]:
-    """Mirrors _normalize_labels_by_name in cloudforger.nn.experiments.base:
+    """Mirrors _normalize_labels_by_name in cloudforger.experiments.base:
     log-transform then z-score, fit on the given (training) values."""
     if np.any(values <= 0):
         raise ValueError("Cannot log-transform non-positive values.")
@@ -404,7 +405,7 @@ def evaluate_loss(model, loader, loss_fn, device) -> float:
 def evaluate_per_target_loss(model, loader, device) -> np.ndarray:
     """Per-target (standardized-space) MSE -- same quantity evaluate_loss
     averages down to one scalar, kept per-column so it's directly comparable
-    to cloudforger.nn.train.evaluate_per_target's output for the TDA methods
+    to cloudforger.training.train.evaluate_per_target's output for the TDA methods
     (same standardized log-zscore space, same label_names order)."""
     model.eval()
     total_sq_err, count = None, 0
@@ -693,7 +694,7 @@ def run_one_seed(
         "run_tag": run_tag,
     }
 
-    # Provenance: same stamp shape cloudforger.nn.experiments.common.save_results
+    # Provenance: same stamp shape cloudforger.experiments.common.save_results
     # uses, so results.json is self-sufficient (commit/dirty/when/run_tag)
     # without loading the torch file, and this run gets a row in the shared
     # results/experiments.jsonl ledger regardless of which code path wrote it.

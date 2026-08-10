@@ -43,11 +43,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from cloudforger.config import FeatureConfig, RunConfig, load_config
 from cloudforger.core.io import dump_pickle, load_pickle
 from cloudforger.core.records import diagram_to_record, load_diagrams, to_pointcloud
-from cloudforger.features import REGISTRY as FEATURE_REGISTRY
-from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
-from cloudforger.filtration.base import Filtration
+from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
+from cloudforger.data_generation.filtration import REGISTRY as FILTRATION_REGISTRY
+from cloudforger.data_generation.filtration.base import Filtration
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
-from cloudforger.vectorizers.calibrated import build_calibrated_imager
+from cloudforger.vectorization.persistence_images.calibrated import build_calibrated_imager
 
 
 def _compute_one_diagram(rec: dict, filtration: Filtration):
@@ -146,7 +146,7 @@ def _compute_betti_curve(
     train_diagrams: list, train_bundle: dict, adv_diagrams: list | None, adv_bundle: dict | None,
     feat_cfg: FeatureConfig, out_path: Path, adv_out_path: Path,
 ) -> None:
-    from cloudforger.features.calibrated import build_calibrated_betti_curves
+    from cloudforger.vectorization.scalar_features.calibrated import build_calibrated_betti_curves
 
     homology_dims = tuple(feat_cfg.params.get("homology_dims", (0, 1)))
     grid_size = int(feat_cfg.params.get("grid_size", 512))

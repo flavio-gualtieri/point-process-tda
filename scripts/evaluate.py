@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.config import RunConfig, load_config
-from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
+from cloudforger.data_generation.filtration import REGISTRY as FILTRATION_REGISTRY
 from cloudforger.paths import DEFAULT_RESULTS_ROOT, ResultsPaths
 
 # Methods whose results always live under the "raw" filtration tag,

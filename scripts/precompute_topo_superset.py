@@ -46,7 +46,7 @@ from cloudforger.core.cloud import PointCloud
 from cloudforger.core.diagram import PersistenceDiagram
 from cloudforger.core.io import dump_pickle, load_pickle
 from cloudforger.core.records import diagram_to_record, to_pointcloud
-from cloudforger.filtration import DTMFiltration
+from cloudforger.data_generation.filtration import DTMFiltration
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
 
 # Log-spaced mass-fraction grid: fine end (0.01-0.15) covers the current

@@ -39,17 +39,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.config import BifiltrationConfig, RunConfig, load_config
-from cloudforger.core.calibration import bifiltration_grid, check_grid_resolves
+from cloudforger.calibration import bifiltration_grid, check_grid_resolves
 from cloudforger.core.io import dump_pickle, load_pickle
 from cloudforger.core.records import (
     load_signed_measures,
     signed_measure_to_record,
     to_pointcloud,
 )
-from cloudforger.filtration import BIFILTRATION_REGISTRY
-from cloudforger.filtration.bifiltration import Bifiltration
+from cloudforger.data_generation.filtration import BIFILTRATION_REGISTRY
+from cloudforger.data_generation.filtration.bifiltration import Bifiltration
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
-from cloudforger.vectorizers.signed_measure_image import build_signed_measure_imagers
+from cloudforger.vectorization.persistence_images.signed_measure_image import build_signed_measure_imagers
 
 # Calibration defaults. Coverage is 0.95 rather than 0.99 because the repo's own
 # sigma/coverage sweep (results/nested_thomas/sigma_sweep) found tighter bounds

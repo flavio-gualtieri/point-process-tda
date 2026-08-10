@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from cloudforger.config import load_config
 from cloudforger.core.io import load_pickle
 from cloudforger.core.records import load_signed_measures
-from cloudforger.filtration import BIFILTRATION_REGISTRY
+from cloudforger.data_generation.filtration import BIFILTRATION_REGISTRY
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
 
 FULL_N = 8000  # what the full run will process, for projecting cost

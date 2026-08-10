@@ -44,9 +44,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from cloudforger.config import load_config
 from cloudforger.core.io import dump_pickle
 from cloudforger.core.records import load_diagrams
-from cloudforger.features import REGISTRY as FEATURE_REGISTRY
+from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
-from cloudforger.vectorizers.calibrated import build_calibrated_imager
+from cloudforger.vectorization.persistence_images.calibrated import build_calibrated_imager
 
 # Even log-spaced coverage of precompute_topo_superset.py's full 11-point m
 # grid (0.01 ... 0.90): fine end matches the existing k=5,10,15 regime,

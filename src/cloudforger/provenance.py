@@ -2,7 +2,7 @@
 """Per-run provenance stamping + a flat experiment ledger.
 
 Shared by every place that writes results.pt/results.json --
-cloudforger.nn.experiments.common.save_results and baselines.vihrs.run_one_seed
+cloudforger.experiments.common.save_results and baselines.vihrs.run_one_seed
 (which duplicates that schema by hand instead of calling save_results) -- so
 "what commit/config produced this?" is answerable from results.json alone
 without loading a torch file, and "what have I run, and how did it do?" is

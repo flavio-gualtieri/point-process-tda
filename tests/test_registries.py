@@ -9,9 +9,9 @@ from __future__ import annotations
 import numpy as np
 
 from cloudforger.core.region import Box
-from cloudforger.features import REGISTRY as FEATURE_REGISTRY
-from cloudforger.filtration import REGISTRY as FILTRATION_REGISTRY
-from cloudforger.processes import REGISTRY as PROCESS_REGISTRY
+from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
+from cloudforger.data_generation.filtration import REGISTRY as FILTRATION_REGISTRY
+from cloudforger.data_generation.point_processes import REGISTRY as PROCESS_REGISTRY
 
 
 def _sample_cloud(process_name: str, **params):
@@ -61,7 +61,7 @@ def test_feature_registry_betti_and_entropy():
 
 
 def test_calibrated_imager():
-    from cloudforger.vectorizers.calibrated import build_calibrated_imager
+    from cloudforger.vectorization.persistence_images.calibrated import build_calibrated_imager
 
     clouds = [_sample_cloud("thomas", parent_intensity=50.0, mean_offspring=8.0, cluster_scale=0.03, edge_buffer=0.1) for _ in range(3)]
     dtm = FILTRATION_REGISTRY.build("dtm", k=5)
