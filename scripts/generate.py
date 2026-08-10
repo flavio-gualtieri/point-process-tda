@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.config import load_config
-from cloudforger.core.design import CloudDesign
+from cloudforger.data_generation.design import CloudDesign
 from cloudforger.core.io import dump_pickle
 from cloudforger.core.records import cloud_to_record
 from cloudforger.paths import DEFAULT_DATA_ROOT, DataPaths
