@@ -1,0 +1,210 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{graphicx}
+\usepackage{caption}
+
+\definecolor{linknavy}{HTML}{2a4d8f}
+\hypersetup{colorlinks=true, linkcolor=linknavy, urlcolor=linknavy, citecolor=linknavy}
+
+
+\setlist[itemize]{topsep=2pt, itemsep=2pt, parsep=0pt}
+
+\title{Multiparameter Persistent Homology vs.\ Classical Baselines\\
+\large A Three-Seed Comparison on Thomas and Nested-Thomas Point Processes}
+\author{point-process-tda}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-2em}
+
+\tableofcontents
+
+\section{Overview}
+
+This report compares four parameter-estimation methods across two point-process
+families, each trained for 3 seeds (9371--9373) with the same train/val/test split
+per seed within a process, so every method sees identical data:
+
+\begin{itemize}
+  \item \textbf{vihrs} --- classical baseline: a 1-D CNN over the centred Ripley
+    $L(r)-r$ function plus the point count $n(x)$, reproducing Vihrs (2022).
+  \item \textbf{pi\_multik (k=5,10,15)} --- this repo's multi-scale persistence-image
+    CNN: a shared CoordConv encoder applied independently to DTM-filtration
+    persistence images at three density scales ($k=5,10,15$), late-fused before an
+    MLP head.
+  \item \textbf{mph\_pi} --- a CNN over a genuinely \emph{multiparameter} persistent
+    homology image: a single joint (density, radius) bifiltration signed measure,
+    rendered as one $(H_0,H_1)$ image pair. Architecturally identical to
+    \texttt{pi\_multik}'s single-scale branch (CoordConv encoder + MLP head) ---
+    the only structural difference is that scale is already folded into the second
+    filtration axis, so there is no $k$-axis to fuse across.
+  \item \textbf{mph\_fusion} --- late fusion of \texttt{vihrs}'s $L(r)-r$ branch and
+    \texttt{mph\_pi}'s CoordConv branch, motivated by the two methods specializing
+    in different targets (Section~\ref{sec:nested-thomas}).
+\end{itemize}
+
+All targets are trained in \emph{standardized log space}: each target is
+log-transformed, then $z$-scored using the mean/std fit on that seed's training
+split; the reported loss is always mean squared error (MSE) on that standardized
+scale. Section~\ref{sec:units} explains exactly what a given loss value means in
+the original, physical units of each parameter.
+
+\section{Reading the loss numbers}
+\label{sec:units}
+
+Every loss in this report is a standardized MSE, not a raw squared error in
+physical units --- so ``0.03'' does not mean the same thing for every target, and
+does not mean anything at all without translation. This section makes that
+translation concrete.
+
+\subsection{Why the scale is arbitrary without context}
+
+Each target $y$ (e.g.\ \texttt{parent\_intensity}) is transformed before training
+as $z = \bigl(\log y - \mu_{\log}\bigr)/\sigma_{\log}$, where $\mu_{\log}$ and
+$\sigma_{\log}$ are the mean and standard deviation of $\log y$ on that seed's
+\emph{training} split. The model is scored by $\mathrm{MSE} =
+\mathbb{E}\bigl[(\hat z - z)^2\bigr]$ on the test split. Two properties fall out of
+this construction:
+
+\begin{itemize}
+  \item \textbf{The ``no-skill'' baseline is $\approx 1$.} A model that always
+    predicts the training mean ($\hat z = 0$) scores $\mathrm{MSE} \approx
+    \mathrm{Var}(z) \approx 1$ (by construction, on data drawn like the training
+    set). So loss values are naturally read against 1.0, not against 0: a loss of
+    0.5 means the model is explaining about half the variance in log-space, a loss
+    of 0.03 means it is explaining almost all of it.
+  \item \textbf{$R^2 \approx 1 - \mathrm{loss}$.} This is the standard
+    variance-explained interpretation, directly usable without further
+    transformation.
+  \item \textbf{The same loss value means a different real-world error for
+    different targets}, because $\sigma_{\log}$ (how spread out that target is in
+    log-space to begin with) differs by target. A target that already spans a
+    narrow log-range needs a much smaller absolute log-error to reach a given
+    standardized loss than a target that spans a wide one.
+\end{itemize}
+
+\subsection{From standardized loss to a physical error factor}
+
+Undoing both transforms (z-score, then log) turns a standardized RMSE into a
+\emph{multiplicative} error factor in the original units: if
+$\mathrm{RMSE}_z = \sqrt{\mathrm{loss}}$, then a ``typical'' prediction sits within
+a factor of $\exp\!\bigl(\mathrm{RMSE}_z \cdot \sigma_{\log}\bigr)$ of the true
+value. Tables~\ref{tab:loss-units-nested-thomas} and \ref{tab:loss-units-thomas} apply this to every target actually used in
+this report, at a range of representative loss values.
+
+\input{mph_comparison_report_loss_units.tex}
+
+\textbf{Worked example.} A loss of $0.03$ on \texttt{cluster\_scale}
+(nested Thomas, $\sigma_{\log}=0.655$) corresponds to $R^2=0.97$ and a typical
+prediction within about $\pm12\%$ of the true value; the same loss of $0.03$ on
+\texttt{meta\_offspring} ($\sigma_{\log}=0.409$) --- a target with less inherent
+log-spread --- corresponds to the same $R^2$ but a tighter $\pm7\%$ typical error.
+The take-away: compare loss numbers \emph{within} a target/process across methods
+freely, but don't compare raw loss values \emph{across} targets without consulting
+Tables~\ref{tab:loss-units-nested-thomas}/\ref{tab:loss-units-thomas} first.
+
+\section{Nested Thomas process}
+\label{sec:nested-thomas}
+
+Nested Thomas is a two-level cluster process (meta-clusters of sub-clusters),
+with five targets: \texttt{parent\_intensity}, \texttt{meta\_offspring},
+\texttt{meta\_cluster\_scale}, \texttt{mean\_offspring}, \texttt{cluster\_scale}.
+8000 clouds (7000 train/val/test, 1000 held-out adversarial), $\sigma_{\log}$ per
+target in Table~\ref{tab:loss-units-nested-thomas}.
+
+\input{mph_comparison_report_nested_thomas_table.tex}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/nested_thomas_loss_curves.pdf}
+  \caption{Training/validation loss curves, seed 9371 (representative). \texttt{vihrs}
+    and \texttt{pi\_multik} use early stopping (patience 30/50 epochs on validation
+    loss); \texttt{mph\_pi}/\texttt{mph\_fusion} always run the full 500-epoch budget
+    but reload the best-validation-loss checkpoint before final evaluation, so all
+    four are compared on their best-checkpoint numbers regardless of curve length.}
+  \label{fig:nested-thomas-curves}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/nested_thomas_per_target.pdf}
+  \caption{Per-target test loss, mean $\pm$ std over 3 seeds.}
+  \label{fig:nested-thomas-per-target}
+\end{figure}
+
+\textbf{Finding: the two feature sources specialize.} \texttt{mph\_pi} is clearly
+better at the intensity/count targets (\texttt{parent\_intensity},
+\texttt{meta\_offspring}); \texttt{vihrs} is clearly better at the spatial-scale
+targets (\texttt{cluster\_scale}, \texttt{meta\_cluster\_scale}) --- consistent
+with what each feature actually encodes: Ripley's $L(r)-r$ is built to detect a
+characteristic clustering \emph{radius} directly, while the DTM-bifiltration image
+is fundamentally a density/topology signal. \texttt{mph\_fusion} recovers
+\texttt{mph\_pi}'s advantage on the intensity targets while narrowing (though not
+fully closing) \texttt{vihrs}'s advantage on \texttt{cluster\_scale}, and wins
+outright on \texttt{mean\_offspring}. On overall test loss, \texttt{mph\_fusion}
+beats both individual methods in all 3/3 seeds.
+
+\section{Thomas process}
+\label{sec:thomas}
+
+Plain Thomas is a single-level cluster process, with three targets:
+\texttt{parent\_intensity}, \texttt{mean\_offspring}, \texttt{cluster\_scale}.
+Same 8000-cloud (7000+1000) split convention as nested Thomas.
+
+\input{mph_comparison_report_thomas_table.tex}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/thomas_loss_curves.pdf}
+  \caption{Training/validation loss curves, seed 9371 (representative).}
+  \label{fig:thomas-curves}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/thomas_per_target.pdf}
+  \caption{Per-target test loss, mean $\pm$ std over 3 seeds.}
+  \label{fig:thomas-per-target}
+\end{figure}
+
+\section{Overall comparison}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/overall_comparison.pdf}
+  \caption{Overall (all-target) test loss by method, mean $\pm$ std over 3 seeds.}
+  \label{fig:overall}
+\end{figure}
+
+\section{Notes on comparability}
+
+\begin{itemize}
+  \item \textbf{Training recipes differ.} \texttt{vihrs} and \texttt{pi\_multik}
+    use their own bespoke training loops (Adam/AdamW with early stopping on
+    validation loss); \texttt{mph\_pi}/\texttt{mph\_fusion} use this repo's shared
+    single-source training runner (plain Adam, fixed weight decay, no early
+    stopping --- always trains the full epoch budget). All four reload the
+    best-validation-loss checkpoint before final test/adversarial evaluation, so
+    final numbers are comparable despite the different stopping rules; the
+    difference only costs \texttt{mph\_pi}/\texttt{mph\_fusion} extra wall-clock
+    time; it does not advantage either side numerically.
+  \item \textbf{Data provenance.} All numbers here come from data generated (or
+    regenerated) after this report's underlying pipeline changes; two data issues
+    were found and fixed while producing these results: \texttt{nested\_thomas}'s
+    $k=5$ diagrams had never finished computing, and \texttt{thomas}'s point
+    clouds had been lost (the $k=5/10/15$ diagrams on disk no longer matched any
+    reproducible cloud set) and were regenerated from the process's seeded design.
+  \item \textbf{Adversarial loss} is evaluated on a held-out population generated
+    with a disjoint seed offset, never seen during training or model selection.
+\end{itemize}
+
+\end{document}

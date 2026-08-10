@@ -1,0 +1,52 @@
+# python scripts/featurize_bifiltration.py configs/runs/thomas/thomas_mph.yaml --limit 500
+#
+# thomas counterpart of nested_thomas/nested_thomas_mph.yaml -- same mph_dtm
+# bifiltration hyperparameters (dtm_mass/threshold_radius/homology_dims are
+# method hyperparameters, not process-specific; thomas's single clustering
+# scale (c in [0.10, 0.90], same range as nested_thomas's meta_cluster_scale)
+# is coarser than nested_thomas's two-scale case that 0.40 was already
+# validated against, so it should comfortably resolve here too -- verify via
+# the --limit 500 smoke run's grid diagnostics before trusting the full run).
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration: []
+
+bifiltration:
+  - name: mph_dtm
+    params:
+      dtm_mass: 0.05
+      homology_dims: [0, 1]
+      threshold_radius: 0.40
+
+features:
+  - name: mph_image
+    params:
+      resolution: 64
+      sigma_pixels: 0.75
+      clip_mass: true
+
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names:    [parent_intensity, mean_offspring, cluster_scale]
