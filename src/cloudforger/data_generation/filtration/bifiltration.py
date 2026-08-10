@@ -5,10 +5,18 @@ from typing import Any
 from abc import ABC, abstractmethod
 
 import numpy as np
-import multipers as mp
-import multipers.filtrations as F
 
-from multipers.filtrations.density import DTM
+# multipers is only installed in the local dev env -- HPC runs never touch
+# DtmRipsBifiltration, but this module is still imported transitively via
+# filtration/__init__.py -> paths.py on every entrypoint (e.g. train.py).
+# Deferring the import to point-of-use keeps that import chain working on
+# HPC and only raises if a caller actually exercises this class.
+try:
+    import multipers as mp
+    import multipers.filtrations as F
+    from multipers.filtrations.density import DTM
+except ImportError:
+    mp = F = DTM = None
 
 from ...core.signed_measure import SignedMeasure
 from ...core.cloud import PointCloud
@@ -51,6 +59,12 @@ class DtmRipsBifiltration(Bifiltration):
     axis_names = ("rips_radius", "dtm_codensity")
 
     def __init__(self, dtm_mass=0.05, homology_dims=(0,), threshold_radius=0.25):
+        if mp is None:
+            raise ImportError(
+                "DtmRipsBifiltration requires the 'multipers' package, which "
+                "isn't installed in this environment (it's dev-only, not "
+                "present on HPC). Install it locally to use this class."
+            )
         self._m, self._dims, self._thresh = dtm_mass, tuple(homology_dims), threshold_radius
 
     @property

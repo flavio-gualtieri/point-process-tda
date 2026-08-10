@@ -227,7 +227,7 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
 
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         lr_seq = vihrs.apply_zscore_global(train_split["lr_seq"], lr_norm).astype(np.float32)
-        pi_img, imagers, channel_norms = pi_multik.build_pi_tensor(
+        pi_img, imagers = pi_multik.build_pi_tensor(
             train_split, k_values, homology_dims=homology_dims, resolution=resolution,
             sigma_pixels=sigma_pixels, coverage=coverage, train_idx=train_idx,
         )
@@ -280,9 +280,9 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         if adv_split is not None:
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_lr_seq = vihrs.apply_zscore_global(adv_split["lr_seq"], lr_norm).astype(np.float32)
-            adv_pi_img, _, _ = pi_multik.build_pi_tensor(
+            adv_pi_img, _ = pi_multik.build_pi_tensor(
                 adv_split, k_values, homology_dims=homology_dims, resolution=resolution,
-                sigma_pixels=sigma_pixels, coverage=coverage, imagers=imagers, channel_norms=channel_norms,
+                sigma_pixels=sigma_pixels, coverage=coverage, imagers=imagers,
             )
             adv_extra, _, _ = pi_multik.build_extra(adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms)
             adv_ds = TensorDataset(
