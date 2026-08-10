@@ -3,14 +3,15 @@
 \small
 \begin{tabular}{lcc}
 \toprule
-Method & Test loss & Adversarial loss \\
+Method & Test loss$^\dagger$ & Adversarial loss$^\dagger$ \\
 \midrule
 \texttt{vihrs} & 0.1154 $\pm$ 0.0091 & 0.1180 $\pm$ 0.0008 \\
+\texttt{pi\_multik} & 0.1248 $\pm$ 0.0064 & 0.1233 $\pm$ 0.0027 \\
 \texttt{mph\_pi} & 0.1307 $\pm$ 0.0051 & 0.1289 $\pm$ 0.0037 \\
 \texttt{mph\_fusion} & 0.1131 $\pm$ 0.0097 & 0.1148 $\pm$ 0.0024 \\
 \bottomrule
 \end{tabular}
-\caption{Thomas: overall test/adversarial loss, mean $\pm$ std over 3 seeds.}
+\caption{Thomas: overall test/adversarial loss, mean $\pm$ std over 3 seeds. $^\dagger$standardized log-MSE (Section~\ref{sec:units}), not raw physical units -- see Table~\ref{tab:loss-units-thomas} to translate.}
 \label{tab:thomas-overall}
 \end{table}
 
@@ -22,10 +23,11 @@ Method & Test loss & Adversarial loss \\
 Method & parent\_intensity & mean\_offspring & cluster\_scale \\
 \midrule
 \texttt{vihrs} & 0.193 & 0.125 & 0.029 \\
+\texttt{pi\_multik} & 0.202 & 0.131 & 0.041 \\
 \texttt{mph\_pi} & 0.210 & 0.143 & 0.040 \\
 \texttt{mph\_fusion} & 0.188 & 0.123 & 0.029 \\
 \bottomrule
 \end{tabular}
-\caption{Thomas: per-target test loss, mean over 3 seeds (see Fig.~ for error bars).}
+\caption{Thomas: per-target test loss (standardized log-MSE, Section~\ref{sec:units}), mean over 3 seeds -- see Table~\ref{tab:loss-units-thomas} to translate, corresponding figure for error bars.}
 \label{tab:thomas-per-target}
 \end{table}

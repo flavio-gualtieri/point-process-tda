@@ -1,0 +1,179 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{graphicx}
+\usepackage{caption}
+
+\definecolor{linknavy}{HTML}{2a4d8f}
+\hypersetup{colorlinks=true, linkcolor=linknavy, urlcolor=linknavy, citecolor=linknavy}
+
+\setlist[itemize]{topsep=2pt, itemsep=2pt, parsep=0pt}
+
+\title{Multiparameter Persistent Homology vs.\ Classical Baselines\\
+\large Concise Summary --- Thomas and Nested-Thomas Point Processes}
+\author{point-process-tda}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-2em}
+
+\section{Setup}
+
+\begin{itemize}
+  \item 4 methods, 2 processes, 3 seeds each (9371--9373), identical train/val/test
+    split per seed within a process.
+  \item \textbf{vihrs}: 1-D CNN over Ripley $L(r)-r$ + $n(x)$ (Vihrs 2022 baseline).
+  \item \textbf{pi\_multik (k=5,10,15)}: shared CoordConv encoder over DTM
+    persistence images at 3 density scales, late-fused.
+  \item \textbf{mph\_pi}: CoordConv encoder over one joint (density, radius)
+    bifiltration image --- same architecture as \texttt{pi\_multik}'s branch, no
+    $k$-axis (scale is already a filtration axis).
+  \item \textbf{mph\_fusion}: \texttt{vihrs} branch + \texttt{mph\_pi} branch,
+    late-fused.
+  \item All targets: log-transformed, then $z$-scored (train-split mean/std).
+    Loss = MSE on that standardized scale, always.
+\end{itemize}
+
+\section{Reading the loss numbers}
+\label{sec:units}
+
+\begin{itemize}
+  \item Loss is standardized log-MSE, not raw physical error --- 0.03 does not mean
+    the same thing for every target.
+  \item No-skill baseline $\approx 1.0$ (predicting the training mean). $R^2 \approx
+    1 - \mathrm{loss}$.
+  \item To physical units: $\mathrm{RMSE}_z = \sqrt{\mathrm{loss}}$; typical
+    prediction is within a factor of $\exp(\mathrm{RMSE}_z \cdot \sigma_{\log})$ of
+    the truth, where $\sigma_{\log}$ is that target's log-space std (varies by
+    target --- Table~\ref{tab:loss-units-nested-thomas}).
+  \item Example: loss $0.03$ on \texttt{cluster\_scale} ($\sigma_{\log}=0.655$)
+    $\to$ $R^2=0.97$, $\pm12\%$ typical error. Same loss on \texttt{meta\_offspring}
+    ($\sigma_{\log}=0.409$) $\to$ same $R^2$, tighter $\pm7\%$.
+  \item Compare loss freely \emph{within} a target/process; always translate before
+    comparing \emph{across} targets.
+\end{itemize}
+
+\input{mph_comparison_report_loss_units.tex}
+
+\section{Nested Thomas}
+\label{sec:nested-thomas}
+
+\begin{itemize}
+  \item Two-level cluster process, 5 targets, 8000 clouds (7000 train/val/test + 1000
+    adversarial).
+\end{itemize}
+
+\input{mph_comparison_report_nested_thomas_table.tex}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/nested_thomas_loss_curves.pdf}
+  \caption{Loss curves, seed 9371. All 4 methods reload the best-val-loss
+    checkpoint before final eval regardless of stopping rule.}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/nested_thomas_per_target.pdf}
+  \caption{Per-target test loss, mean $\pm$ std over 3 seeds.}
+\end{figure}
+
+\textbf{Findings:}
+\begin{itemize}
+  \item Overall test loss: \texttt{pi\_multik} (0.1927) $\approx$
+    \texttt{mph\_fusion} (0.1965) $<$ \texttt{mph\_pi} (0.2095) $<$ \texttt{vihrs}
+    (0.2171).
+  \item No method wins every target.
+  \item \texttt{mph\_pi} $>$ \texttt{vihrs} on intensity/count targets
+    (\texttt{parent\_intensity}, \texttt{meta\_offspring}).
+  \item \texttt{vihrs} $>$ \texttt{mph\_pi} on \texttt{cluster\_scale} --- $L(r)-r$
+    targets clustering radius directly; the bifiltration image is a
+    density/topology signal.
+  \item \texttt{mph\_fusion} wins \texttt{parent\_intensity} and
+    \texttt{meta\_cluster\_scale} outright; beats both parent methods overall in
+    3/3 seeds.
+  \item \texttt{pi\_multik} wins \texttt{meta\_offspring} and
+    \texttt{mean\_offspring} outright --- 3 fixed DTM scales capture nearly what
+    the joint bifiltration does here.
+  \item \texttt{vihrs} alone wins only \texttt{cluster\_scale}, but wins it clearly.
+  \item Takeaway: representation choice trades off \emph{which} targets it
+    resolves best; fusion is the more robust default.
+\end{itemize}
+
+\section{Thomas}
+\label{sec:thomas}
+
+\begin{itemize}
+  \item Single-level cluster process, 3 targets, same 8000-cloud split convention.
+  \item \texttt{pi\_multik} (and, after a local crash, \texttt{vihrs}/\texttt{mph\_pi}/
+    \texttt{mph\_fusion} too) trained on HPC and downloaded rather than run locally
+    --- see Section~\ref{sec:comparability}.
+\end{itemize}
+
+\input{mph_comparison_report_thomas_table.tex}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/thomas_loss_curves.pdf}
+  \caption{Loss curves, seed 9371.}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/thomas_per_target.pdf}
+  \caption{Per-target test loss, mean $\pm$ std over 3 seeds.}
+\end{figure}
+
+\textbf{Findings:}
+\begin{itemize}
+  \item Overall test loss: \texttt{mph\_fusion} (0.1131) $<$ \texttt{vihrs}
+    (0.1154) $<$ \texttt{pi\_multik} (0.1248) $<$ \texttt{mph\_pi} (0.1307).
+  \item Unlike nested Thomas, \texttt{pi\_multik} does not lead here --- one
+    clustering scale to resolve instead of two, so sweeping 3 DTM $k$ values adds
+    less on top of a single bifiltration or a direct radius estimate.
+  \item \texttt{mph\_fusion} wins \texttt{parent\_intensity} and
+    \texttt{mean\_offspring} outright.
+  \item \texttt{vihrs} alone still wins \texttt{cluster\_scale} clearly (0.029 vs.\
+    0.040 for the DTM-based methods) --- same pattern as nested Thomas.
+  \item Takeaway: fusing $L(r)-r$ in rather than discarding it is what wins
+    overall, both processes.
+\end{itemize}
+
+\section{Overall}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/overall_comparison.pdf}
+  \caption{Overall test loss by method, mean $\pm$ std over 3 seeds.}
+\end{figure}
+
+\section{Comparability notes}
+\label{sec:comparability}
+
+\begin{itemize}
+  \item \texttt{vihrs}/\texttt{pi\_multik}: bespoke loops, early stopping.
+    \texttt{mph\_pi}/\texttt{mph\_fusion}: shared runner, fixed epoch budget, no
+    early stopping. All four reload best-val-loss checkpoint before final eval ---
+    comparable despite different stopping rules; only wall-clock cost differs.
+  \item Two data issues found and fixed while producing these results:
+    \texttt{nested\_thomas}'s $k=5$ diagrams had never finished computing;
+    \texttt{thomas}'s point clouds had been lost and were regenerated from the
+    process's seeded design.
+  \item \texttt{thomas}: all 4 methods' results were trained on HPC and
+    downloaded (local runs were lost to a crash / proved too memory-heavy to
+    finish reliably); validated on arrival (clean unpickle, correct labels,
+    expected record counts) but not independently re-run locally to confirm
+    byte-identical reproduction.
+  \item Adversarial loss: held-out population, disjoint seed offset, never seen
+    during training/model selection.
+\end{itemize}
+
+\end{document}

@@ -141,17 +141,30 @@ target in Table~\ref{tab:loss-units-nested-thomas}.
   \label{fig:nested-thomas-per-target}
 \end{figure}
 
-\textbf{Finding: the two feature sources specialize.} \texttt{mph\_pi} is clearly
-better at the intensity/count targets (\texttt{parent\_intensity},
-\texttt{meta\_offspring}); \texttt{vihrs} is clearly better at the spatial-scale
-targets (\texttt{cluster\_scale}, \texttt{meta\_cluster\_scale}) --- consistent
-with what each feature actually encodes: Ripley's $L(r)-r$ is built to detect a
-characteristic clustering \emph{radius} directly, while the DTM-bifiltration image
-is fundamentally a density/topology signal. \texttt{mph\_fusion} recovers
-\texttt{mph\_pi}'s advantage on the intensity targets while narrowing (though not
-fully closing) \texttt{vihrs}'s advantage on \texttt{cluster\_scale}, and wins
-outright on \texttt{mean\_offspring}. On overall test loss, \texttt{mph\_fusion}
-beats both individual methods in all 3/3 seeds.
+\textbf{Finding: no single method dominates every target, and the strongest
+overall performer is a close contest between two very different architectures.}
+Overall (all-target) test loss ranks
+\texttt{pi\_multik} (0.1927) $\approx$ \texttt{mph\_fusion} (0.1965) $<$
+\texttt{mph\_pi} (0.2095) $<$ \texttt{vihrs} (0.2171) --- but that ordering
+does not hold target-by-target. \texttt{mph\_pi} (single joint bifiltration
+image) is clearly better than \texttt{vihrs} at the intensity/count targets
+(\texttt{parent\_intensity}, \texttt{meta\_offspring}); \texttt{vihrs}'s
+$L(r)-r$ is clearly better at \texttt{cluster\_scale} --- consistent with what
+each feature actually encodes: $L(r)-r$ is built to detect a characteristic
+clustering \emph{radius} directly, while the DTM-bifiltration image is
+fundamentally a density/topology signal. \texttt{mph\_fusion} (late-fusing
+those two) wins \texttt{parent\_intensity} and \texttt{meta\_cluster\_scale}
+outright and beats both of its parent methods on overall test loss in all 3/3
+seeds. \texttt{pi\_multik} (three single-parameter DTM scales, $k=5,10,15$,
+fused) takes a different route to a similarly strong result, winning
+\texttt{meta\_offspring} and \texttt{mean\_offspring} outright --- sweeping
+several fixed density scales evidently captures much of what the joint
+bifiltration captures, at least on this process. \texttt{vihrs} alone wins
+only \texttt{cluster\_scale}, but wins it clearly (0.028 vs.\ 0.029--0.043 for
+everything else), so it is not dominated either. The practical takeaway: the
+choice of TDA representation trades off \emph{which} parameters it resolves
+best, not just \emph{how well} on average, and fusion (of either kind) is the
+more robust choice when no single target dominates the estimation task.
 
 \section{Thomas process}
 \label{sec:thomas}
@@ -159,6 +172,9 @@ beats both individual methods in all 3/3 seeds.
 Plain Thomas is a single-level cluster process, with three targets:
 \texttt{parent\_intensity}, \texttt{mean\_offspring}, \texttt{cluster\_scale}.
 Same 8000-cloud (7000+1000) split convention as nested Thomas.
+\texttt{pi\_multik} for this process was trained on HPC rather than locally
+(Section~\ref{sec:comparability}); everything else matches the nested-Thomas
+protocol exactly, same 3 seeds.
 
 \input{mph_comparison_report_thomas_table.tex}
 
@@ -176,6 +192,18 @@ Same 8000-cloud (7000+1000) split convention as nested Thomas.
   \label{fig:thomas-per-target}
 \end{figure}
 
+\textbf{Finding: a cleaner win for fusion here than on nested Thomas.} Overall
+test loss ranks \texttt{mph\_fusion} (0.1131) $<$ \texttt{vihrs} (0.1154) $<$
+\texttt{pi\_multik} (0.1248) $<$ \texttt{mph\_pi} (0.1307). Unlike nested Thomas,
+\texttt{pi\_multik} does not lead here --- with only one clustering scale to
+resolve (rather than two nested ones), sweeping three DTM $k$ values adds less
+on top of a single joint bifiltration or a direct radius estimate.
+\texttt{mph\_fusion} wins \texttt{parent\_intensity} and \texttt{mean\_offspring}
+outright; \texttt{vihrs} alone still wins \texttt{cluster\_scale} clearly (0.029
+vs.\ 0.040 for the DTM-based methods) --- the same pattern as nested Thomas:
+$L(r)-r$ remains the sharpest tool specifically for the spatial-scale target,
+and fusing it in rather than discarding it is what wins overall.
+
 \section{Overall comparison}
 
 \begin{figure}[htbp]
@@ -186,6 +214,7 @@ Same 8000-cloud (7000+1000) split convention as nested Thomas.
 \end{figure}
 
 \section{Notes on comparability}
+\label{sec:comparability}
 
 \begin{itemize}
   \item \textbf{Training recipes differ.} \texttt{vihrs} and \texttt{pi\_multik}
@@ -203,6 +232,17 @@ Same 8000-cloud (7000+1000) split convention as nested Thomas.
     $k=5$ diagrams had never finished computing, and \texttt{thomas}'s point
     clouds had been lost (the $k=5/10/15$ diagrams on disk no longer matched any
     reproducible cloud set) and were regenerated from the process's seeded design.
+  \item \textbf{Compute location.} \texttt{thomas}'s \texttt{pi\_multik} (3
+    seeds) was trained on HPC and its results downloaded rather than trained
+    locally, after the local diagram-computation step for this method proved too
+    memory-heavy for reliable local execution (see the repo history around
+    \texttt{scripts/featurize.py}'s per-cloud persistent-homology computation).
+    Every other number in this report --- including \texttt{thomas}'s
+    \texttt{vihrs}/\texttt{mph\_pi}/\texttt{mph\_fusion} runs, which were
+    \emph{also} re-obtained from that same HPC download after a local crash lost
+    the original local copies --- was validated (clean unpickle, correct label
+    set, expected record counts) before being incorporated here, but was not
+    independently re-run in both places to confirm byte-identical reproduction.
   \item \textbf{Adversarial loss} is evaluated on a held-out population generated
     with a disjoint seed offset, never seen during training or model selection.
 \end{itemize}
