@@ -1,0 +1,66 @@
+# nested_thomas process -> plain Rips filtration -> Betti curves (H0+H1) -> CNN
+# regressor. Rips deliberately paired with betti_cnn, not pi/pi_multik/mph_pi:
+# Rips's H0 birth axis is degenerate (every H0 feature is born at filtration
+# value 0), which the calibrated 2D persistence-image builder rejects outright
+# ("H0 birth axis is degenerate; use a 1-D vectorizer" -- hit this directly
+# removing rips from nested_thomas_pi_multik_k5k10k15.yaml). Betti curves are
+# 1-D functions of the single filtration parameter, so this is unaffected --
+# same reasoning as this repo's legacy rips runs (results/legacy/{matern,
+# inhom_thomas}/rips), just via betti_cnn instead of per-dim pi_0/pi_1/betti_0/
+# betti_1, to keep both homology dimensions in one model.
+#
+# data/nested_thomas/rips/{diagrams,adversarial_diagrams}.pkl already exist and
+# were verified against the current clouds.pkl (7000/7000 clouds, seeds/params
+# match exactly) -- only the betti_curve feature needs computing here.
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: rips, params: {maxdim: 1}}
+
+features:
+  - name: betti_curve
+    params: {grid_size: 512, homology_dims: [0, 1]}
+
+method:
+  name: betti_cnn_01
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    embedding_dim: 64
+
+seeds: [9371, 9372, 9373]
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names:    [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+use_adversarial: true
+
+# python scripts/featurize.py configs/runs/nested_thomas/nested_thomas_rips_betti_cnn.yaml
+# python scripts/train.py configs/runs/nested_thomas/nested_thomas_rips_betti_cnn.yaml

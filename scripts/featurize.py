@@ -58,10 +58,28 @@ def _compute_one_diagram(rec: dict, filtration: Filtration):
 
 def _compute_diagrams(clouds_records: list[dict], filtration: Filtration, tag: str) -> list:
     n = len(clouds_records)
-    workers = max(1, os.cpu_count() or 1)
+    # Capped well below os.cpu_count(): each worker is a fresh spawned
+    # process re-importing numpy/scipy/gudhi/multipers's full C++ backends,
+    # and running all 10 cores' worth concurrently pushed this machine's
+    # memory hard enough to crash the VS Code host process outright (not
+    # just slow things down) -- a few workers is a much safer default.
+    # This machine has only 16GB total RAM. Even bounded (max_tasks_per_child
+    # below), each worker's per-cloud DTM peak still reaches ~1-2GB before a
+    # recycle, and 4 concurrent workers left the system with under 150MB free
+    # -- too close to swapping/OOM given everything else running (editor,
+    # browser, ...). 2 workers leaves real headroom.
+    # Machine is at 16GB RAM and baseline load (editor, browser, ...) alone
+    # was already leaving well under 1GB free before this job adds anything --
+    # after 3 crashes, correctness/stability beats speed here: 1 worker only.
+    workers = max(1, min(1, os.cpu_count() or 1))
     # Small workloads (e.g. a --limit smoke run) aren't worth process-pool
     # spawn overhead -- plain sequential loop, same as before.
-    if workers <= 1 or n < 200:
+    # NOTE: workers==1 still goes through the pool below (not this branch) so
+    # it gets max_tasks_per_child recycling too -- the per-cloud DTM leak
+    # doesn't care whether it's leaking in a worker or the main process, and a
+    # 7000-call unbounded leak in a single process is just as dangerous, only
+    # slower to manifest. Only truly tiny workloads skip the pool entirely.
+    if n < 200:
         diagrams = []
         for i, rec in enumerate(clouds_records):
             diagrams.append(_compute_one_diagram(rec, filtration))
@@ -71,7 +89,12 @@ def _compute_diagrams(clouds_records: list[dict], filtration: Filtration, tag: s
 
     diagrams: list = [None] * n
     done = 0
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    # max_tasks_per_child: the underlying DTM/persistent-homology C++
+    # backend leaks memory per call (observed: a single worker reached
+    # 8GB RSS after ~20-30 calls, unbounded growth, not a fixed import
+    # cost) -- respawning each worker after a handful of tasks resets
+    # that growth instead of letting it run away and exhaust memory.
+    with ProcessPoolExecutor(max_workers=workers, max_tasks_per_child=10) as pool:
         futures = {pool.submit(_compute_one_diagram, rec, filtration): i for i, rec in enumerate(clouds_records)}
         for future in as_completed(futures):
             i = futures[future]
