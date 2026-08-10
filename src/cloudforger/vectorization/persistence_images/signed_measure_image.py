@@ -1,10 +1,10 @@
-# src/cloudforger/vectorizers/signed_measure_image.py
+# src/cloudforger/vectorization/persistence_images/signed_measure_image.py
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..core.signed_measure import SignedMeasure
+from ...core.signed_measure import SignedMeasure
 from .persistence_image import _box_mass
 
 import numpy as np

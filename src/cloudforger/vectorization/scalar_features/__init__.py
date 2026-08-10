@@ -1,4 +1,4 @@
-from ..core.registry import Registry
+from ...core.registry import Registry
 from .base import DiagramFeature
 from .result import BettiCurveFeature
 from .betti_curve import BettiCurve

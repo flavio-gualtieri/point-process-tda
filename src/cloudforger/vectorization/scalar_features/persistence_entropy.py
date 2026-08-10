@@ -1,11 +1,11 @@
-# src/cloudforger/features/persistence_entropy.py
+# src/cloudforger/vectorization/scalar_features/persistence_entropy.py
 
 from __future__ import annotations
 
 from typing import Any
 
 from .base import DiagramFeature
-from ..core.diagram import PersistenceDiagram
+from ...core.diagram import PersistenceDiagram
 
 import numpy as np
 

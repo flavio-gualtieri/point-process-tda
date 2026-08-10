@@ -1,10 +1,10 @@
-# src/cloudforger/vectorizers/multi_channel.py
+# src/cloudforger/vectorization/persistence_images/multi_channel.py
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..core.diagram import PersistenceDiagram
+from ...core.diagram import PersistenceDiagram
 from .persistence_image import PersistenceImager
 
 import numpy as np

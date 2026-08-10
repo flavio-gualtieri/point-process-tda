@@ -1,10 +1,10 @@
-# src/cloudforger/vectorizers/persistence_image.py
+# src/cloudforger/vectorization/persistence_images/persistence_image.py
 
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..core.diagram import PersistenceDiagram
+from ...core.diagram import PersistenceDiagram
 
 import numpy as np
 from scipy.special import erf

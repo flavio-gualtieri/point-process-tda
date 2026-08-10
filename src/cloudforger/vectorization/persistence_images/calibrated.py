@@ -1,4 +1,4 @@
-# src/cloudforger/vectorizers/calibrated.py
+# src/cloudforger/vectorization/persistence_images/calibrated.py
 """Build a MultiChannelImager with ranges auto-calibrated from a diagram
 sample, instead of hand-picked bounds. Reconciles the two independent
 implementations that existed before this refactor
@@ -7,8 +7,8 @@ scripts/processing/params/pipeline_lib/images.py::build_imagers) into one."""
 
 from __future__ import annotations
 
-from ..core.calibration import axis_bounds, calibrate, calibrate_report, diagram_stats
-from ..core.diagram import PersistenceDiagram
+from ...calibration import axis_bounds, calibrate, calibrate_report, diagram_stats
+from ...core.diagram import PersistenceDiagram
 from .multi_channel import MultiChannelImager
 from .persistence_image import PersistenceImager
 

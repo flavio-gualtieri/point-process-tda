@@ -1,11 +1,11 @@
-# src/cloudforger/features/base.py
+# src/cloudforger/vectorization/scalar_features/base.py
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..core.diagram import PersistenceDiagram
+from ...core.diagram import PersistenceDiagram
 
 import numpy as np
 

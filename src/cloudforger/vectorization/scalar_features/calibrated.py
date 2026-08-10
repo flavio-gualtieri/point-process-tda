@@ -1,4 +1,4 @@
-# src/cloudforger/features/calibrated.py
+# src/cloudforger/vectorization/scalar_features/calibrated.py
 """Build BettiCurve features with ranges auto-calibrated from a diagram
 sample, instead of hand-picked bounds. Generalizes
 dtm_experiment/compute_features.py's build_calibrated_betti."""
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..core.diagram import PersistenceDiagram
+from ...core.diagram import PersistenceDiagram
 from .betti_curve import BettiCurve
 
 
