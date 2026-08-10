@@ -59,11 +59,11 @@ def select_labels(
     return labels[:, idx], list(target_label_names)
 
 
-def normalize_labels_by_name(
+def _log_transform_by_name(
     labels: np.ndarray,
     label_names: list[str],
     log_label_names: list[str] | None,
-) -> tuple[np.ndarray, dict]:
+) -> tuple[np.ndarray, list[str]]:
     log_set = set(log_label_names or label_names)
 
     transformed = labels.astype(float).copy()
@@ -78,15 +78,55 @@ def normalize_labels_by_name(
         else:
             transforms.append("identity")
 
+    return transformed, transforms
+
+
+def fit_label_norm(
+    labels: np.ndarray,
+    label_names: list[str],
+    log_label_names: list[str] | None,
+) -> dict:
+    """Fit log+zscore label stats on `labels` -- pass ONLY the training rows
+    here (see apply_label_norm to transform other splits with the result),
+    the same fit-on-train/apply-frozen convention as fit_zscore /
+    vihrs.fit_log_zscore. Fitting on train+val+test combined would leak test
+    statistics into every normalized training label."""
+    transformed, transforms = _log_transform_by_name(labels, label_names, log_label_names)
+
     mean = transformed.mean(axis=0)
     std = transformed.std(axis=0)
     std = np.where(std == 0, 1.0, std)
 
-    return (transformed - mean) / std, {
-        "mean": mean,
-        "std": std,
-        "transforms": transforms,
-    }
+    return {"mean": mean, "std": std, "transforms": transforms}
+
+
+def apply_label_norm(
+    labels: np.ndarray,
+    label_names: list[str],
+    label_norm: dict,
+) -> np.ndarray:
+    """Apply an already-fit label_norm (see fit_label_norm) to `labels` --
+    the frozen-stats half of the fit/apply split, used for val/test rows and
+    for the adversarial payload."""
+    # label_norm["transforms"] is positional ("log"/"identity" per column,
+    # written by fit_label_norm); _log_transform_by_name wants a name set,
+    # so translate positionally rather than re-deriving it from log_set.
+    log_names = [name for name, t in zip(label_names, label_norm["transforms"]) if t == "log"]
+    transformed, _ = _log_transform_by_name(labels, label_names, log_names)
+    return (transformed - label_norm["mean"]) / label_norm["std"]
+
+
+def normalize_labels_by_name(
+    labels: np.ndarray,
+    label_names: list[str],
+    log_label_names: list[str] | None,
+) -> tuple[np.ndarray, dict]:
+    """Fit AND apply in one call -- kept for callers that don't need a
+    separate train-only fit (e.g. a one-off script normalizing a single
+    array). Prefer fit_label_norm/apply_label_norm for a train/val/test
+    split so val and test are transformed with frozen, train-only stats."""
+    label_norm = fit_label_norm(labels, label_names, log_label_names)
+    return apply_label_norm(labels, label_names, label_norm), label_norm
 
 
 def save_results(

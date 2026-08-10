@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
+from cloudforger.core.splits import train_val_test_indices
 from cloudforger.nn.splits import train_val_test_split
 from cloudforger.nn.train import train_one_epoch, evaluate, evaluate_per_target
 from cloudforger.nn.heads.paramest import ParameterEstimator
@@ -23,7 +24,8 @@ from cloudforger.nn.experiments.common import (
     MultiSourceExperiment,
     prepare_device,
     select_labels,
-    normalize_labels_by_name,
+    fit_label_norm,
+    apply_label_norm,
     save_results,
 )
 
@@ -442,11 +444,17 @@ class Experiment(ABC):
             labels, label_norm = _encode_classification_labels(labels)
             n_outputs = len(label_norm["classes"])
         else:
-            labels, label_norm = normalize_labels_by_name(
-                labels,
-                label_names,
-                self.cfg.get("log_label_names"),
+            # Fit mean/std on the TRAIN rows only (same seed/fractions
+            # _make_loaders' train_val_test_split will later carve the
+            # dataset with, so the indices line up), then apply those frozen
+            # stats to every row before building the dataset -- fitting on
+            # the full train+val+test pool would leak test statistics into
+            # every normalized training label.
+            train_idx, _val_idx, _test_idx = train_val_test_indices(
+                len(labels), seed=self.cfg["seed"]
             )
+            label_norm = fit_label_norm(labels[train_idx], label_names, self.cfg.get("log_label_names"))
+            labels = apply_label_norm(labels, label_names, label_norm)
             n_outputs = labels.shape[1]
 
         dataset = self.build_dataset(payload, labels)
@@ -504,14 +512,21 @@ class Experiment(ABC):
                 self.cfg.get("target_label_names"),
             )
 
-            adv_transformed = adversarial_labels.astype(float).copy()
-            for j, transform in enumerate(label_norm["transforms"]):
-                if transform == "log":
-                    if np.any(adv_transformed[:, j] <= 0):
-                        raise ValueError(f"Cannot log-transform adversarial label {label_names[j]!r}")
-                    adv_transformed[:, j] = np.log(adv_transformed[:, j])
-
-            adversarial_labels = (adv_transformed - label_norm["mean"]) / label_norm["std"]
+            if self.task_type == "classification":
+                # Pre-existing gap, not touched here: label_norm["mean"]/["std"]
+                # are None for classification (see _encode_classification_labels),
+                # so this path needs _apply_classification_encoding instead of
+                # apply_label_norm. Left as-is to keep this change scoped to the
+                # train/test normalization leak.
+                adv_transformed = adversarial_labels.astype(float).copy()
+                for j, transform in enumerate(label_norm["transforms"]):
+                    if transform == "log":
+                        if np.any(adv_transformed[:, j] <= 0):
+                            raise ValueError(f"Cannot log-transform adversarial label {label_names[j]!r}")
+                        adv_transformed[:, j] = np.log(adv_transformed[:, j])
+                adversarial_labels = (adv_transformed - label_norm["mean"]) / label_norm["std"]
+            else:
+                adversarial_labels = apply_label_norm(adversarial_labels, label_names, label_norm)
 
             adversarial_dataset = self.build_dataset(adversarial_payload, adversarial_labels)
 
