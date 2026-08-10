@@ -1,11 +1,11 @@
-# src/cloudforger/filtration/dtm.py
+# src/cloudforger/data_generation/filtration/dtm.py
 
 from __future__ import annotations
 
 from typing import Any
 from gudhi.dtm_rips_complex import DTMRipsComplex
 
-from ..core.cloud import PointCloud
+from ...core.cloud import PointCloud
 from .base import Filtration
 
 import numpy as np

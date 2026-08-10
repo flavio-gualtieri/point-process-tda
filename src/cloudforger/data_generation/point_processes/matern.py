@@ -1,9 +1,9 @@
-# src/cloudforger/processes/matern.py
+# src/cloudforger/data_generation/point_processes/matern.py
 
 import numpy as np
 from scipy.spatial import cKDTree
-from ..core.base import PointProcess
-from ..core.region import Region
+from ...core.base import PointProcess
+from ...core.region import Region
 
 class MaternHardCoreProcess(PointProcess):
     """Matérn Type II hard-core process via dependent thinning."""

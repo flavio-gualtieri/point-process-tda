@@ -1,8 +1,8 @@
-# src/cloudforger/processes/poisson.py
+# src/cloudforger/data_generation/point_processes/poisson.py
 
 import numpy as np
-from ..core.base import PointProcess
-from ..core.region import Region
+from ...core.base import PointProcess
+from ...core.region import Region
 
 class PoissonProcess(PointProcess):
     def __init__(self, intensity: float | None = None):

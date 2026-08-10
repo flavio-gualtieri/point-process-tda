@@ -1,5 +1,5 @@
-from ..core.registry import Registry
-from ..core.base import PointProcess
+from ...core.registry import Registry
+from ...core.base import PointProcess
 from .poisson import PoissonProcess
 from .matern import MaternHardCoreProcess
 from .neyman_scott import NeymanScottProcess

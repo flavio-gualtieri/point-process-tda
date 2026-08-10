@@ -1,4 +1,4 @@
-from ..core.registry import Registry
+from ...core.registry import Registry
 from .base import Filtration
 from .rips import RipsFiltration
 from .dtm import DTMFiltration

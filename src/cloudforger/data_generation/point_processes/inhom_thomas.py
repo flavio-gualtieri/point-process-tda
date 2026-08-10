@@ -1,13 +1,13 @@
-# src/cloudforger/processes/inhom_thomas.py
+# src/cloudforger/data_generation/point_processes/inhom_thomas.py
 
 from __future__ import annotations
 
 from typing import Any
 import numpy as np
 
-from ..core.base import PointProcess
-from ..core.cloud import PointCloud
-from ..core.region import Region
+from ...core.base import PointProcess
+from ...core.cloud import PointCloud
+from ...core.region import Region
 from .thomas import ThomasProcess
 
 

@@ -1,12 +1,12 @@
-# src/cloudforger/filtration/base.py
+# src/cloudforger/data_generation/filtration/base.py
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..core.cloud import PointCloud
-from ..core.diagram import PersistenceDiagram
+from ...core.cloud import PointCloud
+from ...core.diagram import PersistenceDiagram
 
 import numpy as np
 

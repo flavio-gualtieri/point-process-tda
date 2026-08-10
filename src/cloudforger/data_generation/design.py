@@ -1,10 +1,11 @@
-# src/cloudforger/core/design.py
+# src/cloudforger/data_generation/design.py
 """Point-process design-space sampling: turning a design spec (grid or
 random parameter-vector sampling, with an optional adversarial holdout)
 into concrete PointCloud realizations. Promoted from
 scripts/processing/params/pipeline_lib/clouds.py, generalized off its
 per-dimension looping (this repo is 2D-only for now -- see RunConfig) and
-using cloudforger.processes.REGISTRY instead of a duplicate local mapping."""
+using cloudforger.data_generation.point_processes.REGISTRY instead of a
+duplicate local mapping."""
 
 from __future__ import annotations
 
@@ -17,9 +18,9 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator
 
-from ..processes import REGISTRY as PROCESS_REGISTRY
-from .cloud import PointCloud
-from .region import Box, Region
+from .point_processes import REGISTRY as PROCESS_REGISTRY
+from ..core.cloud import PointCloud
+from ..core.region import Box, Region
 
 DEFAULT_ADVERSARIAL_SEED_OFFSET = 100_000
 

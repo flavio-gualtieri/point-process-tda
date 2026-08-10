@@ -1,4 +1,4 @@
-# src/cloudforger/processes/nested_thomas.py
+# src/cloudforger/data_generation/point_processes/nested_thomas.py
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import math
 
 import numpy as np
 
-from ..core.region import Region
+from ...core.region import Region
 from .neyman_scott import NeymanScottProcess, gaussian_displacements, poisson_counts
 from .thomas import ThomasProcess
 

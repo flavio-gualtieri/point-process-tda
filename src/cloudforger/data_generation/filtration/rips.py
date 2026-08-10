@@ -1,11 +1,11 @@
-# src/cloudforger/filtration/rips.py
+# src/cloudforger/data_generation/filtration/rips.py
 
 from __future__ import annotations
 
 from typing import Any
 from ripser import ripser
 
-from ..core.cloud import PointCloud
+from ...core.cloud import PointCloud
 from .base import Filtration
 
 import numpy as np

@@ -10,8 +10,8 @@ import multipers.filtrations as F
 
 from multipers.filtrations.density import DTM
 
-from ..core.signed_measure import SignedMeasure
-from ..core.cloud import PointCloud
+from ...core.signed_measure import SignedMeasure
+from ...core.cloud import PointCloud
 
 class Bifiltration(ABC):
     @property

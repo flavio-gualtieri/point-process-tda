@@ -1,12 +1,12 @@
-# src/cloudforger/processes/neyman_scott.py
+# src/cloudforger/data_generation/point_processes/neyman_scott.py
 
 from __future__ import annotations
 
 from typing import Any, Callable
 import numpy as np
 
-from ..core.base import PointProcess
-from ..core.region import Region
+from ...core.base import PointProcess
+from ...core.region import Region
 
 
 DisplacementSampler = Callable[[int, int, np.random.Generator], np.ndarray]
