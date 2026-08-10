@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/persistence_image.py
+# src/cloudforger/experiments/persistence_image.py
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from cloudforger.nn.data import PersistenceImageDataset
-from cloudforger.nn.experiments.base import (
+from cloudforger.training.data import PersistenceImageDataset
+from cloudforger.experiments.base import (
     Experiment,
     register,
     n_points_head_extra,
@@ -65,6 +65,6 @@ class PersistenceImageExperiment(Experiment):
         return persistence_entropy_head_extra(self, payload, self._dims, n_x)
 
     def build_encoder(self, dataset):
-        from cloudforger.nn.encoders.persistence_image import PIEncoder
+        from cloudforger.encoders.persistence_image import PIEncoder
 
         return PIEncoder(in_channels=len(self._dims), embedding_dim=self.cfg["embedding_dim"])

@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/ph_combined.py
+# src/cloudforger/experiments/ph_combined.py
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from cloudforger.nn.data import BettiCurveDataset, PersistenceImageDataset
-from cloudforger.nn.encoders.base import Encoder
-from cloudforger.nn.experiments.base import (
+from cloudforger.training.data import BettiCurveDataset, PersistenceImageDataset
+from cloudforger.encoders.base import Encoder
+from cloudforger.experiments.base import (
     Experiment,
     register,
     n_points_head_extra,
@@ -178,8 +178,8 @@ class PHCombinedExperiment(Experiment):
         return persistence_entropy_head_extra(self, payload, (0, 1), n_x)
 
     def build_encoder(self, dataset):
-        from cloudforger.nn.encoders.persistence_image import PIEncoder
-        from cloudforger.nn.encoders.sequence_cnn import SequenceCNNEncoder
+        from cloudforger.encoders.persistence_image import PIEncoder
+        from cloudforger.encoders.sequence_cnn import SequenceCNNEncoder
 
         embedding_dim = self.cfg["embedding_dim"]
         pi_encoder = PIEncoder(in_channels=2, embedding_dim=embedding_dim)

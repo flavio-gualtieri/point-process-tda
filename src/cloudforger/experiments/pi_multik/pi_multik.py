@@ -1,7 +1,7 @@
-# src/cloudforger/nn/experiments/pi_multik.py
+# src/cloudforger/experiments/pi_multik/pi_multik.py
 """Multi-k persistence-image model: per k in cfg["k_values"], the (H0, H1)
 persistence-image pair is fed through a SHARED-WEIGHT CoordConv CNN branch
-(cloudforger.nn.encoders.coordconv_pi.CoordConvPIEncoder) -- one encoder
+(cloudforger.encoders.coordconv_pi.CoordConvPIEncoder) -- one encoder
 instance, called once per k (folded into the batch dimension so it's a
 single conv-stack invocation, not K separate ones) -- producing one
 embedding f_k per k. The f_k's are late-fused by concatenation with
@@ -9,13 +9,16 @@ embedding f_k per k. The f_k's are late-fused by concatenation with
 head. This supersedes the old pi_multik design (all k's stacked into one
 wide-channel tensor, seen jointly by a single conv from layer 1 -- i.e.
 EARLY fusion across k) with a late-fusion, Siamese-style alternative; the
-old implementation is preserved verbatim in experiments/delete.py.
+old implementation is preserved as an explicit comparison sibling in
+pi_multik_earlyfusion.py (this docstring used to point at a since-removed
+experiments/delete.py -- corrected during the pipeline-housekeeping
+refactor, see docs/refactor_inventory.md's Judgment call #3).
 
 The flat concat above is order-blind to the k axis. pi_multik_scaleconv.py
 registers a scale-aware sibling experiment that reuses everything here
 (PIMultiKExperiment.run, load_multik_split, build_pi_tensor/build_extra)
 but overrides _build_model to swap in ScaleConvFusion
-(cloudforger.nn.encoders.scaleconv_pi), a small Conv1d block over the
+(cloudforger.encoders.scaleconv_pi), a small Conv1d block over the
 ordered k axis, before the head -- see PIMultiK(use_fusion=...).
 
 Channel order per k (documented here since nothing in the tensor itself
@@ -47,18 +50,18 @@ from torch.utils.data import DataLoader, Subset, TensorDataset
 from cloudforger.baselines import vihrs
 from cloudforger.core.io import intersect_seeds
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.nn.encoders.coordconv_pi import CoordConvPIEncoder
-from cloudforger.nn.encoders.scaleconv_pi import ScaleConvFusion
-from cloudforger.nn.experiments.base import register
-from cloudforger.nn.experiments.common import (
+from cloudforger.encoders.coordconv_pi import CoordConvPIEncoder
+from cloudforger.encoders.scaleconv_pi import ScaleConvFusion
+from cloudforger.experiments.base import register
+from cloudforger.experiments.common import (
     MultiSourceExperiment,
     apply_zscore,
     fit_zscore,
     prepare_device,
     save_results,
 )
-from cloudforger.nn.heads.paramest import ParameterEstimator
-from cloudforger.nn.train import evaluate, evaluate_per_target, train_one_epoch
+from cloudforger.models.heads.paramest import ParameterEstimator
+from cloudforger.training.train import evaluate, evaluate_per_target, train_one_epoch
 
 
 def _load_pickle(path: Path) -> Any:
@@ -325,7 +328,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         train_loader, val_loader, test_loader = _loader(train_idx, True), _loader(val_idx, False), _loader(test_idx, False)
 
         # PIMultiK.forward(pi_imgs, extra) lines up exactly with
-        # cloudforger.nn.train's (inputs, covariates, labels) 3-tuple batch
+        # cloudforger.training.train's (inputs, covariates, labels) 3-tuple batch
         # convention, so the shared train loop applies as-is.
         model = self._build_model(
             in_channels=len(homology_dims),

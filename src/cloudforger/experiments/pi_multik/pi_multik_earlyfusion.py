@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/pi_multik_earlyfusion.py
+# src/cloudforger/experiments/pi_multik/pi_multik_earlyfusion.py
 """EARLY-fusion sibling of pi_multik/pi_multik_scaleconv/pi_multik_towers:
 all k's (H0, H1) channels are stacked into one (n_k * in_channels)-channel
 image BEFORE the first conv layer, so a single CoordConvPIEncoder sees every
@@ -19,10 +19,10 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from cloudforger.nn.encoders.coordconv_pi import CoordConvPIEncoder
-from cloudforger.nn.experiments.base import register
-from cloudforger.nn.experiments.pi_multik import PIMultiKExperiment
-from cloudforger.nn.heads.paramest import ParameterEstimator
+from cloudforger.encoders.coordconv_pi import CoordConvPIEncoder
+from cloudforger.experiments.base import register
+from cloudforger.experiments.pi_multik.pi_multik import PIMultiKExperiment
+from cloudforger.models.heads.paramest import ParameterEstimator
 
 
 class PIMultiKEarlyFusion(nn.Module):

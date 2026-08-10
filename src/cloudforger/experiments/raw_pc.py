@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/raw_pc.py
+# src/cloudforger/experiments/raw_pc.py
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from pathlib import Path
 
 from cloudforger.core.cloud import PointCloud
 from cloudforger.core.region import Box
-from cloudforger.nn.data import PointCloudDataset, pad_point_cloud_collate
-from cloudforger.nn.experiments.base import Experiment, register, log_zscore_fit_once
+from cloudforger.training.data import PointCloudDataset, pad_point_cloud_collate
+from cloudforger.experiments.base import Experiment, register, log_zscore_fit_once
 
 
 def _cloud_list(payload: Any):
@@ -118,7 +118,7 @@ class RawPointCloudExperiment(Experiment):
         return log_zscore_fit_once(self, n_points, attr="_n_points_norm")
 
     def build_encoder(self, dataset):
-        from cloudforger.nn.encoders.point_cloud import PointNetEncoder
+        from cloudforger.encoders.point_cloud import PointNetEncoder
 
         return PointNetEncoder(
             input_dim=self.ambient_dim,

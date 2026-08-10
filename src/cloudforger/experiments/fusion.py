@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/fusion.py
+# src/cloudforger/experiments/fusion.py
 """L(r)-r + TDA fusion: feeds vihrs's L(r)-r/n(x) representation and one or
 more TDA branches (persistence images, Betti curves, persistence entropy)
 into ONE model, late-fused by concatenating branch embeddings before a
@@ -31,10 +31,10 @@ from torch.utils.data import DataLoader, Subset, TensorDataset
 from cloudforger.baselines import vihrs
 from cloudforger.core.io import align_seeds
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.nn.encoders.persistence_image import PIEncoder
-from cloudforger.nn.encoders.sequence_cnn import SequenceCNNEncoder
-from cloudforger.nn.experiments.base import register
-from cloudforger.nn.experiments.common import (
+from cloudforger.encoders.persistence_image import PIEncoder
+from cloudforger.encoders.sequence_cnn import SequenceCNNEncoder
+from cloudforger.experiments.base import register
+from cloudforger.experiments.common import (
     MultiSourceExperiment,
     apply_zscore,
     fit_zscore,

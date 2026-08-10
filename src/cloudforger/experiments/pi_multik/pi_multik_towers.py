@@ -1,15 +1,15 @@
-# src/cloudforger/nn/experiments/pi_multik_towers.py
+# src/cloudforger/experiments/pi_multik/pi_multik_towers.py
 
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
 
-from cloudforger.nn.encoders.coordconv_pi import CoordConvPIEncoder
-from cloudforger.nn.encoders.towerconv_pi import TowerConv
-from cloudforger.nn.experiments.base import register
-from cloudforger.nn.heads.paramest import ParameterEstimator
-from cloudforger.nn.experiments.pi_multik import PIMultiKExperiment
+from cloudforger.encoders.coordconv_pi import CoordConvPIEncoder
+from cloudforger.encoders.towerconv_pi import TowerConv
+from cloudforger.experiments.base import register
+from cloudforger.models.heads.paramest import ParameterEstimator
+from cloudforger.experiments.pi_multik.pi_multik import PIMultiKExperiment
 
 
 class PIMultiKTowers(nn.Module):

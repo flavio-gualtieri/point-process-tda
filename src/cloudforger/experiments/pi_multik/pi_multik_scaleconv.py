@@ -1,9 +1,9 @@
-# src/cloudforger/nn/experiments/pi_multik_scaleconv.py
+# src/cloudforger/experiments/pi_multik/pi_multik_scaleconv.py
 
 from __future__ import annotations
 
-from cloudforger.nn.experiments.base import register
-from cloudforger.nn.experiments.pi_multik import PIMultiK, PIMultiKExperiment
+from cloudforger.experiments.base import register
+from cloudforger.experiments.pi_multik.pi_multik import PIMultiK, PIMultiKExperiment
 
 
 @register("pi_multik_scaleconv")

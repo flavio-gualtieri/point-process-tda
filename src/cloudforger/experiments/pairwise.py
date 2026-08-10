@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/pairwise.py
+# src/cloudforger/experiments/pairwise.py
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any
 import numpy as np
 import torch
 
-from cloudforger.nn.data import CorrelationFeatureDataset
-from cloudforger.nn.experiments.base import Experiment, register, n_points_head_extra
+from cloudforger.training.data import CorrelationFeatureDataset
+from cloudforger.experiments.base import Experiment, register, n_points_head_extra
 
 
 @register("pairwise")
@@ -33,7 +33,7 @@ class PairwiseExperiment(Experiment):
         return n_points_head_extra(self, payload, dataset_path)
 
     def build_encoder(self, dataset):
-        from cloudforger.nn.encoders.stats import StatsEncoder
+        from cloudforger.encoders.stats import StatsEncoder
 
         return StatsEncoder(
             input_dim=dataset.input_dim,

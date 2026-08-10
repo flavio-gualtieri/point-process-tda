@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/betti.py
+# src/cloudforger/experiments/betti.py
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from cloudforger.nn.data import BettiCurveDataset
-from cloudforger.nn.experiments.base import Experiment, register, n_points_head_extra
+from cloudforger.training.data import BettiCurveDataset
+from cloudforger.experiments.base import Experiment, register, n_points_head_extra
 
 
 @register("betti")
@@ -37,7 +37,7 @@ class BettiCurveExperiment(Experiment):
         return n_points_head_extra(self, payload, dataset_path)
 
     def build_encoder(self, dataset):
-        from cloudforger.nn.encoders.stats import StatsEncoder
+        from cloudforger.encoders.stats import StatsEncoder
 
         return StatsEncoder(
             input_dim=dataset.input_dim,

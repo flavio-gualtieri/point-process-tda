@@ -1,11 +1,11 @@
-# src/cloudforger/nn/experiments/mph_pi.py
+# src/cloudforger/experiments/mph_pi.py
 """CNN for the multiparameter-persistent-homology image feature
 (scripts/featurize_bifiltration.py's mph_image, built from a Bifiltration in
 BIFILTRATION_REGISTRY -- e.g. mph_dtm's (rips_radius, dtm_codensity)
 bifiltration -- via multipers.signed_measure + build_signed_measure_imagers).
 
 Same architecture as pi_multik's per-branch design: CoordConvPIEncoder
-(cloudforger.nn.encoders.coordconv_pi) over the (H_dim0, H_dim1, ...) image
+(cloudforger.encoders.coordconv_pi) over the (H_dim0, H_dim1, ...) image
 stack, concatenated with [log N] and passed through a ParameterEstimator MLP
 head (nn.experiments.base.Experiment.run() wires that composition via
 SingleModalModel). There is no k/scale axis to fuse across here -- a
@@ -52,8 +52,8 @@ from typing import Any
 import numpy as np
 
 from cloudforger.core.io import load_pickle
-from cloudforger.nn.data import PersistenceImageDataset
-from cloudforger.nn.experiments.base import Experiment, register, n_points_head_extra
+from cloudforger.training.data import PersistenceImageDataset
+from cloudforger.experiments.base import Experiment, register, n_points_head_extra
 
 
 def select_mph_channels(
@@ -183,7 +183,7 @@ class MPHImageExperiment(Experiment):
         return n_points_head_extra(self, payload, dataset_path)
 
     def build_encoder(self, dataset):
-        from cloudforger.nn.encoders.coordconv_pi import CoordConvPIEncoder
+        from cloudforger.encoders.coordconv_pi import CoordConvPIEncoder
 
         return CoordConvPIEncoder(
             in_channels=len(self._dims),

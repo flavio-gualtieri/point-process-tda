@@ -1,20 +1,32 @@
-# src/cloudforger/nn/experiments/pi_multik_fusion.py
-"""Fusion of vihrs's L(r)-r + n(x) branch with pi_multik's stacked
-multi-k persistence-image branch, late-fused by concatenating both branch
-embeddings before a shared regression head -- same "concatenate before the
-head" pattern fusion.py's own (lr + pi + betti) FusionCNN uses, minus the
-betti branch. Absorbed from dtm_experiment/pi_multik_fusion_model.py.
+# src/cloudforger/experiments/mph_fusion.py
+"""Fusion of vihrs's L(r)-r + n(x) branch with mph_pi's CoordConv
+multiparameter-persistence-image branch, late-fused by concatenating both
+branch embeddings before a shared regression head -- same "concatenate
+before the head" pattern pi_multik_fusion.py/fusion.py use, minus the k-axis
+(mph_pi has no k/scale axis to fold into the batch dim, see mph_pi.py's
+docstring: one CoordConvPIEncoder call directly on the (B, D, R, R) image
+stack, not K of them).
+
+Motivation: a preliminary 3-seed comparison (results/nested_thomas/mph_dtm0.05/
+mph_pi vs results/nested_thomas/raw/vihrs_checkpointed) found the two methods
+win on DIFFERENT targets -- mph_pi better at intensity/count parameters
+(parent_intensity, meta_offspring), vihrs better at spatial-scale parameters
+(cluster_scale, meta_cluster_scale) -- consistent with what each feature
+actually encodes (L(r)-r targets characteristic clustering radii directly;
+the DTM-bifiltration image is a density/topology signal). This fusion tests
+whether one model can get both.
 
 Reuses, rather than reimplements:
-  - pi_multik.load_multik_split for the image side, so it inherits that
-    function's k-dependent seed-intersection handling.
+  - mph_pi.load_mph_split for the image side (single bifiltration file, no
+    k-axis to intersect -- pi_multik_fusion.py's analogous reuse of
+    pi_multik.load_multik_split has that extra intersection step because
+    pi_multik joins several per-k files first).
+  - mph_pi.build_mph_tensor for per-channel image z-scoring.
   - cloudforger.core.io.align_seeds for the join against vihrs's L(r)-r
-    population (every cloud, never DTM-filtered) -- the same join fusion.py
-    itself needs, for the same reason (different, filtered population sizes).
-  - pi_multik.build_pi_tensor / build_extra for per-channel image z-scoring
-    and the n(x)+entropy scalar side-channel -- both operate on any dict
-    with "pi_channels"/"entropy_cols"/"n_points" keys, which is exactly the
-    schema load_fusion_split below returns.
+    population (every cloud, never filtered) -- same join fusion.py/
+    pi_multik_fusion.py need, for the same reason (different, in-principle
+    filterable population sizes; mph_image happens to cover every cloud
+    too, but this doesn't assume that).
 """
 
 from __future__ import annotations
@@ -30,57 +42,56 @@ from torch.utils.data import DataLoader, Subset, TensorDataset
 from cloudforger.baselines import vihrs
 from cloudforger.core.io import align_seeds
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.nn.encoders.coordconv_pi import CoordConvPIEncoder
-from cloudforger.nn.experiments import pi_multik
-from cloudforger.nn.experiments.base import register
-from cloudforger.nn.experiments.common import MultiSourceExperiment, prepare_device, save_results
-from cloudforger.nn.heads.paramest import ParameterEstimator
+from cloudforger.encoders.coordconv_pi import CoordConvPIEncoder
+from cloudforger.experiments import mph_pi
+from cloudforger.experiments.base import register
+from cloudforger.experiments.common import MultiSourceExperiment, prepare_device, save_results
+from cloudforger.models.heads.paramest import ParameterEstimator
 
 
 def load_fusion_split(
-    k_values: list[int],
-    image_paths: list[Path],
+    image_path: Path,
     clouds_path: Path,
     lr_features: dict[str, np.ndarray],
     label_names: tuple[str, ...],
     tag: str,
+    homology_dims: tuple[int, ...] | None = None,
 ) -> dict[str, Any] | None:
-    multik_split = pi_multik.load_multik_split(k_values, image_paths, clouds_path, label_names, tag=tag)
-    if multik_split is None:
+    mph_split = mph_pi.load_mph_split(image_path, clouds_path, label_names, tag=tag, homology_dims=homology_dims)
+    if mph_split is None:
         return None
 
-    multik_idx, lr_idx = align_seeds(multik_split["seeds"], lr_features["cloud_seeds"])
-    print(f"  [{tag}] {len(multik_idx)}/{len(multik_split['seeds'])} pi_multik clouds matched to L(r)-r clouds.")
+    mph_idx, lr_idx = align_seeds(mph_split["seeds"], lr_features["cloud_seeds"])
+    print(f"  [{tag}] {len(mph_idx)}/{len(mph_split['seeds'])} mph clouds matched to L(r)-r clouds.")
 
-    targets_multik = multik_split["targets"][multik_idx]
+    targets_mph = mph_split["targets"][mph_idx]
     targets_lr = lr_features["targets"][lr_idx]
-    assert np.allclose(targets_multik, targets_lr), f"[{tag}] target mismatch after seed alignment -- alignment bug."
+    assert np.allclose(targets_mph, targets_lr), f"[{tag}] target mismatch after seed alignment -- alignment bug."
 
     return {
-        "pi_channels": [ch[multik_idx] for ch in multik_split["pi_channels"]],
-        "entropy_cols": {name: values[multik_idx] for name, values in multik_split["entropy_cols"].items()},
-        "n_points": multik_split["n_points"][multik_idx],
-        "targets": targets_multik,
+        "image_tensors": mph_split["image_tensors"][mph_idx],
+        "dims": mph_split["dims"],
+        "n_points": mph_split["n_points"][mph_idx],
+        "targets": targets_mph,
         "lr_seq": lr_features["l_minus_r"][lr_idx],
     }
 
 
-class VihrsPIMultiKFusion(nn.Module):
+class VihrsMPHFusion(nn.Module):
     def __init__(
         self,
         lr_seq_len: int,
         in_channels: int,
         embedding_dim: int,
-        n_k: int,
         n_extra: int,
         n_targets: int,
         conv_channels: tuple[int, ...] = (32, 64, 128),
         dropout: float = 0.2,
+        pool_type: str = "max",
         head_hidden_dims: tuple[int, ...] = (64, 32),
         head_dropout: float = 0.1,
     ):
         super().__init__()
-        self.n_k = n_k
 
         # L(r)-r branch -- identical architecture to VihrsCNN's/FusionCNN's own conv stack.
         self.lr_conv = nn.Sequential(
@@ -92,16 +103,14 @@ class VihrsPIMultiKFusion(nn.Module):
             lr_flat_dim = self.lr_conv(torch.zeros(1, 1, lr_seq_len)).flatten(1).shape[1]
         self.lr_head = nn.Linear(lr_flat_dim, embedding_dim)
 
-        # Multi-k persistence-image branch -- identical to pi_multik's own:
-        # ONE shared-weight CoordConvPIEncoder, applied to each k's (H0, H1)
-        # pair (k folded into the batch dim in forward()), late-fused by
-        # concatenation rather than the old early-fusion wide-channel encoder.
+        # mph_pi branch -- identical to mph_pi's own CoordConvPIEncoder, one
+        # call directly on the (B, D, R, R) stack (no k-axis to fold).
         self.pi_encoder = CoordConvPIEncoder(
             in_channels=in_channels, embedding_dim=embedding_dim,
-            conv_channels=conv_channels, dropout=dropout,
+            conv_channels=conv_channels, dropout=dropout, pool_type=pool_type,
         )
 
-        merge_dim = embedding_dim + n_k * embedding_dim + n_extra
+        merge_dim = embedding_dim + embedding_dim + n_extra
         self.head = ParameterEstimator(
             embedding_dim=merge_dim, n_params=n_targets,
             hidden_dims=head_hidden_dims, dropout=head_dropout,
@@ -109,13 +118,7 @@ class VihrsPIMultiKFusion(nn.Module):
 
     def forward(self, lr_seq: torch.Tensor, pi_img: torch.Tensor, extra: torch.Tensor) -> torch.Tensor:
         lr_emb = self.lr_head(self.lr_conv(lr_seq.unsqueeze(1)).flatten(start_dim=1))
-
-        # pi_img: (B, K, 2, R, R) -- fold K into the batch dim so the shared
-        # encoder runs once per forward pass instead of K separate calls.
-        b = pi_img.shape[0]
-        flat = pi_img.reshape(b * self.n_k, *pi_img.shape[2:])
-        pi_emb = self.pi_encoder(flat).reshape(b, self.n_k * self.pi_encoder.embedding_dim)
-
+        pi_emb = self.pi_encoder(pi_img)
         return self.head(torch.cat([lr_emb, pi_emb, extra], dim=1))
 
 
@@ -160,13 +163,13 @@ def _evaluate_per_target(model, loader, device) -> np.ndarray:
     return (total_sq_err / count).cpu().numpy()
 
 
-@register("pi_multik_fusion")
-class PIMultiKFusionExperiment(MultiSourceExperiment):
+@register("mph_fusion")
+class MPHFusionExperiment(MultiSourceExperiment):
     file_keys = ("clouds", "images")
 
     @property
     def subdir(self) -> str:
-        return "pi_multik_fusion"
+        return "mph_fusion"
 
     def run(
         self,
@@ -178,7 +181,8 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         # to every label this process's clouds actually carry.
         target_label_names = self.cfg.get("target_label_names")
         label_names = tuple(target_label_names) if target_label_names else None
-        k_values = list(self.cfg["k_values"])
+        homology_dims_cfg = self.cfg.get("homology_dims")
+        homology_dims = tuple(homology_dims_cfg) if homology_dims_cfg else None
         seed = self.cfg["seed"]
         device = prepare_device(seed)
 
@@ -189,17 +193,17 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         )
         label_names = tuple(lr_data["label_names"])
         train_split = load_fusion_split(
-            k_values, list(dataset_paths["images"]), Path(dataset_paths["clouds"]),
-            lr_data["train_features"], label_names, tag="train_test",
+            Path(dataset_paths["images"]), Path(dataset_paths["clouds"]),
+            lr_data["train_features"], label_names, tag="train_test", homology_dims=homology_dims,
         )
         if train_split is None:
-            raise FileNotFoundError(f"images missing for some k in {k_values} under {dataset_paths['images']}.")
+            raise FileNotFoundError(f"mph_image missing under {dataset_paths['images']}.")
 
         adv_split = None
         if adversarial_paths is not None and lr_data["adversarial_features"] is not None:
             adv_split = load_fusion_split(
-                k_values, list(adversarial_paths["images"]), Path(adversarial_paths["clouds"]),
-                lr_data["adversarial_features"], label_names, tag="adversarial",
+                Path(adversarial_paths["images"]), Path(adversarial_paths["clouds"]),
+                lr_data["adversarial_features"], label_names, tag="adversarial", homology_dims=homology_dims,
             )
 
         n = len(train_split["targets"])
@@ -209,8 +213,8 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
 
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         lr_seq = vihrs.apply_zscore_global(train_split["lr_seq"], lr_norm).astype(np.float32)
-        pi_img, channel_norms = pi_multik.build_pi_tensor(train_split, k_values, channel_norms=None)
-        extra, entropy_norms = pi_multik.build_extra(train_split, n_norm)
+        pi_img, channel_norms = mph_pi.build_mph_tensor(train_split["image_tensors"], channel_norms=None)
+        extra = vihrs.apply_log_zscore(train_split["n_points"], n_norm).astype(np.float32)[:, None]
 
         full_dataset = TensorDataset(
             torch.from_numpy(lr_seq), torch.from_numpy(pi_img), torch.from_numpy(extra), torch.from_numpy(targets_std),
@@ -222,11 +226,12 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
 
         train_loader, val_loader, test_loader = _loader(train_idx, True), _loader(val_idx, False), _loader(test_idx, False)
 
-        model = VihrsPIMultiKFusion(
-            lr_seq_len=lr_seq.shape[1], in_channels=pi_img.shape[2], embedding_dim=self.cfg["embedding_dim"],
-            n_k=pi_img.shape[1], n_extra=extra.shape[1], n_targets=len(label_names),
+        model = VihrsMPHFusion(
+            lr_seq_len=lr_seq.shape[1], in_channels=pi_img.shape[1], embedding_dim=self.cfg["embedding_dim"],
+            n_extra=extra.shape[1], n_targets=len(label_names),
             conv_channels=tuple(self.cfg.get("conv_channels", (32, 64, 128))),
             dropout=self.cfg.get("dropout", 0.2),
+            pool_type=str(self.cfg.get("pool_type", "max")),
             head_hidden_dims=tuple(self.cfg.get("head_hidden_dims", (64, 32))),
             head_dropout=self.cfg.get("head_dropout", 0.1),
         ).to(device)
@@ -248,20 +253,20 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
                 best_val_loss = val_loss
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             if epoch == 1 or epoch % 25 == 0 or epoch == n_epochs:
-                print(f"[pi_multik_fusion seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}")
+                print(f"[mph_fusion seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}")
 
         model.load_state_dict(best_state)
         test_loss = _evaluate_loss(model, test_loader, loss_fn, device)
         test_loss_per_target = dict(zip(label_names, _evaluate_per_target(model, test_loader, device).tolist()))
-        print(f"\n[pi_multik_fusion seed={seed}] test loss {test_loss:.4f}")
+        print(f"\n[mph_fusion seed={seed}] test loss {test_loss:.4f}")
 
         adversarial_loss = None
         adversarial_loss_per_target = None
         if adv_split is not None:
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_lr_seq = vihrs.apply_zscore_global(adv_split["lr_seq"], lr_norm).astype(np.float32)
-            adv_pi_img, _ = pi_multik.build_pi_tensor(adv_split, k_values, channel_norms=channel_norms)
-            adv_extra, _ = pi_multik.build_extra(adv_split, n_norm, entropy_norms=entropy_norms)
+            adv_pi_img, _ = mph_pi.build_mph_tensor(adv_split["image_tensors"], channel_norms=channel_norms)
+            adv_extra = vihrs.apply_log_zscore(adv_split["n_points"], n_norm).astype(np.float32)[:, None]
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_lr_seq), torch.from_numpy(adv_pi_img),
                 torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
@@ -271,12 +276,12 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
             adversarial_loss_per_target = dict(
                 zip(label_names, _evaluate_per_target(model, adv_loader, device).tolist())
             )
-            print(f"[pi_multik_fusion seed={seed}] adversarial loss {adversarial_loss:.4f}")
+            print(f"[mph_fusion seed={seed}] adversarial loss {adversarial_loss:.4f}")
 
         cfg_meta = {
             **self.cfg,
-            "method": "pi_multik_fusion",
-            "channels": ["l_minus_r", "n_points"] + [f"k{k}_h{d}" for k in k_values for d in (0, 1)],
+            "method": "mph_fusion",
+            "channels": ["l_minus_r", "n_points"] + [f"mph_h{d}" for d in train_split["dims"]],
         }
         save_results(
             output_dir, model=model, best_state=best_state, history=history, cfg=cfg_meta,

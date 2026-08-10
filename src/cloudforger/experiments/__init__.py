@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/__init__.py
+# src/cloudforger/experiments/__init__.py
 
 from .base import Experiment, register, build_experiment, REGISTRY
 from .common import MultiSourceExperiment
@@ -11,11 +11,13 @@ from .betti import BettiCurveExperiment
 from .betti_cnn import BettiCurveCNNExperiment
 from .ph_combined import PHCombinedExperiment
 from .fusion import FusionExperiment
-from .pi_multik import PIMultiKExperiment
-from .pi_multik_fusion import PIMultiKFusionExperiment
-from .pi_multik_scaleconv import PIMultiKScaleConvExperiment
-from .pi_multik_towers import PIMultiKTowersExperiment
-from .pi_multik_earlyfusion import PIMultiKEarlyFusionExperiment
+from .pi_multik import (
+    PIMultiKExperiment,
+    PIMultiKFusionExperiment,
+    PIMultiKScaleConvExperiment,
+    PIMultiKTowersExperiment,
+    PIMultiKEarlyFusionExperiment,
+)
 
 
 __all__ = [

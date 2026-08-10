@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/betti_cnn.py
+# src/cloudforger/experiments/betti_cnn.py
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from cloudforger.nn.data import BettiCurveDataset
-from cloudforger.nn.experiments.base import (
+from cloudforger.training.data import BettiCurveDataset
+from cloudforger.experiments.base import (
     Experiment,
     register,
     n_points_head_extra,
@@ -80,7 +80,7 @@ class BettiCurveCNNExperiment(Experiment):
         return BettiCurveDataset(normalized, labels, homology_dims=list(self._dims))
 
     def build_encoder(self, dataset):
-        from cloudforger.nn.encoders.sequence_cnn import SequenceCNNEncoder
+        from cloudforger.encoders.sequence_cnn import SequenceCNNEncoder
 
         return SequenceCNNEncoder(
             input_dim=dataset.input_dim,

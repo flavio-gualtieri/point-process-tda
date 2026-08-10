@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/common.py
+# src/cloudforger/experiments/common.py
 """Shared machinery for both Experiment (single dataset_path) and
 MultiSourceExperiment (several dataset files joined by seed -- fusion,
 pi_multik, pi_multik_fusion) subclasses, so every method -- regardless of

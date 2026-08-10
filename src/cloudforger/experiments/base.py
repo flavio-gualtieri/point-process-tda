@@ -1,4 +1,4 @@
-# src/cloudforger/nn/experiments/base.py
+# src/cloudforger/experiments/base.py
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.nn.splits import train_val_test_split
-from cloudforger.nn.train import train_one_epoch, evaluate, evaluate_per_target
-from cloudforger.nn.heads.paramest import ParameterEstimator
-from cloudforger.nn.heads.classifier import ClassificationHead
-from cloudforger.nn.models.single_modal import SingleModalModel
-from cloudforger.nn.experiments.common import (
+from cloudforger.training.splits import train_val_test_split
+from cloudforger.training.train import train_one_epoch, evaluate, evaluate_per_target
+from cloudforger.models.heads.paramest import ParameterEstimator
+from cloudforger.models.heads.classifier import ClassificationHead
+from cloudforger.models.single_modal import SingleModalModel
+from cloudforger.experiments.common import (
     MultiSourceExperiment,
     prepare_device,
     select_labels,
@@ -92,7 +92,7 @@ def _combine_head_extra(parts: list[np.ndarray]) -> np.ndarray:
 
 
 # _select_labels / _normalize_labels_by_name moved to
-# cloudforger.nn.experiments.common (as select_labels / normalize_labels_by_name)
+# cloudforger.experiments.common (as select_labels / normalize_labels_by_name)
 # so MultiSourceExperiment subclasses (fusion, pi_multik, pi_multik_fusion)
 # can share them too.
 
