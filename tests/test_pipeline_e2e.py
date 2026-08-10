@@ -8,11 +8,17 @@ pipeline, kept here as a regression test.
 Two cases: the original single-k CNN path (betti_cnn_01), and pi_multik
 -- the multi-k (k=5,10) reference pipeline docs/architecture.md is
 organized around, which had no dedicated regression test before the
-pipeline-housekeeping refactor added this second case. Its numeric output
-(test_loss, model weights) was diffed bit-for-bit against a pre-refactor
-worktree run of the same config while writing that refactor; this test
-just keeps that path exercised going forward, not a repeat of that
-one-off comparison."""
+pipeline-housekeeping refactor added this second case.
+
+test_pi_multik_reference_pipeline also regression-tests the train/test
+calibration-leakage fix (experiments/pi_multik/pi_multik.py's module
+docstring): persistence-image calibration is now fit fresh per seed, on
+that seed's train split only, so two different seeds trained against the
+IDENTICAL featurized diagrams should end up with DIFFERENT calibrated
+axis bounds. The test asserts exactly that (results.json's
+config.imager_params differs between seed 1 and seed 2) -- if a future
+change accidentally reintroduces a single shared calibration, this
+assertion is what would catch it."""
 
 from __future__ import annotations
 
@@ -91,6 +97,13 @@ PI_MULTIK_CONFIG = {
         "name": "pi_multik",
         "params": {
             "homology_dims": [0, 1], "include_entropy": True,
+            # Persistence-image calibration -- fit here, per seed, on train
+            # rows only (mirrors the features.persistence_image.params
+            # above, which scripts/featurize.py still uses to precompute
+            # persistence_image.pkl/persistence_entropy.pkl, now unused by
+            # pi_multik itself but left in this config to also exercise
+            # that codepath).
+            "resolution": 8, "sigma_pixels": 2.0, "pd_calibration_coverage": 0.95,
             "embedding_dim": 8, "conv_channels": [4, 8], "dropout": 0.1, "pool_type": "max",
             "head_hidden_dims": [8], "head_dropout": 0.1,
             "batch_size": 4, "n_epochs": 3, "lr": 0.001, "weight_decay": 0.0001,
@@ -154,10 +167,16 @@ def test_pi_multik_reference_pipeline(tmp_path):
 
     _run("featurize.py", config_path, data_root, results_root)
     for k in (5, 10):
+        # diagrams.pkl is what pi_multik itself now reads (see module
+        # docstring); persistence_image.pkl/persistence_entropy.pkl are
+        # still produced too (features: requests them) but are unused by
+        # pi_multik -- kept in this config to exercise that codepath too.
+        assert (data_root / "thomas" / f"dtm_k{k}" / "diagrams.pkl").exists()
         assert (data_root / "thomas" / f"dtm_k{k}" / "persistence_image.pkl").exists()
         assert (data_root / "thomas" / f"dtm_k{k}" / "persistence_entropy.pkl").exists()
 
     _run("train.py", config_path, data_root, results_root)
+    results_by_seed = {}
     for seed in (1, 2):
         result_dir = results_root / "thomas" / "dtm_k5+10" / "pi_multik" / f"seed_{seed}"
         assert (result_dir / "results.json").exists()
@@ -167,3 +186,12 @@ def test_pi_multik_reference_pipeline(tmp_path):
         assert result["config"]["k_values"] == [5, 10]
         assert set(result["test_loss_per_target"]) == {"parent_intensity", "mean_offspring", "cluster_scale"}
         assert result["test_loss"] > 0
+        assert "imager_params" in result["config"]
+        results_by_seed[seed] = result
+
+    # The actual leakage-fix regression check: seeds 1 and 2 draw different
+    # train/val/test splits of the SAME featurized diagrams, so their
+    # per-seed-fit calibration (birth_range/pers_range per k) must differ.
+    # Equal would mean calibration silently fell back to being shared
+    # again.
+    assert results_by_seed[1]["config"]["imager_params"] != results_by_seed[2]["config"]["imager_params"]

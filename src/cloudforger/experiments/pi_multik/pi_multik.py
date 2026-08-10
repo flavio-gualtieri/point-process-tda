@@ -10,9 +10,7 @@ head. This supersedes the old pi_multik design (all k's stacked into one
 wide-channel tensor, seen jointly by a single conv from layer 1 -- i.e.
 EARLY fusion across k) with a late-fusion, Siamese-style alternative; the
 old implementation is preserved as an explicit comparison sibling in
-pi_multik_earlyfusion.py (this docstring used to point at a since-removed
-experiments/delete.py -- corrected during the pipeline-housekeeping
-refactor, see docs/refactor_inventory.md's Judgment call #3).
+pi_multik_earlyfusion.py.
 
 The flat concat above is order-blind to the k axis. pi_multik_scaleconv.py
 registers a scale-aware sibling experiment that reuses everything here
@@ -30,10 +28,48 @@ len(homology_dims), e.g. for k_values = [5, 10, 15], homology_dims = (0, 1):
     slice [:, 2] = (H0, H1) at k=15
 
 Not an Experiment subclass, for the same reason fusion.py isn't: each k's
-images_dtm_k<k>.pkl survives the empty-diagram filter with a DIFFERENT
-subset of seeds, so the files must be intersected by seed
-(cloudforger.core.io.intersect_seeds) before their channels can be stacked,
-which Experiment.run()'s single dataset_path contract has no hook for.
+diagrams.pkl can in principle survive to a different subset of seeds (a
+degenerate-cloud edge case in the filtration step), so the files must be
+intersected by seed (cloudforger.core.io.intersect_seeds) before their
+channels can be stacked, which Experiment.run()'s single dataset_path
+contract has no hook for.
+
+PERSISTENCE-IMAGE CALIBRATION IS FIT PER SEED, ON TRAIN ROWS ONLY.
+Earlier versions of this module read a precomputed, shared
+persistence_image.pkl (built once by scripts/featurize.py, calibrated --
+axis_bounds/build_calibrated_imager -- against the ENTIRE train_test
+population) and reused it, unchanged, across every training seed. That
+meant every seed's val/test rows had already influenced the
+persistence-image axis bounds and pixel z-score stats used to build their
+OWN features -- a data-leakage bug: a different, independently-shuffled
+train/val/test split is drawn per seed
+(cloudforger.core.splits.train_val_test_indices(n, seed)), so no single
+shared calibration can be uninformed by every seed's test rows at once.
+
+Fixed by moving calibration+imaging here, driven directly by this file's
+own dataset_paths["images"] (now cached PER-K DIAGRAMS, not precomputed
+images -- see scripts/train.py's _multi_source_dataset_paths) and computed
+fresh for every training seed: train_val_test_indices(n, seed) runs FIRST,
+and everything statistical below -- label / n(x) / entropy log-zscore,
+persistence-image axis calibration, per-channel pixel z-score -- is fit
+using ONLY that seed's train_idx rows, then applied frozen to the val/test
+rows (same call, same tensor) and to the adversarial population (a second,
+frozen-only call). This is the same fit-on-train/apply-frozen convention
+cloudforger.experiments.common.fit_label_norm/apply_label_norm already
+uses for every OTHER experiment's labels -- this file just didn't follow
+it for images/n(x)/entropy until now. Diagram computation itself has no
+leakage concern (each cloud's diagram depends only on that cloud) and
+stays shared/cached across seeds via scripts/featurize.py exactly as
+before; only the (cheap) imaging step is redone per seed.
+
+Two related, currently-UNFIXED instances of the same "fit before split"
+bug, out of scope for this pass -- flagged, not silently left inconsistent:
+  1. The m_values/topo_superset pi_multik pathway
+     (scripts/precompute_topo_superset.py + featurize_topo_superset.py,
+     used by matern's configs in place of a fixed k_values list) has its
+     own, separate, still-whole-population calibration step.
+  2. mph_pi.py / mph_fusion.py fit their image z-score / label stats the
+     same whole-population way this file used to.
 """
 
 from __future__ import annotations
@@ -48,7 +84,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Subset, TensorDataset
 
 from cloudforger.baselines import vihrs
+from cloudforger.core.diagram import PersistenceDiagram
 from cloudforger.core.io import intersect_seeds
+from cloudforger.core.records import load_diagrams
 from cloudforger.core.splits import train_val_test_indices
 from cloudforger.encoders.coordconv_pi import CoordConvPIEncoder
 from cloudforger.encoders.scaleconv_pi import ScaleConvFusion
@@ -62,6 +100,9 @@ from cloudforger.experiments.common import (
 )
 from cloudforger.models.heads.paramest import ParameterEstimator
 from cloudforger.training.train import evaluate, evaluate_per_target, train_one_epoch
+from cloudforger.vectorization.persistence_images.calibrated import build_calibrated_imager
+from cloudforger.vectorization.persistence_images.multi_channel import MultiChannelImager
+from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
 
 
 def _load_pickle(path: Path) -> Any:
@@ -71,20 +112,26 @@ def _load_pickle(path: Path) -> Any:
 
 def load_multik_split(
     k_values: list[int],
-    image_paths: list[Path],
+    diagram_paths: list[Path],
     clouds_path: Path,
     label_names: tuple[str, ...] | None,
     tag: str,
     homology_dims: tuple[int, ...] = (0, 1),
 ) -> dict[str, Any] | None:
-    payloads = []
-    for k, path in zip(k_values, image_paths):
+    """Load and seed-align each k's diagrams.pkl (NOT a precomputed image
+    file -- see module docstring). Persistence entropy is computed here,
+    directly from the diagrams (calibration-free, so no leakage concern);
+    persistence IMAGES are deliberately not built here -- that's
+    build_pi_tensor's job, once a train/val/test split exists to calibrate
+    against."""
+    bundles = []
+    for k, path in zip(k_values, diagram_paths):
         if not Path(path).exists():
             print(f"  [{tag}] missing {path} -- skipping split.")
             return None
-        payloads.append(_load_pickle(path))
+        bundles.append(load_diagrams(path))  # (diagrams, bundle) per k
 
-    seed_arrays = [np.asarray(p["seeds"]) for p in payloads]
+    seed_arrays = [np.asarray(bundle["seeds"]) for _, bundle in bundles]
     idx_per_k, common_seeds = intersect_seeds(seed_arrays)
     per_k_totals = {k: len(s) for k, s in zip(k_values, seed_arrays)}
     print(f"  [{tag}] {len(common_seeds)} clouds common to all k in {k_values} (per-k totals: {per_k_totals}).")
@@ -94,7 +141,7 @@ def load_multik_split(
     # (no target_label_names configured) means "every label this process
     # produced" -- adapts to whatever process generated this data instead of
     # assuming a fixed target set.
-    tda_label_names = list(payloads[0]["label_names"])
+    tda_label_names = list(bundles[0][1]["label_names"])
     if label_names is None:
         label_names = tuple(tda_label_names)
     missing = [name for name in label_names if name not in tda_label_names]
@@ -102,30 +149,22 @@ def load_multik_split(
         raise KeyError(f"[{tag}] label_names {tda_label_names} is missing {missing} from {label_names}")
     col_idx = [tda_label_names.index(name) for name in label_names]
 
-    targets = np.asarray(payloads[0]["labels"], dtype=float)[np.ix_(idx_per_k[0], col_idx)]
-    for k, payload, idx in zip(k_values[1:], payloads[1:], idx_per_k[1:]):
-        targets_k = np.asarray(payload["labels"], dtype=float)[np.ix_(idx, col_idx)]
+    targets = np.asarray(bundles[0][1]["labels"], dtype=float)[np.ix_(idx_per_k[0], col_idx)]
+    for k, (_, bundle), idx in zip(k_values[1:], bundles[1:], idx_per_k[1:]):
+        targets_k = np.asarray(bundle["labels"], dtype=float)[np.ix_(idx, col_idx)]
         assert np.allclose(targets, targets_k), (
             f"[{tag}] target mismatch between k={k_values[0]} and k={k} after seed alignment -- alignment bug."
         )
 
-    # Channel order: for k in k_values, [pi_d(k) for d in homology_dims] --
-    # see module docstring. homology_dims must be a subset of what was
-    # actually computed at featurize time (payload["image_tensors"].keys()).
-    pi_channels: list[np.ndarray] = []
+    entropy_feature = FEATURE_REGISTRY.build("persistence_entropy", homology_dims=homology_dims)
+    diagrams_per_k: dict[int, list[PersistenceDiagram]] = {}
     entropy_cols: dict[str, np.ndarray] = {}
-    for k, payload, idx in zip(k_values, payloads, idx_per_k):
-        available = set(payload["image_tensors"].keys())
-        missing_dims = [d for d in homology_dims if d not in available]
-        if missing_dims:
-            raise KeyError(
-                f"[{tag}] homology_dims {homology_dims} requests dims {missing_dims} not present in "
-                f"image_tensors for k={k} (available: {sorted(available)}) -- these must have been computed "
-                f"by the featurize step (features.persistence_image.params.homology_dims)."
-            )
+    for k, (diagrams, _bundle), idx in zip(k_values, bundles, idx_per_k):
+        aligned = [diagrams[i] for i in idx]
+        diagrams_per_k[k] = aligned
+        per_diagram_entropy = [entropy_feature.compute(d) for d in aligned]
         for dim in homology_dims:
-            pi_channels.append(np.asarray(payload["image_tensors"][dim], dtype=np.float64)[idx])
-            entropy_cols[f"entropy{dim}_k{k}"] = np.asarray(payload["persistence_entropy"][dim], dtype=np.float64)[idx]
+            entropy_cols[f"entropy{dim}_k{k}"] = np.array([e[dim] for e in per_diagram_entropy], dtype=np.float64)
 
     # n(x) doesn't depend on k (same underlying cloud) -- joined once from
     # the sibling clouds.pkl by seed.
@@ -134,7 +173,7 @@ def load_multik_split(
     n_points = np.array([n_points_by_seed[int(s)] for s in common_seeds], dtype=np.float64)
 
     return {
-        "pi_channels": pi_channels,
+        "diagrams_per_k": diagrams_per_k,
         "entropy_cols": entropy_cols,
         "n_points": n_points,
         "targets": targets,
@@ -144,61 +183,116 @@ def load_multik_split(
 
 
 def build_pi_tensor(
-    split: dict[str, Any], k_values: list[int], channel_norms: list[dict[str, float]] | None
-) -> tuple[np.ndarray, list[dict[str, float]]]:
+    split: dict[str, Any],
+    k_values: list[int],
+    homology_dims: tuple[int, ...],
+    resolution: int,
+    sigma_pixels: float,
+    coverage: float,
+    train_idx: np.ndarray | None = None,
+    imagers: list[MultiChannelImager] | None = None,
+    channel_norms: list[dict[str, float]] | None = None,
+) -> tuple[np.ndarray, list[MultiChannelImager], list[dict[str, float]]]:
     """(N, K, D, H, W) float32 tensor, K = len(k_values), D = number of
-    homology dims selected (split["pi_channels"] has K*D entries, D per k,
-    in homology_dims order -- see load_multik_split) -- unlike the old
-    pi_multik's (N, D*K, H, W) layout (all k's flattened into one channel
-    axis), k is kept as its own axis here so the shared-weight CoordConv
-    branch can fold it into the batch dimension for a single conv-stack call
-    per forward pass. Still one independent z-score per raw (k, dim)
-    channel -- PI pixels are raw Gaussian-kernel sums with a huge dynamic
-    range, and different k's have different raw magnitude scales on top of
-    that, so per-channel (not global) normalization matters here more than
-    it would for a single k."""
-    fit = channel_norms is None
+    homology dims selected -- unlike the old pi_multik's (N, D*K, H, W)
+    layout (all k's flattened into one channel axis), k is kept as its own
+    axis here so the shared-weight CoordConv branch can fold it into the
+    batch dimension for a single conv-stack call per forward pass. Still one
+    independent z-score per raw (k, dim) channel -- PI pixels are raw
+    Gaussian-kernel sums with a huge dynamic range, and different k's have
+    different raw magnitude scales on top of that, so per-channel (not
+    global) normalization matters here more than it would for a single k.
+
+    Fit-once/apply-frozen (see module docstring): two modes.
+      - Fit (imagers=None): train_idx selects which rows of
+        split["diagrams_per_k"][k] calibrate each k's MultiChannelImager
+        (build_calibrated_imager) and, downstream, each channel's z-score --
+        the main population's train-only fit. Every row of split (train AND
+        val/test) is still transformed and returned, just not used to fit.
+      - Apply (imagers given): every diagram in split is transformed with
+        the given, already-frozen imagers/channel_norms and train_idx is
+        ignored -- used for the adversarial population, applying stats fit
+        on the main population's train rows.
+    """
+    fit = imagers is None
     if fit:
+        if train_idx is None:
+            raise ValueError("build_pi_tensor: train_idx is required when fitting (imagers=None).")
+        imagers = []
         channel_norms = []
-    normed_channels = []
-    for i, raw in enumerate(split["pi_channels"]):
-        norm = fit_zscore(raw) if fit else channel_norms[i]
+
+    # raw_channels is flat: [dim0_k0, dim1_k0, ..., dim0_k1, dim1_k1, ...]
+    raw_channels: list[np.ndarray] = []
+    for ki, k in enumerate(k_values):
+        diagrams_k = split["diagrams_per_k"][k]
         if fit:
+            calibration_diagrams = [diagrams_k[i] for i in train_idx]
+            imager = build_calibrated_imager(
+                calibration_diagrams, homology_dims=homology_dims, resolution=resolution,
+                sigma_pixels=sigma_pixels, coverage=coverage, verbose=False,
+            )
+            imagers.append(imager)
+        else:
+            imager = imagers[ki]
+        images = [imager.transform(d) for d in diagrams_k]
+        for dim in homology_dims:
+            raw_channels.append(np.stack([im[dim] for im in images]))
+
+    normed_channels = []
+    for i, raw in enumerate(raw_channels):
+        if fit:
+            norm = fit_zscore(raw[train_idx])
             channel_norms.append(norm)
+        else:
+            norm = channel_norms[i]
         normed_channels.append(apply_zscore(raw, norm))
     # normed_channels is flat: [dim0_k0, dim1_k0, ..., dim0_k1, dim1_k1, ...]
     # -- group by k (D consecutive entries each) into (N, D, H, W), then
     # stack those groups along a new k axis.
     dims_per_k = len(normed_channels) // len(k_values)
     per_k = [np.stack(normed_channels[dims_per_k * i : dims_per_k * (i + 1)], axis=1) for i in range(len(k_values))]
-    return np.stack(per_k, axis=1).astype(np.float32), channel_norms
+    return np.stack(per_k, axis=1).astype(np.float32), imagers, channel_norms
 
 
 def build_extra(
     split: dict[str, Any],
-    n_norm: dict,
+    train_idx: np.ndarray | None,
+    n_norm: dict | None = None,
     entropy_norms: dict[str, dict[str, float]] | None = None,
     include_entropy: bool = False,
-) -> tuple[np.ndarray, dict[str, dict[str, float]]]:
+) -> tuple[np.ndarray, dict, dict[str, dict[str, float]]]:
     """(N, 1 + (n_entropy_cols if include_entropy else 0)) side-vector,
     concatenated onto the per-k embeddings before the fusion head: [log N]
     always, plus one plain z-scored column per split["entropy_cols"] entry
     (persistence entropy per (homology dim, k), loaded by load_multik_split)
-    when include_entropy is set. entropy_norms is None to fit (train split),
-    or the train split's returned norms to apply frozen (val/test/adversarial)."""
+    when include_entropy is set.
+
+    Fit-once/apply-frozen (see module docstring): pass train_idx (n_norm and
+    entropy_norms left None) to fit n(x)/entropy stats on
+    split[...][train_idx] only, applied to every row of split -- the main
+    population's train-only fit. Pass a previously-fit n_norm (and
+    entropy_norms, if include_entropy) to apply them frozen to a different
+    population instead (train_idx unused, pass None) -- the adversarial
+    call."""
+    fit = n_norm is None
+    if fit:
+        if train_idx is None:
+            raise ValueError("build_extra: train_idx is required when fitting (n_norm=None).")
+        n_norm = vihrs.fit_log_zscore(split["n_points"][train_idx])
     n_std = vihrs.apply_log_zscore(split["n_points"], n_norm).astype(np.float32)
     cols = [n_std]
-    fit = entropy_norms is None
     if fit:
         entropy_norms = {}
     if include_entropy:
         for name in sorted(split["entropy_cols"]):
             raw = split["entropy_cols"][name]
-            norm = fit_zscore(raw) if fit else entropy_norms[name]
             if fit:
+                norm = fit_zscore(raw[train_idx])
                 entropy_norms[name] = norm
+            else:
+                norm = entropy_norms[name]
             cols.append(apply_zscore(raw, norm).astype(np.float32))
-    return np.stack(cols, axis=1), entropy_norms
+    return np.stack(cols, axis=1), n_norm, entropy_norms
 
 
 class PIMultiK(nn.Module):
@@ -286,11 +380,20 @@ class PIMultiKExperiment(MultiSourceExperiment):
         label_names = tuple(target_label_names) if target_label_names else None
         k_values = list(self.cfg["k_values"])
         # Channel selection: which persistence homology dims to stack per k/m
-        # (must be a subset of what features.persistence_image.params.homology_dims
-        # actually computed at featurize time); include_entropy additionally
-        # appends per-(dim, k) persistence entropy scalars to the extra side-vector.
+        # (must be a subset of what the filtration actually computed, e.g.
+        # filtration.params.maxdim); include_entropy additionally appends
+        # per-(dim, k) persistence entropy scalars to the extra side-vector.
         homology_dims = tuple(self.cfg.get("homology_dims", (0, 1)))
         include_entropy = bool(self.cfg.get("include_entropy", False))
+        # Persistence-image calibration/resolution -- now a method param
+        # (fit per seed here, see module docstring), not a features: block
+        # param read once by scripts/featurize.py. Defaults match
+        # scripts/featurize.py's _compute_persistence_image's own historical
+        # defaults, so a config that doesn't set these behaves the same as
+        # before modulo the leakage fix itself.
+        resolution = int(self.cfg.get("resolution", 64))
+        sigma_pixels = float(self.cfg.get("sigma_pixels", 2.0))
+        coverage = float(self.cfg.get("pd_calibration_coverage", 0.99))
         seed = self.cfg["seed"]
         device = prepare_device(seed)
 
@@ -299,7 +402,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
             homology_dims=homology_dims,
         )
         if train_split is None:
-            raise FileNotFoundError(f"images missing for some k in {k_values} under {dataset_paths['images']}.")
+            raise FileNotFoundError(f"diagrams missing for some k in {k_values} under {dataset_paths['images']}.")
         label_names = tuple(train_split["label_names"])
 
         adv_split = None
@@ -310,17 +413,23 @@ class PIMultiKExperiment(MultiSourceExperiment):
             )
 
         n = len(train_split["targets"])
-        label_norm = vihrs.fit_log_zscore(train_split["targets"])
-        n_norm = vihrs.fit_log_zscore(train_split["n_points"])
+        # Split FIRST: every statistic fit below (label/n(x)/entropy
+        # log-zscore, persistence-image calibration bounds, per-channel
+        # pixel z-score) uses train_idx only, so none of it is informed by
+        # a val or test row -- see module docstring.
+        train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
 
+        label_norm = vihrs.fit_log_zscore(train_split["targets"][train_idx])
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
-        pi_img, channel_norms = build_pi_tensor(train_split, k_values, channel_norms=None)
-        extra, entropy_norms = build_extra(train_split, n_norm, include_entropy=include_entropy)
+        pi_img, imagers, channel_norms = build_pi_tensor(
+            train_split, k_values, homology_dims=homology_dims, resolution=resolution,
+            sigma_pixels=sigma_pixels, coverage=coverage, train_idx=train_idx,
+        )
+        extra, n_norm, entropy_norms = build_extra(train_split, train_idx, include_entropy=include_entropy)
 
         full_dataset = TensorDataset(
             torch.from_numpy(pi_img), torch.from_numpy(extra), torch.from_numpy(targets_std),
         )
-        train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
 
         def _loader(idx: np.ndarray, shuffle: bool) -> DataLoader:
             return DataLoader(Subset(full_dataset, idx), batch_size=self.cfg["batch_size"], shuffle=shuffle)
@@ -381,8 +490,13 @@ class PIMultiKExperiment(MultiSourceExperiment):
         adversarial_loss_per_target = None
         if adv_split is not None:
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
-            adv_pi_img, _ = build_pi_tensor(adv_split, k_values, channel_norms=channel_norms)
-            adv_extra, _ = build_extra(adv_split, n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy)
+            adv_pi_img, _, _ = build_pi_tensor(
+                adv_split, k_values, homology_dims=homology_dims, resolution=resolution,
+                sigma_pixels=sigma_pixels, coverage=coverage, imagers=imagers, channel_norms=channel_norms,
+            )
+            adv_extra, _, _ = build_extra(
+                adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
+            )
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_pi_img), torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
             )
@@ -396,6 +510,10 @@ class PIMultiKExperiment(MultiSourceExperiment):
         cfg_meta = {
             **self.cfg,
             "channels": [f"k{k}_h{d}" for k in k_values for d in homology_dims],
+            # Per-k calibrated imager params, so a seed's exact calibration
+            # (birth_range/pers_range/sigma_pixels -- now seed-specific, see
+            # module docstring) is recoverable from results.json alone.
+            "imager_params": {k: imager.params for k, imager in zip(k_values, imagers)},
         }
         save_results(
             output_dir, model=model, best_state=best_state, history=history, cfg=cfg_meta,

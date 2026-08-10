@@ -127,9 +127,20 @@ def _multi_source_dataset_paths(
         paths["clouds"] = data_paths.clouds(adversarial=adversarial)
     if "images" in exp.file_keys:
         if m_values is not None:
+            # topo_superset pathway (matern's mass-fraction sweep): still
+            # reads a precomputed, shared, whole-population-calibrated
+            # image file -- the same leakage the multi_k branch below now
+            # avoids, not yet fixed here (see pi_multik.py's module
+            # docstring, "currently-UNFIXED" item 1).
             paths["images"] = _topo_superset_image_paths(data_paths, m_values, adversarial)
         elif multi_k:
-            paths["images"] = [data_paths.feature([f], "persistence_image", adversarial=adversarial) for f in filtrations]
+            # pi_multik-family methods calibrate persistence images fresh
+            # per training seed, on that seed's train rows only (see
+            # experiments/pi_multik/pi_multik.py's module docstring) --
+            # so they read cached per-k diagrams here, not a precomputed,
+            # shared imaging that would bake in the old whole-population
+            # calibration leak.
+            paths["images"] = [data_paths.diagrams([f], adversarial=adversarial) for f in filtrations]
         else:
             paths["images"] = data_paths.feature(filtrations, image_feature_name, adversarial=adversarial)
     if "betti" in exp.file_keys:

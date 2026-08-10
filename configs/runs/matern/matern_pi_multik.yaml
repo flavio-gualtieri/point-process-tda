@@ -48,6 +48,15 @@ method:
     early_stopping_patience: 30  # stop after this many epochs with no val_loss improvement
     # k_values auto-derived from the filtration list above; override to fuse a subset, e.g. k_values: [5, 15]
     use_fusion: true
+    # Persistence-image calibration is now fit here, per seed, on that
+    # seed's train split only (see experiments/pi_multik/pi_multik.py's
+    # module docstring) -- mirrors features.persistence_image.params
+    # above, which scripts/featurize.py still uses to precompute
+    # diagrams/persistence_image.pkl for other, non-pi_multik methods.
+    resolution: 64
+    sigma_pixels: 2.0
+    homology_dims: [0, 1]
+    pd_calibration_coverage: 0.99
 
 seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
 target_label_names: [parent_intensity, hardcore_radius]  # targets to regress -- the only two params MaternHardCoreProcess exposes

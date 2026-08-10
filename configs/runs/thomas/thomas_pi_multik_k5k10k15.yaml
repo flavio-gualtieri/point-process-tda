@@ -58,6 +58,14 @@ method:
   params:
     homology_dims: [0, 1]
     include_entropy: false
+    # Persistence-image calibration is now fit here, per seed, on that
+    # seed's train split only (see experiments/pi_multik/pi_multik.py's
+    # module docstring) -- mirrors features.persistence_image.params
+    # above, which scripts/featurize.py still uses to precompute
+    # diagrams/persistence_image.pkl for other, non-pi_multik methods.
+    resolution: 64
+    sigma_pixels: 0.75
+    pd_calibration_coverage: 0.95
 
     embedding_dim: 64
     conv_channels: [32, 64, 128]

@@ -6,15 +6,21 @@ head" pattern fusion.py's own (lr + pi + betti) FusionCNN uses, minus the
 betti branch. Absorbed from dtm_experiment/pi_multik_fusion_model.py.
 
 Reuses, rather than reimplements:
-  - pi_multik.load_multik_split for the image side, so it inherits that
+  - pi_multik.load_multik_split for the diagram side, so it inherits that
     function's k-dependent seed-intersection handling.
   - cloudforger.core.io.align_seeds for the join against vihrs's L(r)-r
     population (every cloud, never DTM-filtered) -- the same join fusion.py
     itself needs, for the same reason (different, filtered population sizes).
-  - pi_multik.build_pi_tensor / build_extra for per-channel image z-scoring
-    and the n(x)+entropy scalar side-channel -- both operate on any dict
-    with "pi_channels"/"entropy_cols"/"n_points" keys, which is exactly the
+  - pi_multik.build_pi_tensor / build_extra for persistence-image
+    calibration + per-channel z-scoring and the n(x)+entropy scalar
+    side-channel -- both operate on any dict with
+    "diagrams_per_k"/"entropy_cols"/"n_points" keys, which is exactly the
     schema load_fusion_split below returns.
+
+Fits label_norm/lr_norm (the L(r)-r branch's global z-score) on train_idx
+only, same fix and same reason as pi_multik.py's own run() -- see that
+module's docstring. This file previously fit both on the whole train_test
+population before any train/val/test split existed, the same leakage bug.
 """
 
 from __future__ import annotations
@@ -39,13 +45,13 @@ from cloudforger.models.heads.paramest import ParameterEstimator
 
 def load_fusion_split(
     k_values: list[int],
-    image_paths: list[Path],
+    diagram_paths: list[Path],
     clouds_path: Path,
     lr_features: dict[str, np.ndarray],
     label_names: tuple[str, ...],
     tag: str,
 ) -> dict[str, Any] | None:
-    multik_split = pi_multik.load_multik_split(k_values, image_paths, clouds_path, label_names, tag=tag)
+    multik_split = pi_multik.load_multik_split(k_values, diagram_paths, clouds_path, label_names, tag=tag)
     if multik_split is None:
         return None
 
@@ -57,7 +63,9 @@ def load_fusion_split(
     assert np.allclose(targets_multik, targets_lr), f"[{tag}] target mismatch after seed alignment -- alignment bug."
 
     return {
-        "pi_channels": [ch[multik_idx] for ch in multik_split["pi_channels"]],
+        "diagrams_per_k": {
+            k: [diagrams[i] for i in multik_idx] for k, diagrams in multik_split["diagrams_per_k"].items()
+        },
         "entropy_cols": {name: values[multik_idx] for name, values in multik_split["entropy_cols"].items()},
         "n_points": multik_split["n_points"][multik_idx],
         "targets": targets_multik,
@@ -179,6 +187,12 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         target_label_names = self.cfg.get("target_label_names")
         label_names = tuple(target_label_names) if target_label_names else None
         k_values = list(self.cfg["k_values"])
+        homology_dims = tuple(self.cfg.get("homology_dims", (0, 1)))
+        # Persistence-image calibration/resolution -- method params now,
+        # fit per seed below; see pi_multik.py's module docstring.
+        resolution = int(self.cfg.get("resolution", 64))
+        sigma_pixels = float(self.cfg.get("sigma_pixels", 2.0))
+        coverage = float(self.cfg.get("pd_calibration_coverage", 0.99))
         seed = self.cfg["seed"]
         device = prepare_device(seed)
 
@@ -193,7 +207,7 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
             lr_data["train_features"], label_names, tag="train_test",
         )
         if train_split is None:
-            raise FileNotFoundError(f"images missing for some k in {k_values} under {dataset_paths['images']}.")
+            raise FileNotFoundError(f"diagrams missing for some k in {k_values} under {dataset_paths['images']}.")
 
         adv_split = None
         if adversarial_paths is not None and lr_data["adversarial_features"] is not None:
@@ -203,19 +217,25 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
             )
 
         n = len(train_split["targets"])
-        label_norm = vihrs.fit_log_zscore(train_split["targets"])
-        n_norm = vihrs.fit_log_zscore(train_split["n_points"])
-        lr_norm = vihrs.fit_zscore_global(train_split["lr_seq"])
+        # Split FIRST -- label_norm/lr_norm and everything build_pi_tensor/
+        # build_extra fit are all restricted to train_idx below; see
+        # pi_multik.py's module docstring.
+        train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
+
+        label_norm = vihrs.fit_log_zscore(train_split["targets"][train_idx])
+        lr_norm = vihrs.fit_zscore_global(train_split["lr_seq"][train_idx])
 
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         lr_seq = vihrs.apply_zscore_global(train_split["lr_seq"], lr_norm).astype(np.float32)
-        pi_img, channel_norms = pi_multik.build_pi_tensor(train_split, k_values, channel_norms=None)
-        extra, entropy_norms = pi_multik.build_extra(train_split, n_norm)
+        pi_img, imagers, channel_norms = pi_multik.build_pi_tensor(
+            train_split, k_values, homology_dims=homology_dims, resolution=resolution,
+            sigma_pixels=sigma_pixels, coverage=coverage, train_idx=train_idx,
+        )
+        extra, n_norm, entropy_norms = pi_multik.build_extra(train_split, train_idx)
 
         full_dataset = TensorDataset(
             torch.from_numpy(lr_seq), torch.from_numpy(pi_img), torch.from_numpy(extra), torch.from_numpy(targets_std),
         )
-        train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
 
         def _loader(idx: np.ndarray, shuffle: bool) -> DataLoader:
             return DataLoader(Subset(full_dataset, idx), batch_size=self.cfg["batch_size"], shuffle=shuffle)
@@ -260,8 +280,11 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         if adv_split is not None:
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_lr_seq = vihrs.apply_zscore_global(adv_split["lr_seq"], lr_norm).astype(np.float32)
-            adv_pi_img, _ = pi_multik.build_pi_tensor(adv_split, k_values, channel_norms=channel_norms)
-            adv_extra, _ = pi_multik.build_extra(adv_split, n_norm, entropy_norms=entropy_norms)
+            adv_pi_img, _, _ = pi_multik.build_pi_tensor(
+                adv_split, k_values, homology_dims=homology_dims, resolution=resolution,
+                sigma_pixels=sigma_pixels, coverage=coverage, imagers=imagers, channel_norms=channel_norms,
+            )
+            adv_extra, _, _ = pi_multik.build_extra(adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms)
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_lr_seq), torch.from_numpy(adv_pi_img),
                 torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
