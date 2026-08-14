@@ -6,8 +6,8 @@ from .point_cloud import PointNetEncoder
 from .sequence_cnn import SequenceCNNEncoder
 from .stats import StatsEncoder
 from .coordconv_pi import CoordConvPIEncoder
-from .scaleconv_pi import ScaleConvFusion
-from .towerconv_pi import TowerConv
+from .encoder_bank import EncoderBank
+from .scaleconv_pi import ConvFusion
 
 __all__ = [
     "REGISTRY",
@@ -17,8 +17,8 @@ __all__ = [
     "SequenceCNNEncoder",
     "StatsEncoder",
     "CoordConvPIEncoder",
-    "ScaleConvFusion",
-    "TowerConv",
+    "EncoderBank",
+    "ConvFusion",
 ]
 
 # New in the pipeline-housekeeping refactor (docs/architecture.md): every
@@ -35,5 +35,5 @@ REGISTRY.register("point_cloud")(PointNetEncoder)
 REGISTRY.register("sequence_cnn")(SequenceCNNEncoder)
 REGISTRY.register("stats")(StatsEncoder)
 REGISTRY.register("coordconv_pi")(CoordConvPIEncoder)
-REGISTRY.register("scaleconv_pi")(ScaleConvFusion)
-REGISTRY.register("towerconv_pi")(TowerConv)
+REGISTRY.register("encoder_bank")(EncoderBank)
+REGISTRY.register("scaleconv_pi")(ConvFusion)

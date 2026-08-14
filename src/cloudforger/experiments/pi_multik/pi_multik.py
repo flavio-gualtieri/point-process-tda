@@ -17,8 +17,8 @@ from cloudforger.core.diagram import PersistenceDiagram
 from cloudforger.core.io import intersect_seeds
 from cloudforger.core.records import load_diagrams
 from cloudforger.core.splits import train_val_test_indices
-from cloudforger.encoders.coordconv_pi import CoordConvPIEncoder
-from cloudforger.encoders.scaleconv_pi import ScaleConvFusion
+from cloudforger.encoders.encoder_bank import EncoderBank
+from cloudforger.encoders.scaleconv_pi import ConvFusion
 from cloudforger.experiments.base import register
 from cloudforger.experiments.common import (
     MultiSourceExperiment,
@@ -193,12 +193,24 @@ def build_extra(
 
 
 class PIMultiK(nn.Module):
-    """SHARED-WEIGHT CoordConv branch: one CoordConvPIEncoder instance,
-    applied independently to each k's (H0, H1) image pair (k folded into
-    the batch dimension, so it's one conv-stack call per forward, not K),
-    producing f_k5, f_k10, f_k15, ... Those are late-fused by concatenation
-    with the extra scalar features, then passed through an MLP fusion head.
-    """
+    """Late-fusion multi-k model, in two composable stages:
+
+    1. EncoderBank turns each k's (H0, H1) image pair into a (B, K,
+       embedding_dim) embedding sequence -- encoder_mode picks shared-weight
+       (one CoordConvPIEncoder, k folded into the batch dim) vs independent
+       (n_k separate CoordConvPIEncoders) -- see EncoderBank's docstring.
+    2. That sequence is collapsed to one vector -- fusion_mode="concat" is a
+       flat reshape (head_in grows with n_k); fusion_mode="conv" runs it
+       through ConvFusion, whose fusion_pool ("avg" vs "flatten") picks
+       scale-count-invariant pooling vs position-preserving flattening --
+       see ConvFusion's docstring.
+
+    Together these two axes cover what used to be three separate model
+    classes (this file's old shared+concat, pi_multik_towers' independent+
+    flatten) as one config-selectable combination -- e.g. independent+
+    avg-pool or shared+flatten are now reachable without a new file. The
+    fused vector is concatenated with the extra scalar features and passed
+    through an MLP head."""
 
     def __init__(
         self,
@@ -211,44 +223,74 @@ class PIMultiK(nn.Module):
         dropout: float = 0.2,
         head_hidden_dims: tuple[int, ...] = (64, 32),
         head_dropout: float = 0.1,
-        use_fusion: bool = False,
+        encoder_mode: str = "shared",
+        fusion_mode: str = "concat",
+        fusion_pool: str = "avg",
+        fusion_dropout: float = 0.0,
         scale_fusion_hidden: int = 128,
         scale_fusion_out_dim: int = 128,
         scale_fusion_kernel_size: int = 3,
+        scale_fusion_dropout: float = 0.0,
         pool_type: str = "max",
     ):
         super().__init__()
         self.n_k = n_k
-        self.use_fusion = use_fusion
-        self.encoder = CoordConvPIEncoder(
-            in_channels=in_channels, embedding_dim=embedding_dim,
-            conv_channels=conv_channels, dropout=dropout,
-            pool_type=pool_type,
+        self.fusion_mode = fusion_mode
+        self.bank = EncoderBank(
+            mode=encoder_mode, n_k=n_k, in_channels=in_channels, embedding_dim=embedding_dim,
+            conv_channels=conv_channels, dropout=dropout, pool_type=pool_type,
         )
-        if self.use_fusion:
-            self.scale_fusion = ScaleConvFusion(
-                embedding_dim, hidden=scale_fusion_hidden, out_dim=scale_fusion_out_dim,
-                kernel_size=scale_fusion_kernel_size,
+        if fusion_mode == "concat":
+            self.fusion = None
+            fused_dim = n_k * embedding_dim
+        elif fusion_mode == "conv":
+            self.fusion = ConvFusion(
+                n_k=n_k, embedding_dim=embedding_dim, hidden=scale_fusion_hidden,
+                out_dim=scale_fusion_out_dim, kernel_size=scale_fusion_kernel_size,
+                dropout=scale_fusion_dropout, pool=fusion_pool,
             )
-            head_in = self.scale_fusion.out_dim + n_extra
+            fused_dim = self.fusion.out_dim
         else:
-            head_in = n_k * embedding_dim + n_extra
+            raise ValueError(f"PIMultiK: fusion_mode must be 'concat' or 'conv', got {fusion_mode!r}.")
+        # Applied after fusion, before the head, regardless of fusion_mode --
+        # previously only pi_multik_towers had this (as an always-on
+        # nn.Dropout); promoted here so it's available to any combination.
+        self.fusion_dropout = nn.Dropout(fusion_dropout) if fusion_dropout > 0 else nn.Identity()
 
         self.head = ParameterEstimator(
-            embedding_dim=head_in, n_params=n_targets,
+            embedding_dim=fused_dim + n_extra, n_params=n_targets,
             hidden_dims=head_hidden_dims, dropout=head_dropout,
         )
 
     def forward(self, pi_imgs, extra):
-        b = pi_imgs.shape[0]
-        flat = pi_imgs.reshape(b * self.n_k, *pi_imgs.shape[2:])
-        emb = self.encoder(flat)                                   # (B*K, C)
-        if self.use_fusion:
-            seq = emb.reshape(b, self.n_k, self.encoder.embedding_dim)  # (B, K, C)
-            pooled = self.scale_fusion(seq)                        # (B, out_dim)
+        seq = self.bank(pi_imgs)  # (B, K, C)
+        if self.fusion_mode == "concat":
+            fused = seq.reshape(seq.shape[0], -1)
         else:
-            pooled = emb.reshape(b, self.n_k * self.encoder.embedding_dim)
-        return self.head(torch.cat([pooled, extra], dim=1))
+            fused = self.fusion(seq)
+        fused = self.fusion_dropout(fused)
+        return self.head(torch.cat([fused, extra], dim=1))
+
+
+def _resolve_fusion_kwargs(cfg: dict) -> dict[str, Any]:
+    """Translates method.params' encoder_mode/fusion_mode/fusion_pool
+    overrides -- and the legacy use_fusion bool (matern_pi_multik.yaml's
+    method: pi_multik still sets it: True reproduces what pi_multik_scaleconv
+    defaults to, conv fusion with avg pooling; False reproduces plain
+    concat) -- into PIMultiK constructor kwargs.
+
+    Deliberately omits a key entirely when cfg doesn't set it, so each
+    sibling experiment's own _build_model default (via kwargs.setdefault)
+    still applies. Precedence: explicit encoder_mode/fusion_mode/fusion_pool
+    cfg keys, then use_fusion, then the registered method's own default."""
+    kwargs: dict[str, Any] = {}
+    if "use_fusion" in cfg and "fusion_mode" not in cfg:
+        kwargs["fusion_mode"] = "conv" if cfg["use_fusion"] else "concat"
+        kwargs["fusion_pool"] = "avg"
+    for key in ("encoder_mode", "fusion_mode", "fusion_pool"):
+        if key in cfg:
+            kwargs[key] = cfg[key]
+    return kwargs
 
 
 @register("pi_multik")
@@ -260,10 +302,14 @@ class PIMultiKExperiment(MultiSourceExperiment):
         return "pi_multik"
 
     def _build_model(self, **kwargs) -> PIMultiK:
-        """Flat-concat baseline. Overridden by PIMultiKScaleConvExperiment
-        to swap in ScaleConvFusion instead -- everything else in run()
-        (data loading, training loop, save_results) is shared verbatim."""
-        return PIMultiK(use_fusion=False, **kwargs)
+        """Shared-weight-encoder, flat-concat baseline -- the reference
+        pi_multik design. Siblings (PIMultiKScaleConvExperiment,
+        PIMultiKTowersExperiment) override just the encoder_mode/fusion_mode/
+        fusion_pool defaults below -- everything else in run() (data
+        loading, training loop, save_results) is shared verbatim."""
+        kwargs.setdefault("encoder_mode", "shared")
+        kwargs.setdefault("fusion_mode", "concat")
+        return PIMultiK(**kwargs)
 
     def run(
         self,
@@ -333,7 +379,10 @@ class PIMultiKExperiment(MultiSourceExperiment):
             scale_fusion_hidden=self.cfg.get("scale_fusion_hidden", 128),
             scale_fusion_out_dim=self.cfg.get("scale_fusion_out_dim", 128),
             scale_fusion_kernel_size=self.cfg.get("scale_fusion_kernel_size", 3),
-            pool_type=str(self.cfg.get("pool_type", "max"))
+            scale_fusion_dropout=self.cfg.get("scale_fusion_dropout", 0.0),
+            fusion_dropout=self.cfg.get("fusion_dropout", 0.0),
+            pool_type=str(self.cfg.get("pool_type", "max")),
+            **_resolve_fusion_kwargs(self.cfg),
         ).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
         # optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))

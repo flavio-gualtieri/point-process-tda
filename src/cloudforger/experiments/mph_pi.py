@@ -12,7 +12,7 @@ SingleModalModel). There is no k/scale axis to fuse across here -- a
 bifiltration's signed measure already folds "scale" into its second
 filtration parameter, so one joint multiparameter image pair IS the whole
 feature, unlike pi_multik's several single-parameter images at different k.
-Architecturally this is exactly PIMultiK(n_k=1, use_fusion=False): with a
+Architecturally this is exactly PIMultiK(n_k=1, fusion_mode="concat"): with a
 single k, pi_multik's per-k CoordConv branch + flat-concat fusion reduces to
 one encoder call feeding the head directly, which is what subclassing
 Experiment (rather than MultiSourceExperiment) gives for free.

@@ -13,4 +13,12 @@ class PIMultiKScaleConvExperiment(PIMultiKExperiment):
         return "pi_multik_scaleconv"
 
     def _build_model(self, **kwargs) -> PIMultiK:
-        return PIMultiK(use_fusion=True, **kwargs)
+        """Shared-weight encoder + ConvFusion(pool="avg") -- Conv1d over the
+        ordered k axis, then averaged over k into a scale-count-invariant
+        vector. encoder_mode/fusion_pool stay overridable via method.params
+        (e.g. encoder_mode: independent, or fusion_pool: flatten) without
+        needing a new file/class -- see PIMultiK's docstring."""
+        kwargs.setdefault("encoder_mode", "shared")
+        kwargs.setdefault("fusion_mode", "conv")
+        kwargs.setdefault("fusion_pool", "avg")
+        return PIMultiK(**kwargs)
