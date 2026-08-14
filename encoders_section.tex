@@ -1,0 +1,28 @@
+\subsection{Encoders}
+Many variations of encoders were tested for this model. We will focus on the variation that produced the best results, noting that the encoding step is an important aspect that will require further study.
+
+Consider our training clouds $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$. We pick $K$ scales for our $DTM_k$ filtration, and compute persistence images for $D$ homology dimensions with resolution $H \times W$. Therefore for batch size $B$, the objective is to pick a suitable encoder architecture for the following transformation:
+    \begin{equation}
+    (B, K, D, H, W) \xrightarrow{\;\text{Encoder}\;} (B, 128).
+    \end{equation}
+
+When it comes to using multiple images per homology dimension for each cloud, a central question is whether each vectorization should go through a shared-weight encoder, or be assigned its own independent encoder. Experiments suggested that a shared encoder works just as well as the independent option: we ran a sweep crossing \emph{encoder mode} (shared-weight vs. independent-per-$k$) against \emph{fusion mode} (see below), five seeds per combination, on the same $DTM_{5,10,15}$ nested-Thomas setup used throughout. Restricting to the simplest fusion strategy (flat concatenation, discussed below), the shared-weight encoder matched the independent one to within seed noise:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+encoder mode & fusion & test loss (mean $\pm$ sd) & failed seeds \\
+\midrule
+shared      & concat & $0.200 \pm 0.009$ & $0/5$ \\
+independent & concat & $0.217 \pm 0.028$ & $0/5$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+with a ten-seed run of the shared-weight configuration ($0.205 \pm 0.012$) confirming the same order of magnitude. Since tying weights across scales also cuts the parameter count roughly $K$-fold and removes one design axis, we adopt the shared encoder going forward.
+
+The shared encoder is designed as follows: each $(D, H, W)$ persistence-image stack is first augmented with two coordinate channels -- fixed $x$- and $y$-coordinate grids linearly spaced over $[-1, 1]$ -- following the CoordConv construction \citep{liu2018coordconv}, so that the convolutional stack has direct access to absolute pixel position rather than having to infer it from context. This matters here specifically because the birth and persistence axes are calibrated (Section~\ref{sec:calibration}): a fixed pixel location has a fixed, shared meaning across the dataset, and CoordConv lets the network exploit that directly instead of relearning it. The augmented $(D+2, H, W)$ tensor is then passed through a small convolutional stack: three $3\times3$ convolution blocks with channel widths $(32, 64, 128)$, each followed by a ReLU, and by $2\times2$ max-pooling with spatial dropout between blocks (but not after the last one); the resulting feature map is reduced by adaptive average pooling to a single spatial location and projected by a linear layer to the embedding dimension $E$. To apply this one encoder to all $K$ scales, the $k$-axis is folded into the batch dimension for a single forward pass -- one call over $B \cdot K$ images rather than $K$ separate calls -- so the weights are tied across scales by construction rather than by any explicit sharing mechanism.
+
+This produces a $(B, K, E)$ tensor. The next question concerns how the per-$k$ summary is prepared for $NN_\phi$. The options explored include: (i) flat concatenation of the $K$ per-scale embeddings into a single $(B, K \cdot E)$ vector; (ii) a small 1-D convolutional fusion over the ordered $k$-axis (two $\text{Conv1d}$ layers, letting adjacent scales mix), followed by average-pooling over $k$ into a fixed-width $(B, F)$ vector whose size does not depend on $K$; and (iii) the same convolutional fusion, but flattening rather than pooling over $k$, giving a $(B, F \cdot K)$ vector that preserves which position came from which scale at the cost of a width that again grows with $K$.
+
+We determined once again that the simplest option was the most effective, and we concatenate the per-$k$ outputs. The full sweep, crossing both encoder mode and fusion strategy (six combinations, five seeds each), showed that the two convolutional-fusion variants are not simply worse on average but \emph{unstable}: individual seeds collapse to a test loss of $\sim\!0.9$--$1.0$ (i.e.\ the model degenerates to predicting the training-set mean), while other seeds of the very same configuration land right on the concatenation baseline ($\sim\!0.20$). Only the independent-encoder, flatten-pooled combination converged cleanly on all five seeds, but even so it did not outperform plain concatenation ($0.212 \pm 0.005$ vs.\ $0.200 \pm 0.009$). Flat concatenation was therefore preferred not only for its simplicity, but because it was the only strategy -- together with its shared/independent-encoder counterpart -- that trained reliably across seeds without any sign of the collapse observed for the convolutional-fusion alternatives.

@@ -102,10 +102,9 @@ def _experiment_dataset_path(exp, data_paths: DataPaths, filtrations: list[Filtr
 
 
 def _topo_superset_image_paths(data_paths: DataPaths, m_values: list[float], adversarial: bool) -> list[Path]:
-    """topo_superset (scripts/precompute_topo_superset.py +
-    scripts/featurize_topo_superset.py) stores persistence images flat,
-    keyed by mass fraction m, not under the per-k DataPaths.feature()
-    convention -- see ExplicitTag's docstring for why."""
+    """topo_superset (scripts/featurize_topo_superset.py) stores persistence
+    images flat, keyed by mass fraction m, not under the per-k
+    DataPaths.feature() convention -- see ExplicitTag's docstring for why."""
     prefix = "adversarial_" if adversarial else ""
     superset_dir = data_paths.process_dir / "topo_superset"
     return [superset_dir / f"{prefix}dtm_m{m:.2f}_persistence_image.pkl" for m in m_values]

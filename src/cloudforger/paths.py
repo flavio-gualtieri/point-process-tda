@@ -40,7 +40,7 @@ class ExplicitTag:
     """Minimal Filtration stand-in (only .path_tag() is required by
     combined_filtration_tag()/ResultsPaths) for methods whose diagrams
     weren't computed via the Filtration registry -- e.g. topo_superset's
-    mass-fraction DTM sweep (scripts/precompute_topo_superset.py), which
+    mass-fraction DTM sweep (scripts/featurize_topo_superset.py), which
     needs a per-cloud k = round(m*N) the registry's fixed-k contract has no
     hook for, so it bypasses DataPaths/the registry entirely."""
 

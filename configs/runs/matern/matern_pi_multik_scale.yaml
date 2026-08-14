@@ -1,9 +1,10 @@
 # Matern (hard-core type II) -> mass-fraction DTM (7 scales, topo_superset)
 # -> stacked multi-scale persistence images -> pi_multik_scaleconv regression.
-# Diagrams built via scripts/precompute_topo_superset.py (per-cloud
-# k = round(m*N), so NOT the filtration-registry path below -- see that
-# script's docstring); persistence images built via
-# scripts/featurize_topo_superset.py. Mirrors
+# Diagrams + persistence images both built via scripts/featurize_topo_superset.py
+# (per-cloud k = round(m*N), so NOT the filtration-registry path below --
+# see that script's docstring; it always recomputes from the current
+# clouds.pkl, no skip-if-exists caching, so a cloud regeneration can't leave
+# stale topo_superset data behind). Mirrors
 # configs/runs/nested_thomas_pi_multik_scale.yaml -- see that file for the
 # fuller design rationale. Compare against the 3-channel (k=5,10,15)
 # baseline in configs/runs/matern_pi_multik.yaml once
@@ -29,7 +30,7 @@ process:
 
 # Empty on purpose: this method's images are resolved from
 # method.params.m_values (scripts/train.py), not the Filtration registry --
-# same reason precompute_topo_superset.py bypasses it (see header above).
+# same reason featurize_topo_superset.py bypasses it (see header above).
 filtration: []
 
 features:

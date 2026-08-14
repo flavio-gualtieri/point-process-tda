@@ -240,7 +240,7 @@ visibility rather than silently changed.
 | `scripts/featurize_bifiltration.py` | signed measures + images from bifiltrations (mph track) | n | keep | same path; imports updated |
 | `scripts/featurize_sigma_sweep.py` | calibration/resolution grid sweep over already-computed diagrams | y | keep | same path; imports updated |
 | `scripts/featurize_topo_superset.py` | persistence images for a chosen `topo_superset` mass-fraction subset | n | keep | same path; imports updated |
-| `scripts/precompute_topo_superset.py` | precomputes the full `topo_superset` feature superset | n | keep | same path; imports updated |
+| `scripts/precompute_topo_superset.py` | precomputes the full `topo_superset` feature superset | n | **removed 2026-08-14** | merged into `scripts/featurize_topo_superset.py` (clouds → diagrams → images in one always-recompute pass, so a cloud regeneration can't leave stale cached diagrams behind) |
 | `scripts/train.py` | RunConfig → trained method for N seeds → `results.pt`/`.json`/`model.pt` | y | keep | same path; imports updated |
 | `scripts/evaluate.py` | aggregates/compares `results.json` across methods and seeds | y (compares pi_multik to siblings) | keep | same path; imports updated |
 | `scripts/archive_run.py` | moves a method's current results into a named `_runs/<tag>/` slot | n | keep | same path; imports updated |
