@@ -36,6 +36,44 @@ to the existing dtm_k5/dtm_k10/dtm_k15 ones.
 The m-channel subset is a live area of work -- override with --m-values
 rather than editing DEFAULT_M_VALUES.
 
+Filtration value cutoff (thresh): DTMRipsComplex's `k` only sets the DTM
+*density-weighting* function -- it does NOT bound which simplices get
+built. That's `max_filtration` (GUDHI's WeightedRipsComplex), and
+DTMFiltration's own default is thresh=None -> max_filtration=inf, meaning
+EVERY vertex/edge (and by clique expansion, every triangle up to maxdim+1)
+gets built regardless of k/m. For clouds with hundreds to ~1300 points
+(nested_thomas), that's an unbounded 2-skeleton -- computationally
+catastrophic, confirmed directly: a real 50-shard run against nested_thomas
+didn't finish a single m value's diagrams in 35+ minutes, one shard OOM'd
+at 16G/CPU, and `sstat` showed >12GB RSS mid-run.
+
+_thresh_for_m() bounds it instead, calibrated from data already on disk
+(data/nested_thomas/dtm_k5/diagrams.pkl -- computed thresh=None, so its
+finite death values ARE the filtration values that were actually needed,
+unbounded, at k=5): for each of its 6996 diagrams, k=5 maps to an effective
+m = 5/N (N varies 42-1169 there, so this covers roughly m in [0.004,
+0.12]); binning by that effective m and taking the 99.9th percentile of
+each bin's max finite death value gives an empirical growth curve, fit as a
+power law threshold(m) = A * m^B (least squares on log-log bin medians:
+A~2.6, B~0.25 -- notably a much SLOWER growth than the naive uniform-
+density neighbor-radius estimate of B=0.5, consistent with a genuinely
+clustered, non-uniform-density process). A THRESH_SAFETY=1.5x multiplier on
+top of the already-conservative p99.9 covers the ~30x extrapolation past
+m=0.12 out to the sweep's m=0.90.
+
+Caveat, and it's real: this genuinely helps the fine/mid channels (m up to
+~0.20ish), where the natural filtration values are small relative to a
+generously-safe finite cutoff. It buys much less at m=0.45/0.90 -- those
+channels are, by construction, trying to see near-global structure, so
+their natural filtration values approach the domain's own scale regardless
+of thresh; a cutoff loose enough not to truncate real coarse-scale features
+is also loose enough not to prune much of the expensive tail. That's not a
+flaw in the calibration, it's what "coarse scale" means -- expect m=0.45/
+0.90 to still be the slowest channels, just no longer literally unbounded.
+
+Override the whole formula with --thresh (applies one fixed value to every
+m instead of the per-m curve) if you'd rather set it by hand.
+
 Three ways to run it:
 
   1. Single process, does everything (fine for a quick/small run):
@@ -82,6 +120,19 @@ SANITY_N_CLOUDS = 5
 SANITY_SEED = 0
 SHARDS_SUBDIR = "_shards"
 
+# Filtration-value cutoff, thresh(m) = THRESH_FIT_A * m**THRESH_FIT_B *
+# THRESH_SAFETY -- see the module docstring's "Filtration value cutoff"
+# section for the calibration this came from (nested_thomas's own
+# dtm_k5/diagrams.pkl, thresh=None, binned by effective m = 5/N, p99.9 of
+# max finite death per bin, power-law fit).
+THRESH_FIT_A = 2.6
+THRESH_FIT_B = 0.25
+THRESH_SAFETY = 1.5
+
+
+def _thresh_for_m(m: float) -> float:
+    return THRESH_SAFETY * THRESH_FIT_A * m**THRESH_FIT_B
+
 
 # ---------------------------------------------------------------------------
 # DTM by mass fraction
@@ -92,20 +143,20 @@ def _k_from_m(n_points: int, m: float) -> int:
     return int(np.clip(round(m * n_points), 1, max(1, n_points - 1)))
 
 
-def _dtm_diagram_for_cloud(cloud: PointCloud, m: float, *, q: float = DTM_Q, maxdim: int) -> PersistenceDiagram:
+def _dtm_diagram_for_cloud(cloud: PointCloud, m: float, *, q: float = DTM_Q, maxdim: int, thresh: float | None) -> PersistenceDiagram:
     k = _k_from_m(cloud.n_points, m)
-    filtration = DTMFiltration(maxdim=maxdim, k=k, q=q, thresh=None)
+    filtration = DTMFiltration(maxdim=maxdim, k=k, q=q, thresh=thresh)
     diagram = filtration.compute(cloud)
     diagram.filtration_name = "dtm_mfrac"
-    diagram.filtration_params = {**diagram.filtration_params, "m": m, "k": k}
+    diagram.filtration_params = {**diagram.filtration_params, "m": m, "k": k, "thresh": thresh}
     return diagram
 
 
-def _compute_dtm_for_records(records: list[dict], m: float, maxdim: int, tag: str) -> list[PersistenceDiagram]:
+def _compute_dtm_for_records(records: list[dict], m: float, maxdim: int, tag: str, thresh: float | None) -> list[PersistenceDiagram]:
     diagrams = []
     for i, rec in enumerate(records):
         cloud = to_pointcloud(rec)
-        diagrams.append(_dtm_diagram_for_cloud(cloud, m, maxdim=maxdim))
+        diagrams.append(_dtm_diagram_for_cloud(cloud, m, maxdim=maxdim, thresh=thresh))
         if (i + 1) % 500 == 0 or i + 1 == len(records):
             print(f"  [{tag}] {i + 1}/{len(records)} diagrams computed", flush=True)
     return diagrams
@@ -128,19 +179,19 @@ def _is_degenerate(diagram: PersistenceDiagram, maxdim: int, eps: float = 1e-9) 
     return True
 
 
-def _sanity_check_dtm(records: list[dict], m_values: list[float], maxdim: int) -> None:
+def _sanity_check_dtm(records: list[dict], m_values: list[float], maxdim: int, thresh_fn) -> None:
     """Cheap (SANITY_N_CLOUDS clouds x 2 extreme m values) pre-flight check,
     meant to run before the expensive full sweep -- see --sanity-only."""
     rng = np.random.default_rng(SANITY_SEED)
     idx = rng.choice(len(records), size=min(SANITY_N_CLOUDS, len(records)), replace=False)
     extremes = (min(m_values), max(m_values))
-    print(f"[sanity] checking m={extremes} on {len(idx)} sampled clouds ...")
+    print(f"[sanity] checking m={extremes} (thresh={[round(thresh_fn(m), 3) for m in extremes]}) on {len(idx)} sampled clouds ...")
 
     degenerate_count = {m: 0 for m in extremes}
     for i in idx:
         cloud = to_pointcloud(records[int(i)])
         for m in extremes:
-            diagram = _dtm_diagram_for_cloud(cloud, m, maxdim=maxdim)
+            diagram = _dtm_diagram_for_cloud(cloud, m, maxdim=maxdim, thresh=thresh_fn(m))
             n0 = diagram.finite_pairs(0).shape[0]
             n1 = diagram.finite_pairs(1).shape[0]
             degenerate = _is_degenerate(diagram, maxdim)
@@ -217,7 +268,7 @@ def _shard_path(shards_dir: Path, prefix: str, m: float, index: int, total: int)
 
 def run_shard(
     train_records: list[dict], adv_records: list[dict] | None, m_values: list[float], maxdim: int,
-    shards_dir: Path, index: int, total: int,
+    shards_dir: Path, index: int, total: int, thresh_fn,
 ) -> None:
     if not (0 <= index < total):
         raise ValueError(f"--shard index must be in [0, {total}), got {index}.")
@@ -233,11 +284,12 @@ def run_shard(
         print(f"[shard {index}/{total}] adversarial clouds [{astart}:{aend}) -> {len(adv_shard)} clouds")
 
     for m in m_values:
-        tag = f"shard {index}/{total} m={m:.2f}"
-        diagrams = _compute_dtm_for_records(train_shard, m, maxdim, f"train {tag}")
+        thresh = thresh_fn(m)
+        tag = f"shard {index}/{total} m={m:.2f} thresh={thresh:.3f}"
+        diagrams = _compute_dtm_for_records(train_shard, m, maxdim, f"train {tag}", thresh)
         dump_pickle(_shard_path(shards_dir, "", m, index, total), _build_bundle(diagrams, train_shard, m))
         if adv_shard is not None:
-            adv_diagrams = _compute_dtm_for_records(adv_shard, m, maxdim, f"adversarial {tag}")
+            adv_diagrams = _compute_dtm_for_records(adv_shard, m, maxdim, f"adversarial {tag}", thresh)
             dump_pickle(_shard_path(shards_dir, "adversarial_", m, index, total), _build_bundle(adv_diagrams, adv_shard, m))
 
     print(f"[shard {index}/{total}] done.")
@@ -315,11 +367,12 @@ def run_merge(
 
 def run_full(
     out_dir: Path, train_records: list[dict], adv_records: list[dict] | None, m_values: list[float],
-    maxdim: int, homology_dims: tuple[int, ...], resolution: int, sigma_pixels: float,
+    maxdim: int, homology_dims: tuple[int, ...], resolution: int, sigma_pixels: float, thresh_fn,
 ) -> None:
     for m in m_values:
-        tag = f"m={m:.2f}"
-        train_diagrams = _compute_dtm_for_records(train_records, m, maxdim, f"train {tag}")
+        thresh = thresh_fn(m)
+        tag = f"m={m:.2f} thresh={thresh:.3f}"
+        train_diagrams = _compute_dtm_for_records(train_records, m, maxdim, f"train {tag}", thresh)
         train_bundle = _build_bundle(train_diagrams, train_records, m)
         diagrams_path = out_dir / f"dtm_m{m:.2f}_diagrams.pkl"
         images_path = out_dir / f"dtm_m{m:.2f}_persistence_image.pkl"
@@ -331,7 +384,7 @@ def run_full(
         print(f"  [{tag}] saved -> {images_path}")
 
         if adv_records is not None:
-            adv_diagrams = _compute_dtm_for_records(adv_records, m, maxdim, f"adversarial {tag}")
+            adv_diagrams = _compute_dtm_for_records(adv_records, m, maxdim, f"adversarial {tag}", thresh)
             adv_bundle = _build_bundle(adv_diagrams, adv_records, m)
             adv_diagrams_path = out_dir / f"adversarial_dtm_m{m:.2f}_diagrams.pkl"
             adv_images_path = out_dir / f"adversarial_dtm_m{m:.2f}_persistence_image.pkl"
@@ -367,7 +420,14 @@ def main(argv: list[str] | None = None) -> None:
         "--merge", type=int, metavar="TOTAL",
         help="merge TOTAL shards (written by --shard) into the full diagrams + calibrated images",
     )
+    parser.add_argument(
+        "--thresh", type=float, default=None,
+        help="fixed filtration-value cutoff applied to every m (overrides the default per-m "
+             f"thresh(m) = {THRESH_SAFETY}*{THRESH_FIT_A}*m^{THRESH_FIT_B} curve -- see the module docstring's "
+             "'Filtration value cutoff' section). Must be identical across --sanity-only/--shard/--merge calls.",
+    )
     args = parser.parse_args(argv)
+    thresh_fn = (lambda m: args.thresh) if args.thresh is not None else _thresh_for_m
 
     cfg = load_config(args.config, overrides=args.overrides)
     data_paths = DataPaths(cfg.process.name, root=cfg.data_root or DEFAULT_DATA_ROOT)
@@ -385,6 +445,8 @@ def main(argv: list[str] | None = None) -> None:
 
     m_values = args.m_values
     print(f"m grid: {m_values}")
+    print(f"thresh(m): {[round(thresh_fn(m), 3) for m in m_values]}"
+          + (" (fixed --thresh override)" if args.thresh is not None else " (default per-m curve)"))
     print(f"imager params: resolution={resolution} sigma_pixels={sigma_pixels} homology_dims={homology_dims}")
 
     clouds_path = data_paths.clouds()
@@ -399,12 +461,12 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[adversarial] {len(adv_records)} clouds from {adv_clouds_path}")
 
     if args.sanity_only:
-        _sanity_check_dtm(train_records, m_values, maxdim)
+        _sanity_check_dtm(train_records, m_values, maxdim, thresh_fn)
         return
 
     if args.shard is not None:
         index, total = args.shard
-        run_shard(train_records, adv_records, m_values, maxdim, shards_dir, index, total)
+        run_shard(train_records, adv_records, m_values, maxdim, shards_dir, index, total, thresh_fn)
         return
 
     if args.merge is not None:
@@ -416,8 +478,8 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     # Default: single-process, does everything (sanity check + full sweep).
-    _sanity_check_dtm(train_records, m_values, maxdim)
-    run_full(out_dir, train_records, adv_records, m_values, maxdim, homology_dims, resolution, sigma_pixels)
+    _sanity_check_dtm(train_records, m_values, maxdim, thresh_fn)
+    run_full(out_dir, train_records, adv_records, m_values, maxdim, homology_dims, resolution, sigma_pixels, thresh_fn)
 
 
 if __name__ == "__main__":
