@@ -1,0 +1,1350 @@
+% =============================================================================
+% Deep Learning for Parameter Estimation in Spatial Point Processes
+% RESTRUCTURING PASS -- no prose has been rewritten, only moved.
+%
+% HOW TO READ THIS FILE
+%   * Every section opens with a % NOTE block stating its PURPOSE and its TODOs.
+%   * \todo{...} marks inline gaps (renders red while \drafttrue).
+%   * Text carried over from the old draft is tagged % [MOVED FROM: ...].
+%   * Sections 2, 7.1, 7.3, 8, 9 are currently empty skeletons -- these are the
+%     writing targets. Sections 5 and 6 are largely done.
+% =============================================================================
+
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{mathpazo}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{dsfont}
+
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\usepackage{natbib}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+% ----------------------------------------------------------------------------
+% Macros (unused ones from the AAAI draft have been deleted)
+% ----------------------------------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\1}{\mathds{1}}
+\newcommand{\pc}{\mathbf{x}}
+\newcommand{\simpcom}{\Sigma}
+\newcommand{\filt}{\mathcal{F}}
+\newcommand{\kpar}{\kappa}
+\newcommand{\mo}{\mu}
+
+% ----------------------------------------------------------------------------
+% Draft annotations -- set \draftfalse to hide all TODOs
+% ----------------------------------------------------------------------------
+\newif\ifdraft
+\drafttrue
+\ifdraft
+  \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+  \newcommand{\fix}[1]{\textcolor{blue}{[FIX: #1]}}
+\else
+  \newcommand{\todo}[1]{}
+  \newcommand{\fix}[1]{}
+\fi
+
+% ----------------------------------------------------------------------------
+% Theorem environments (trimmed to those actually used)
+% ----------------------------------------------------------------------------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{claim}[theorem]{Claim}
+
+\newtheoremstyle{definitioncolon}%
+  {\topsep}{\topsep}{\normalfont}{}{\bfseries}{}{.5em}%
+  {\thmname{#1}\thmnumber{ #2}\thmnote{: #3}}
+\theoremstyle{definitioncolon}
+\newtheorem{definition}[theorem]{Definition}
+
+\newtheorem*{note}{Note}
+\newtheorem*{example}{Example}
+\newtheorem*{remark}{Remark}
+
+% ----------------------------------------------------------------------------
+\title{Topological Feature Learning for Parameter Estimation\\
+       in Neyman--Scott Processes
+       \thanks{\todo{title is a placeholder -- it should name the topological
+       angle and the family class, not just ``deep learning''}}}
+\author{Flavio Gualtieri}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+
+% #############################################################################
+% ABSTRACT
+% #############################################################################
+% NOTE -- PURPOSE: sell the paper in 6 sentences.
+% The current version is an inventory of components (pipeline, encoder, FCNN).
+% It should instead be: problem -> limitation of classical estimators ->
+% topological features as the answer -> TWO threads (which summary is best /
+% how good is the best model) -> multi-family coverage -> headline number.
+% REWRITE LAST, once Sections 1 and 7 are settled.
+% #############################################################################
+\begin{abstract}
+% [MOVED FROM: old abstract -- keep as raw material only, do not ship]
+Overview of deep learning estimator for the parameters of homogeneous spatial
+point processes. It is comprised of (1) a persistence vectorization pipeline,
+(2) an encoder that produces a feature vector, and (3) a FCNN with $p$ output
+nodes corresponding to the $n$ parameters of the SPP.
+
+\todo{rewrite entirely; leave a bracketed slot for the headline result}
+
+Problem: why classical estimators are limited
+We propose a method using vectorized persistence summaries as learned features, 
+and explore (i) which summaries are most effective, and (ii) how the best model 
+compares to exsting baselines.
+\end{abstract}
+
+
+% #############################################################################
+% 1. INTRODUCTION
+% #############################################################################
+% NOTE -- PURPOSE: motivate, position, and promise. Four moves in this order:
+%   (i)   parameters are the interpretable scientific object
+%   (ii)  classical estimators depend on a CHOSEN summary statistic with a
+%         closed form -- state each limitation as a claim, not a noun
+%   (iii) topological summaries: rich, family-agnostic, no closed form needed
+%   (iv)  explicit contributions + roadmap
+%
+% BIGGEST PROBLEM: the word "topology" does not currently appear anywhere in
+% this section. The reader hits Section 3.2 with no idea why simplicial
+% complexes are being introduced. Fix (iii) first.
+% #############################################################################
+\section{Introduction}
+
+% --- (i) motivation ----------------------------------------------------------
+% [MOVED FROM: old Section 1]
+The study of spatial point processes finds applications in astronomy, cell
+biology, epidemiology, etc. Many natural phenomena - such as galaxy clustering -
+are modelled using SPPs, so one can hope to leverage an understanding of these
+processes to obtain novel insights.
+\todo{pick ONE application and carry it through the whole paper as the running
+example -- galaxy clustering is the natural choice given the related work}
+
+The ability to infer the parameters of SPPs is of particular interest because a
+wealth of canonical summary statistics become readily available once these
+parameters are known, such as ...
+\todo{this motivation is CIRCULAR and must be replaced. Classical methods
+estimate parameters FROM summary statistics, not the other way round. The real
+argument: the parameters are the physically interpretable quantities
+($\kappa$ = cluster density, $\mu$ = occupancy, $\sigma$ = cluster scale), and
+existing estimators are fragile in nameable regimes.}
+\fix{The parameters of spatial point processes are of particular interest because 
+they are interpretable scientific quantities. For example ...}
+
+
+% --- (ii) limitations of existing estimators ---------------------------------
+A number of parameter estimation methods have been proposed, typically relying
+on closed-form expressions for summary statistics, for example the $K$ and $g$
+functions.
+\todo{these three become a short paragraph with citations, not a bullet list}
+\begin{itemize}[nosep]
+  \item Minimum contrast on $K$ or $g$ (Diggle 2003).
+  \item Palm likelihood (Tanaka, Ogata \& Stoyan 2008).
+  \item Bayesian and MCMC.
+\end{itemize}
+
+These methods have limitations we hope to address.
+\todo{THESE FOUR BARE NOUNS ARE THE LOAD-BEARING JUSTIFICATION FOR THE ENTIRE
+PROJECT and are currently placeholders. Each must become a claim with a
+mechanism and, ideally, a regime where it bites:
+ - hand-picked statistic: $K$ radially averages away multi-scale structure;
+   a closed form may not exist at all (nested Thomas)
+ - hyperparameter sensitivity: minimum contrast depends on $(r_{max}, q, p)$
+ - stability: which regimes? near-Poisson? name them
+ - generalizability: new family => new derivation}
+\begin{itemize}[nosep]
+  \item Reliance on hand-picked summary statistic (and by extension a
+        closed-form expression for this statistic).
+  \item Hyperparameter tuning sensitivity.
+  \item Stability.
+  \item Generalizability.
+\end{itemize}
+\fix{Firstly, existing methods rely on the existence of closed-form expressions of
+summary statistics -- such as the $K$-function -- which may not exist for every process.
+For example, while such an expression of the $K$-function exists for the Thomas process,
+it does not for the nested Thomas process. Secondly, classical parameter estimation
+methods suffer from hyperparameter sensitivity, specifically the minimum contrast method
+depends on $(r_{max}, q, p)$. Thirdly, classical methods are not stable in nameable regimes.
+Finally, these methods do not generalize well to new families of processes, as a new derivation
+is required for each new family.}
+
+% --- (iii) the topological turn ---------------------------------------------
+\todo{MISSING PARAGRAPH. This is the hinge of the paper: persistent homology
+gives a multi-scale, family-agnostic descriptor of the pattern that requires no
+closed form and no choice of statistic. Without this paragraph, Section 3.2
+appears out of nowhere.}
+\fix{These limitations motivate the use of persistence-based features which provide a
+multi-scale, process-agnostic descriptor of the point cloud that does not require
+a closed-form or a choice of summary statistic.}
+
+% --- (iv) contributions ------------------------------------------------------
+\todo{MISSING CONTRIBUTIONS LIST. Draft it as:
+ 1. a systematic comparison of vectorized topological summaries as features for
+    SPP parameter estimation (the ORIGINAL objective -- re-elevate it);
+ 2. a per-diagram coverage-quantile calibration scheme for vectorizing across a
+    heterogeneous population of diagrams, with an explicit leakage protocol;
+ 3. a validated multi-family simulator + evaluation protocol, including an exact
+    finite-window variance identity;
+ 4. an estimator covering Thomas / Mat\'ern cluster / nested Thomas under a
+    common reparameterization.
+NOTE: architectural novelty is NOT on this list -- see Section 2.}
+
+\todo{roadmap paragraph}
+
+
+% #############################################################################
+% 2. RELATED WORK
+% #############################################################################
+% NOTE -- PURPOSE: locate the work honestly. Target ~half a page. ENTIRELY NEW.
+%
+% This section exists because the "novel architecture" framing is dead. Two
+% works occupy the neighbourhood:
+%   [A] "Using neural networks to estimate parameters in spatial point process
+%       models" -- essentially this architecture, but with the L function as
+%       the feature.
+%   [B] "Learning from topology: cosmological parameter estimation from the
+%       large-scale structure" -- topological features, but for cosmological
+%       parameters.
+%
+% STRUCTURE: position on two axes -- (what the feature is) x (what is being
+% estimated). [A] establishes the architecture pattern. [B] establishes
+% topological features for parameter inference. Concede both plainly and early;
+% the paper is stronger for it.
+%
+% THEN state the gap precisely. Candidates, in descending order of defensibility:
+%   - neither systematically COMPARES topological summaries against each other
+%     as estimator features (this is the thread to own)
+%   - neither addresses calibration across a heterogeneous diagram population
+%   - neither covers multiple Neyman--Scott families under one reparameterization
+%   - [B] is cosmology-specific; the SPP-estimation setting has a known error
+%     floor and classical baselines to measure against
+% #############################################################################
+\section{Related Work}
+
+\todo{WRITE THIS SECTION. Concede the architecture to [A]; concede topological
+features for parameter estimation to [B]; claim the comparative study, the
+calibration methodology, and the multi-family scope.}
+
+\todo{one paragraph: neural estimators for SPPs -- [A] and its lineage}
+\fix{REF first proposed the use of deep learning for parameter estimation. They implement
+an encoder/inference architecture similar to PointNet, but use the $L$-function as the learned
+feature and therefore suffer from the same limirations as classical methods (i.e. reliance
+on a closed-form summary statistic). REF employ a similar architecture as REF, but actually use
+topological features. Their model is deigned to estimate cosmological parameters rather than the
+parameters of the underlying point process. Furhtermore, they do not systematically compare 
+various topological summaries, nor do they address the calibration of the summaries they use.}
+
+\todo{one paragraph: topological summaries as features for inference -- [B],
+plus the vectorization literature (persistence images, Betti curves)}
+\fix{The vectorization of persistence diagrams is an active area of research arising from the issue
+that persistence diagrams -- not being a Hilbert space -- cannot be direclty used as inputs for
+machine learning models. To mitigate this, REF propose persistence images, which vectorise persistence
+diagrams by applying a Gaussian kernel to each point in the diagram and intergating over a grid.
+REF propose Betti curves, which vectorize persistence diagrams by counting the number of topological features
+that are alive at each scale.}
+
+\todo{one paragraph: the gap, stated in one or two sentences}
+
+
+% #############################################################################
+% 3. BACKGROUND
+% #############################################################################
+% NOTE -- PURPOSE: give the reader only what is needed downstream.
+% Currently ~40% of the draft and written as neutral textbook exposition.
+%
+% ACTIONS:
+%   * CUT hard. Keep intensity, Neyman--Scott, the three families; keep
+%     filtration -> diagram -> vectorization.
+%   * MOVED OUT: the $g$ / $K$ definitions now live in Section 5.3, which is
+%     the only place they are used.
+%   * ADD the missing justification paragraph at 3.2 (see \todo there).
+%   * The literature-review placeholder lives at the end of this section.
+% #############################################################################
+\section{Background}
+\label{sec:background}
+
+% [MOVED FROM: old Section 2 preamble]
+We provide the background in SPPs and persistent homology required for this
+discussion. Readers with a working understanding of both may skip to
+Section \ref{sec:method}.
+
+% -----------------------------------------------------------------------------
+\subsection{Spatial point processes}
+% NOTE: keep as is. This is tight and load-bearing.
+% -----------------------------------------------------------------------------
+
+    \begin{definition}[Intensity function]
+        A $d$-dimensional SPP $X$ on a subset $W \subseteq \R^d$ is equipped
+        with an intensity function $\rho(u): \R^d \rightarrow \R^+$ such that
+            \[
+            \E[N(W)] = \int_W \rho(u) du,
+            \]
+        where $N(W) = \mid W \cap X \mid$ denotes the number of points of $X$
+        in $W$. When $\rho(u) = \lambda \in \R$, $X$ is said to be
+        \emph{homogeneous}.
+    \end{definition}
+
+    \begin{example}
+        For a homogeneous Poisson process with intensity $\lambda$, we have
+        $\rho(u) = \frac{1}{\lambda}$, i.e. points are scattered uniformly on
+        the space.
+    \end{example}
+
+    \begin{definition}[Neyman-Scott process]
+        Let $P$ be a homogeneous Poisson \emph{parent} process with intensity
+        $\kpar$. For a Neyman-Scott process with Poisson-distributed offspring
+        we have:
+            \[
+            \rho_{NS}(u) = \mo \sum_{p \in P} k(u - p),
+            \]
+        where $k$ is a kernel that determines how the \emph{offspring} points
+        are distributed around the parents.
+    \end{definition}
+
+    \begin{note}
+        Neyman-Scott processes always have the parent and offspring intensities
+        as parameters. Additional parameters are introduced by the choice of
+        kernel.
+    \end{note}
+
+    \begin{definition}[Homogeneous Thomas process]
+        A homogeneous Thomas process is a Neyman-Scott process with an isotropic
+        Gaussian kernel $\mathcal{N}(0, \sigma^2I)$
+            \[
+            \rho_{Thomas}(u) = \mo \sum_{p \in P} k(0, \sigma^s),
+            \]
+        This process has parameters $\theta_{Thomas} = (\kappa, \mu, \sigma)$
+        corresponding to the parent intensity, offspring intensity, and cluster
+        scale, respectively.
+    \end{definition}
+
+\todo{add the Mat\'ern cluster and nested Thomas definitions here -- both are
+used in Section 5 but never defined}
+
+% -----------------------------------------------------------------------------
+\subsection{Persistent homology}
+\label{ssec:persistence}
+% NOTE: mechanically complete but intellectually silent. It defines everything
+% EXCEPT the one thing the reader needs.
+% -----------------------------------------------------------------------------
+
+\todo{OPENING PARAGRAPH MISSING -- and it is the intellectual justification for
+the whole method. What does persistence see in a clustered pattern that a
+radially averaged second-order statistic does not? Multi-scale connectivity
+($H_0$ death times track cluster merging across scales) and void structure
+($H_1$). Write this BEFORE the definitions, so the reader knows what the
+machinery is for.}
+\fix{Redially averaged statistics -- such as the $g$ and $K$ functions -- collapse
+a point cloud to a real-valued curve indexed by scale $r$. Features based on such
+statistics are constructed by evaluating over a chosen range $[r_{min}, r_{max}]$
+and subsampling at $n$ points along the interval to obtain a feature vector in $\R^n$.
+This approach is limited because it discards multi-scale connectivity information and
+void structure, i.e. \emph{how} the density is distributed across the space.
+Persistent homology retains this information by tracking a family of simplicial
+complexes on the point cloud as the scale parameter grows, instead of a single scalar
+summary. Under a filtration such as Vietoris-Rips, the $H_0$ persistence summary records
+the order and scales at which clusters merge. The $H_1$ counterpart marks voids and gaps
+in the pattern as they persist across scales, allowing one to capture the clustering-induced
+emptiness or repulsion that a process may exhibit, which a radial-average cannot see.
+For each $d \in \N$, the $d$-dimensional persistence summary requires no closed form expression
+and no assumption about which process family generated it.
+}
+
+% [MOVED FROM: old Section 2.3 -- unchanged]
+Let $X$ be a point process on $R^d$ and $W \subseteq \R^d$ a bounded window with
+$|X \cap W| = n$ . Enumerate the points of $X \cap W$ to construct a point cloud
+$\pc = \{x_1, ..., x_n\} \subset \R^d$. Let $\Sigma(\pc)$ denote the \emph{full
+simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$
+
+    \begin{definition}[Simplex]
+        A \emph{simplex} of $\pc$ is a non-empty finite subset
+        $\sigma \subseteq \pc$. Its faces are the non-empty subsets
+        $\tau \subseteq \sigma$.
+    \end{definition}
+
+    \begin{definition}[Simplicial complex]
+        A simplicial complex $\simpcom$ on $\pc$ is a collection of simplices
+        closed under taking faces: $\sigma \in \simpcom, \tau \subseteq \sigma
+        \implies \tau \in \simpcom$.
+    \end{definition}
+
+    \begin{definition}
+        A filtration function on $\pc$ is a monotone map
+        $f: \Sigma(\pc) \rightarrow \R^+$ such that
+            \[
+            f(\tau) \leq f(\sigma) \quad \forall \quad \tau \subseteq \sigma.
+            \]
+    \end{definition}
+
+    \begin{example}
+        Vietoris-Rips filtration function:
+            \[
+            f_{VR}(\{x_i\}) = 0, \qquad f_{VR}(\{x_i, x_j\}) = \|x_i - x_j\|,
+            \]
+        extended to higher simplices by $f_{VR}(\sigma) = \max_{\{x_i,x_j\}
+        \subseteq \sigma} f_{VR}(\{x_i, x_j\})$, i.e. the diameter of $\sigma$.
+    \end{example}
+
+    \begin{example}
+    \label{ex:dtm}
+        For $u \in \R^d$, let $N_k(u)$ denote its $k$ nearest neighbours in
+        $\pc$. The $\mathrm{DTM}_k$ filtration function is
+            \[
+            f_{DTM}(\sigma; k) = \max_{u \in \sigma}\{(\frac{1}{k}
+            \sum_{v \in N_k(u)} d(u, v)^2)^{\frac{1}{2}}\}
+            \]
+        again extended to higher simplices by the max-over-edges rule of the VR
+        example. \citep{anai2020dtm}.
+    \end{example}
+
+    \begin{claim}
+        $f_{DTM_\kappa}$ is monotone, and is hence a valid filtration function
+        \citep[Prop.\ 3.5]{anai2020dtm}.
+    \end{claim}
+
+    \begin{definition}
+        Given a filtration function $f$ on $\pc$ and $r \geq 0$, we construct
+            \[
+            \mathcal{F}_r = \{\sigma \in \Sigma(\pc) : f(\sigma)
+            \leq r\}.
+            \]
+        Monotonicity of $f$ ensures each $\mathcal{F}_r$ is a simplicial complex
+        and that $\mathcal{F}_s \subseteq \mathcal{F}_t$ for $0 \leq s \leq t$.
+        The family $(\mathcal{F}_r)_{r \geq 0}$ is the \emph{filtration} induced
+        by $f$. We write $VR_r(\pc)$ for $\mathcal{F}_r$ under $f_{VR}$.
+    \end{definition}
+
+    \begin{definition}[Betti number]
+        Fix $k \in \N$ and a simplicial complex $\Sigma$. Taking homology
+        with coefficients in a field (we use $\Z_2$), $H_k(\simpcom)$ is a
+        vector space of dimension $\beta_k = \dim H_k(\simpcom)$, the $k$-th
+        \emph{Betti number}. $\beta_0, \beta_1, \beta_2, \dots$ count connected
+        components, loops, and cavities, respectively.
+    \end{definition}
+
+    \begin{definition}[Persistence pair \& lifetime]
+        For a filtration $(\filt_r)_{r \geq 0}$, a $k$-dimensional homology
+        class is \emph{born} at the smallest scale $b \geq 0$ at which it
+        appears in $H_k(\simpcom_b)$, and \emph{dies} at the scale $d > b$ at
+        which it merges into an older class or becomes a boundary. The pair
+        $(b,d)$ is a \emph{persistence pair}, and $d - b$ its \emph{lifetime}.
+    \end{definition}
+
+    \begin{example}
+        Consider $H_0$. Every $0$-dimensional class is born at $r=0$ and dies
+        when its two components merge, i.e. at the filtration value of the
+        connecting edge.
+    \end{example}
+
+    \begin{definition}[Persistence diagram]
+        A persistence diagram $D_k = \{(b_i, d_i)\}_i$ is the multiset of
+        dimension-$k$ persistence pairs, plotted with birth on the $x$-axis and
+        death on the $y$-axis.
+    \end{definition}
+
+    \begin{remark}
+        Every point of $D_k$ lies above the diagonal $b=d$ because it must die
+        after it is born. Distance from the diagonal is lifetime, so short-lived
+        points near the diagonal are often treated as noise.
+    \end{remark}
+
+    \begin{definition}[Persistence image]
+    \label{def:per_image}
+        The persistence image of $D_k$ is constructed by:
+            \begin{enumerate}
+                \item Mapping to birth-persistence coordinates:
+                      $(b,d) \mapsto (b, d-b)$.
+                \item Weighting each point by $w(d-b)$.
+                \item Forming the persistence surface
+                      $\rho(z) = \sum_i w(d_i - b_i)\,
+                      \phi(z; (b_i, d_i - b_i))$, a weighted sum of isotropic
+                      Gaussian kernels with bandwidth $\sigma_{im}$ centered at
+                      the transformed points.
+                \item Integrating $\rho$ over a $64 \times 64$ pixel grid,
+                      giving a single-channel image $PI \in \R^{64 \times 64}$.
+            \end{enumerate}
+    \end{definition}
+
+    \begin{definition}[Betti curve]
+        For fixed homology dimension $k$, the Betti curve is the
+        right-continuous step function counting $k$-features alive at scale $r$:
+            \[
+            \beta_k(r) = \#\{i : b_i \leq r < d_i\}
+            = \sum_i \1[b_i \leq r < d_i].
+            \]
+    \end{definition}
+
+\todo{list here the OTHER vectorizations that were implemented and tested --
+they are the objects compared in Section 7.1 and must be defined somewhere}
+
+% -----------------------------------------------------------------------------
+\subsection{Background reading}
+% NOTE: PROGRESSION-REPORT SLOT. Deliberately deferred to last.
+% For the report this doubles as the literature-review requirement.
+% -----------------------------------------------------------------------------
+\todo{WRITE LAST. Reading clusters to cover:
+ (a) classical SPP estimation -- Diggle, minimum contrast, Palm likelihood,
+     composite likelihood;
+ (b) TDA foundations -- persistence, stability, DTM filtrations;
+ (c) vectorization of persistence -- persistence images, landscapes, Betti
+     curves, kernel methods;
+ (d) neural/simulation-based inference -- amortized inference, neural
+     estimators, the two related works of Section 2;
+ (e) TDA applied to point processes and to cosmology.}
+
+
+% #############################################################################
+% 4. PROBLEM SETUP
+% #############################################################################
+% NOTE -- PURPOSE: state formally what is being estimated and what "good" means,
+% BEFORE any architecture is described. NEW SECTION, assembled from material
+% that was previously scattered across the top of the old Model section and the
+% bottom of data generation.
+% Short: half a page.
+% #############################################################################
+\section{Problem Setup}
+\label{sec:problem}
+
+\todo{opening: formal statement of the estimation target -- given a single
+realization $\pc$ on window $W$ from a Neyman--Scott process with unknown
+$\theta$, produce $\hat\theta$. Emphasise SINGLE realization: this is what makes
+the problem hard and it is what sets the error floor.}
+\fix{Let $X$ be a Neyman-Scott process on $\R^d$ with unknown parameter vector
+$\theta \in \Theta$. For example, the homogeneous Thomas process has 
+$\theta = (\kappa, \mu, \sigma)$. We observe a single realization of $X$ on a 
+bounded window $W \subset \R^d$, giving a point cloud
+$\pc = {x_1, \dots, x_n} \subset \R^d$ with $n = |X \cap W|$. The objective is to 
+produce an estimate $\hat\theta = \hat\theta(\pc)$ of $\theta$ from $\pc$ alone.
+We stress \emph{single}: $\theta$ is not recovered from repeated draws of $X$, nor 
+is $\pc$ pooled or averaged across realizations. This is the setting a practitioner
+faces: one observed pattern and one chance to estimate the generating parameters.
+It is also what makes the problem hard in a way no estimator can fix: a 
+fixed $\theta$ already induces a distribution over point clouds, so even the true 
+parameter value gives rise to a spread of plausible $\pc$, and it is this irreducible 
+spread —- not any weakness of a particular estimator -— that sets the error floor 
+characterized below.}
+
+
+% [MOVED FROM: old Section 3, loss + log-normalization]
+The model is trained on a training set of synthetic clouds
+$\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$ by backpropagating the RMS loss
+    \[
+    \mathcal{L}(\hat\theta_i, \theta_i) = \sqrt{\sum_{j=1}^{d}(\hat\theta^j_i - \theta^j_i)^2},
+    \]
+where $\theta_i = (\theta_i^1, \dots, \theta_i^d)$. Since parameters on a larger scale
+dominate this loss, we train in log-normalized parameter space,
+    \[
+    \{\pc_i, \theta_i\}_{i=1}^{N_{train}} \rightarrow
+    \left\{\pc_i, \frac{\log(\theta_i) - \mu_{\log\theta}}
+    {\sigma_{\log\theta}}\right\}_{i=1}^{N_{train}},
+    \]
+where -- abusing notation -- $\mu_{\log\theta}, \sigma_{\log\theta}$ denote the
+mean and standard deviation of the logged parameters.
+
+% [MOVED FROM: end of old Section 3.1.1 -- belongs here, as the definition of
+%  what success means]
+We draw one realization per parameter vector. The dispersion of $\hat\theta$
+across realizations sharing a common $\theta$ gives the irreducible error floor
+against which the model's performance should be read.
+
+\todo{make the error floor a named quantity here and reference it from
+Section 7.3 -- it is the yardstick for every reported number}
+
+
+% #############################################################################
+% 5. SIMULATOR AND EXPERIMENTAL DESIGN
+% #############################################################################
+% NOTE -- PURPOSE: this was buried as a subsection of "Model". PROMOTED.
+% Frame it as THE BENCHMARK, not as setup: it is a contribution in its own
+% right (validated multi-family simulator + exact finite-window identity +
+% evaluation protocol). It is also the strongest evidence of rigour available
+% for the progression report -- it must be visible in the table of contents.
+%
+% This section is essentially DONE. Light edits only.
+% #############################################################################
+\section{Simulator and Experimental Design}
+\label{sec:simulator}
+
+% [MOVED FROM: old Section 3.1]
+Training data consists of pairs $(\pc_i, \theta_i)$ in which $\theta_i$ is drawn
+from a design distribution $\Pi$ over parameters space and each $\pc_i$ is a
+single realization of the corresponding process. We describe the design
+distribution, sampling algorithm, and verification procedure used to generate
+the synthetic data.
+
+% -----------------------------------------------------------------------------
+\subsection{Design distribution}
+% NOTE: done. The reparameterization argument is good and should be kept intact.
+% -----------------------------------------------------------------------------
+The naive approach of sampling $(\kappa, \mu, \sigma)$ uniformly and
+independently from intervals is inadequate. Firstly, point processes can
+typically be separated into qualitative regimes of interest, which occupy curved
+subsets of the parameter grid. Therefore uniform sampling would allocate most of
+its mass to configurations that are either near-Poisson or degenerate. Secondly,
+the raw parameters are not comparable across families, for example Mat\'ern's
+ball radius $R$ and Thomas's cluster scale $\sigma$ do not play equivalent roles.
+We therefore sample in reparameterized coordinates that carry the same meaning
+for every family considered:
+    \begin{align*}
+        \lambda &= \kappa\mu && \text{expected offspring intensity,} \\
+        \kappa & && \text{parent intensity,} \\
+        \nu &= r\sqrt{\kappa} && \text{dimensionless overlap index,}
+    \end{align*}
+where $r$ denotes the cluster scale of the family in question: $r = \sigma$ for
+Thomas, $r = R$ for Mat\'ern cluster, and $r = \sqrt{\sigma_1^2 + \sigma_2^2}$
+for nested Thomas. The overlap index $\nu$ measures cluster radius against mean
+inter-parent spacing, so $\nu \ll 1$ gives well-separated clusters and
+$\nu \gtrsim 1$ gives clusters that merge (so the process approaches complete
+spatial randomness). Nested Thomas carries an additional coordinate, the scale
+ratio $\rho = \sigma_2/\sigma_1 \in (0,1)$, which separates configurations in
+which both levels of structure are resolvable from those in which the process
+collapses to a single scale.
+
+We draw $(\log\kappa, \log\lambda, \log\nu)$ uniformly over a grid and invert to
+recover $\mu = \lambda/\kappa$ and $r = \nu/\sqrt{\kappa}$. Log-uniform sampling
+is used because the parameters span several orders of magnitude, and it matches
+the log-normalization applied to the ground-truth targets (see
+Section \ref{sec:problem}) so that training targets are approximately uniform in
+each coordinate. Draws are taken from a scrambled Sobol sequence.
+
+The ranges of the design grid are constrained as follows:
+    \begin{enumerate}
+        \item \textbf{Point budget.} The cost of computing persistence summaries
+        grows rapidly with the number of points, so we impose
+        $\mathbb{E}[N] = \lambda \in [150, 800]$, fixing the range of
+        $\log\lambda$.
+        \item \textbf{Clusters per window.} We require $\kappa|W| = \kappa \geq 15$
+        so that a single realization is informative about $\kappa$, and
+        $\kappa|W| = \kappa \leq 120$ so that individual clusters remain
+        resolvable.
+        \item \textbf{Overlap.} We impose $\nu \in [0.10, 0.90]$. The upper
+        limit deliberately admits the near-Poisson regime so that the model is
+        still exposed to configurations in which the parameters are weakly
+        identifiable.
+    \end{enumerate}
+Parameter draws violating these constraint are rejected and redrawn before any
+cloud is generated. This filter acts on the design and not on realizations,
+therefore it does not distort the conditional law of $\pc$ given $\theta$. The
+realized acceptance rate is $24.8\%$.
+
+% -----------------------------------------------------------------------------
+\subsection{Sampling algorithm}
+% NOTE: done.
+% -----------------------------------------------------------------------------
+The various instances of a the Neyman--Scott construction may be generated by a
+single algorithm. The only part that is different for each instance is the
+displacement kernel $k$ and the offspring count distribution. For a window
+$W \subset \R^d$:
+    \begin{enumerate}
+        \item Expand $W$ by an edge buffer $b$ to produce $W_{exp}$, so that
+        clusters whose parents lie outside $W$ are not truncated.
+        \item Sample the parent process on $W_{exp}$:
+        $n \sim \mathrm{Poisson}(\kappa|W_{exp}|)$, with parents placed uniformly
+        on $W_{exp}$.
+        \item For each parent $p$ independently, draw an offspring count
+        $n_p \sim \mathrm{Poisson}(\mu)$.
+        \item For each offspring independently, draw a displacement
+        $\epsilon \sim k$ and place the point at $p + \epsilon$.
+        \item Discard the parents and retain the offspring lying in $W$.
+    \end{enumerate}
+For the Thomas process $k = \mathcal{N}(0, \simpcom^2 I_d)$; for the Mat\'ern
+cluster process $k$ is uniform on the ball of radius $R$; for nested Thomas the
+parent process at step 2 is itself a Thomas process rather than a homogeneous
+Poisson process.
+
+The buffer is set by a single rule applied to whichever kernel is in use: $b$ is
+the radius containing all but $\varepsilon$ of the mass of $k$. For a Gaussian
+kernel this gives $b = 4\sigma$, at which the per-axis tail mass is
+$2\Phi(-4) \approx 6.3 \times 10^{-5}$; for the compactly supported Mat\'ern
+cluster kernel it gives $b = R$ exactly, with no tail margin required; for nested
+Thomas the buffers of the two levels add, giving $b = 4\sigma_1 + 4\sigma_2$,
+which over-covers the tight bound $4\sqrt{\sigma_1^2 + \sigma_2^2}$ and is
+therefore conservative. Points are never clipped to the boundary; the only
+boundary operation is the containment filter at step 5.
+
+% -----------------------------------------------------------------------------
+\subsection{Validation}
+\label{ssec:verification}
+% NOTE: this is a CONTRIBUTION, not an implementation note. The exact
+% finite-window Var[N(W)] and the 175% discrepancy with the canonical identity
+% deserve prominence -- probably a figure showing the gap as a function of nu.
+%
+% The $g$ and $K$ definitions have been MOVED HERE from the old Background,
+% because this is the only place in the paper that uses them.
+% -----------------------------------------------------------------------------
+
+% --- moved definitions -------------------------------------------------------
+% [MOVED FROM: old Section 2.2 -- trim to only what is used below]
+Throughout this section, let $X$ denote a point process on $\R^d$. We write
+$u, v \in \R^d$ for points (precise locations) and $du$, $dv$ for infinitesimal
+regions of volume $|du|$, $|dv|$ centered at $u$ and $v$, respectively.
+
+    \begin{definition}[Second-order product density]
+        The second-order product density
+        $\rho^{(2)}: \R^d \times \R^d \rightarrow \R^+$
+        is defined such that $\rho^{(2)}(u, v)\,du\,dv$ is the probability of
+        jointly observing a point of $X$ in each of the infinitesimal regions
+        $du$ and $dv$.
+    \end{definition}
+
+    \begin{definition}[Pair correlation function]
+        The pair correlation function $g(u, v): R^d \times R^d \rightarrow \R^+$
+        is defined
+        \[
+        g(u, v) = \frac{\rho^{(2)}(u, v)}{\rho(u)\rho(v)}.
+        \]
+    It is clear that for any Poisson process we have $g \equiv 1$. Intuitively,
+    $g$ can suggest whether SPPs are attractive ($g > 1$), or repulsive
+    ($g < 1$).
+    \end{definition}
+
+    \begin{definition}[Stationarity \& isotropy]
+        A point process $X$ is said to be:
+            \begin{itemize}
+                \item \emph{Stationary} if $X \sim X + s$ for every
+                $s \in \R^d$ where $X + s = \{x + s: x \in X\}$.
+                \item \emph{Isotropic} if $X \sim RX$ for every rotation $R$
+                about the origin.
+            \end{itemize}
+    \end{definition}
+
+    \begin{note}
+        Stationarity implies constant intensity $\rho(u) = \lambda$, but the
+        converse is not necessarily the case. If $X$ is stationary and isotropic,
+        $g(u, v)$ depends on $u$ and $v$ only through their inter-point distance
+        $r = \|u - v\|$. Abusing notation, we may write $g(r)$ for this common
+        value. We now define the $K$ function.
+    \end{note}
+
+    \begin{definition}[$K$-function]
+        For stationary and isotropic $X$, the $K$-function
+        $K(r): \R^+ \rightarrow R^+$ is defined
+            \[
+            K(r) = \int_{b_r(0)} g(\|h\|) dh
+            \]
+        Intuitively, $\rho(u)K(r)$ is the expected number of points we expect to
+        see within a distance $r$ of a typical point in $X$.
+    \end{definition}
+
+\todo{consider double duty for these definitions: they also give the cleanest
+statement of what a radially averaged second-order statistic CANNOT see, which
+is the argument Section 3.2 needs. Cross-reference rather than duplicate.}
+
+% --- validation proper -------------------------------------------------------
+% [MOVED FROM: old Section 3.1.3 -- unchanged]
+Due to every downstream result being dependent on a diligent cloud-generation
+process, we validate it against the established closed-form second-order theory.
+On $W = [0,1]^2$ we compare $[[3000]]$ realizations at each of three parameter
+triples spanning the design, chosen to span the overlap index: a tight-cluster
+regime ($\nu = 0.07$), a moderate regime ($\nu = 0.22$), and a near-Poisson
+regime ($\nu = 1.00$).
+\todo{fix the $[[3000]]$ placeholder}
+
+For the first moment, $\mathbb{E}[N(W)] = \kappa\mu|W|$. For the second, the
+canonical identity $\mathrm{Var}[N(W)] = \kappa\mu(1+\mu)|W|$ holds only in the
+limit of a window large relative to $\sigma$, and is badly biased in precisely
+the near-Poisson regime we wish to stress. Applying the law of total variance to
+$N(W) = \sum_p N_p(W)$ with
+$N_p(W) \mid p \sim \mathrm{Poisson}(\mu q(p))$, $q(p) = \int_W k(x-p)\,dx$, and
+evaluating the shot-noise term by Campbell's formula gives the exact
+finite-window result
+    \begin{equation}
+    \label{eq:varN}
+    \mathrm{Var}[N(W)] = \kappa\mu + \frac{\kappa\mu^2}{4\pi\sigma^2}J(\sigma)^2,
+    \qquad
+    J(\sigma) = \int_{-1}^{1}(1-|t|)\,e^{-t^2/4\sigma^2}\,dt,
+    \end{equation}
+for $W = [0,1]^2$, where the reduction to a one-dimensional integral follows from
+the triangular density of the difference of two independent
+$\mathrm{Uniform}(0,1)$ variables. As $\sigma \to 0$,
+$J(\sigma) \to 2\sigma\sqrt{\pi}$ and \eqref{eq:varN} collapses to
+$\kappa\mu(1+\mu)$, confirming the two agree in the appropriate limit. The gap
+between them reaches $175\%$ at $\nu = 1$, so \eqref{eq:varN} is used as the
+comparison target.
+
+\todo{FIGURE: canonical identity vs \eqref{eq:varN} as a function of $\nu$, with
+the empirical points overlaid. This makes the 175\% claim visible in one glance
+and is the cheapest high-value figure in the paper.}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccccc}
+\toprule
+Case & $\nu$ & $\mathbb{E}[N]$ theory & empirical
+     & $\mathrm{Var}[N]$ theory & empirical \\
+\midrule
+A & 0.07 & 200.0 & $200.4 \pm 0.6$ & 982.0 & $972.5 \pm 25.1$ \\
+B & 0.22 & 100.0 & $100.2 \pm 0.4$ & 545.2 & $544.8 \pm 14.1$ \\
+C & 1.00 & 20.0  & $20.0 \pm 0.1$  & 43.6  & $46.0 \pm 1.2$ \\
+\bottomrule
+\end{tabular}
+\caption{Simulator validation against \eqref{eq:varN}. All deviations are within
+$2$ standard errors.}
+\label{tab:sim-validation}
+\end{table}
+
+We additionally verify that the empirical pair correlation function and Ripley's
+$K$ match
+    \[
+    g(r) = 1 + \frac{e^{-r^2/4\sigma^2}}{4\pi\kappa\sigma^2},
+    \qquad
+    K(r) = \pi r^2 + \frac{1 - e^{-r^2/4\sigma^2}}{\kappa},
+    \]
+that the marginal offspring intensity on $W$ shows no boundary deficit
+(edge-to-interior density ratio $1.003$--$1.048$ across the three cases, in all
+cases consistent with unity and never in the direction an insufficient buffer
+would produce), and that the displacement kernel is isotropic with per-axis
+standard deviation matching $\sigma$. Estimates of $g$ normalized per realization
+carry a negative bias that grows with $\mathbb{E}[N^2]$ and is therefore larger
+for clustered patterns than for a matched-intensity Poisson control; we account
+for this when reading residual deviations rather than attributing them to the
+sampler.
+
+% -----------------------------------------------------------------------------
+\subsection{Splits and evaluation protocol}
+% NOTE: RENAMED from "Splits". This is the evaluation protocol for the whole
+% paper and was previously invisible, buried at the bottom of data generation.
+% Section 7.3 should reference this subsection directly.
+% -----------------------------------------------------------------------------
+% [MOVED FROM: old Section 3.1.4]
+Data are split by parameter vector, never by realization, so that no parameter
+value appears in both training and evaluation. Beyond the random test split we
+generate two further evaluation sets: a grid over the design grid, permitting
+error to be reported as a surface over $(\log\nu, \log\lambda)$ rather than as a
+single scalar; and a set drawn one increment outside each range, characterizing
+degradation under extrapolation.
+
+\todo{add here: the classical baselines (minimum contrast, Palm likelihood) will
+be run on the SAME clouds. State that now -- it is what makes Section 7.3 a
+comparison rather than a table of unanchored numbers.}
+\fix{The classical baselines introduced in Section 2 are run on the same clouds,
+under the same train/test/grid/extrapolation splits rather than on separate data
+or numbers taken from the literature. Section 7.3 is therefore a comparison
+against a shared  test set.}
+
+\todo{state the metric explicitly (logMAE per parameter?) -- the \texttt{\textbackslash lm}
+macro existed in the old preamble but was never used in the text}
+\fix{Throughout Section 7 we report mean squared error in log-normalized parameter
+space. The scalar figures in Section 7.3 average this quantity over the test
+set and over the three parameters; where relevant we report the per-parameter
+loss breakdown. Because the standardization is the one used for training, 
+a loss of $\mathcal{L}=1$ corresponds to an error of one training-set standard 
+deviation of $\log\theta$.}
+
+% NOTE: the "design distribution acts as a prior" remark that used to close this
+% subsection has been MOVED to Section 8 (Discussion), where it belongs as a
+% limitation rather than as a passing aside.
+
+
+% #############################################################################
+% 6. METHOD: PARAMNET
+% #############################################################################
+% NOTE -- PURPOSE: describe the pipeline. Present it honestly as an instance of
+% a known pattern (cf. Section 2), with the genuinely interesting choices
+% flagged as CHOICES to be evaluated in Section 7 -- not as conclusions.
+%
+% GLOBAL EDIT REQUIRED IN THIS SECTION:
+% every sentence of the form "we tested many variants and present the best"
+% must become "we compare X, Y, Z; results in Section 7.x". There are at least
+% three such sentences and they are what currently deletes the comparison
+% thread from the paper.
+% #############################################################################
+\section{Method: ParamNet}
+\label{sec:method}
+
+% [MOVED FROM: old Section 3 opening]
+Let $\pc$ denote a point cloud, $v$ its vectorized persistence summary, and
+$e \in \R^{128}$ the resulting feature vector. ParamNet follows the pipeline
+    \begin{equation}
+    \label{eq:pipeline}
+    \pc \xrightarrow{\;\text{Vectorization}\;} v
+    \xrightarrow{\;\text{Encoder}\;} e
+    \xrightarrow{\;\text{FCNN}\;} \hat\theta.
+    \end{equation}
+
+\todo{add one sentence here conceding that this pipeline shape follows the
+neural-estimator pattern of related work [A], and that the contribution lies in
+the feature stage. Better to say it plainly here than to have a reviewer say it.}
+\fix{We note that the pipeline shape follows the neural-estimator patterns used in REF
+and REF. Our contribution lies in the feature-extraction stage, the application to
+a wider range of SPP families, and the careful evaluation of design choices.}
+
+The model is trained and evaluated on synthetic clouds generated by sweeping a
+design distribution of the parameter space. The synthetic clouds are processed
+together before training so that the feature-extraction step is performed only
+once.
+
+Feature extraction is the model's key component: it is where the cloud's
+topological summary is vectorized and made usable for machine learning. Much
+work has been done to develop vectorizations that ensure stability and minimize
+the inevitable information loss. We explore several such methods here, hoping
+that their relative efficacies provide insight into the structure they capture.
+\todo{THIS SENTENCE IS THE ORIGINAL RESEARCH OBJECTIVE and it is the best
+statement of it anywhere in the draft. Promote the idea to the Introduction's
+contributions list and point forward to Section 7.1 from here.}
+\fix{Feature extraction is the model's key component: it is where the cloud's 
+topological summary is vectorized and made usable for machine learning. 
+A substantial body of work has developed vectorizations of persistence 
+diagrams —- persistence images, Betti curves, landscapes, kernel methods -- 
+that trade off stability, resolution, and information loss in different ways, 
+but there is little consensus on which is preferable for recovering physical 
+generating parameters from a single observed point cloud. We implement and 
+compare several such vectorizations against this task directly, rather than 
+picking one on prior grounds; the comparison, and what it reveals about the 
+structure each vectorization does and does not preserve, is the subject of 
+Section~\ref{ssec:exp-summaries}.}
+
+
+The vectorized summary $v$ is passed through an encoder to obtain the
+feature vector $e \in \R^{128}$, which is then given to the FCNN
+$NN_\phi: \R^{128} \to \R^{n_params}$ to produce the estimate
+$\hat\theta = (\hat\kappa, \hat\mu, \hat\sigma)$.
+
+\todo{$NN_\phi$ is never actually specified -- depth, widths, activations.}
+\fix{$NN_\phi$ is a small feed-forward network: two hidden layers of width 64 and 
+32, each followed by a ReLU nonlinearity and dropout ($p=0.1$), then a final 
+linear layer mapping to the $n_{params}=3$ outputs $(\hat\kappa, \hat\mu, \hat\sigma)$.}
+
+% -----------------------------------------------------------------------------
+\subsection{Filtration and vectorization}
+% -----------------------------------------------------------------------------
+% [MOVED FROM: old Section 3.2]
+Although we implemented and tested a variety of vectorized topological summaries,
+we focus primarily on the most effective: persistence image.
+\todo{REWRITE -- this sentence deletes the comparative contribution in half a
+line. Replace with: "we implement and compare N vectorizations; the comparison
+is the subject of Section 7.1. For the remainder of this section we describe the
+pipeline instantiated with persistence images."}
+We expose the pipeline as follows;
+    \begin{enumerate}
+        \item Pick filtration function and construct filtrations
+        $\{(\filt)_{r\geq 0}\}_i$.
+        \item Compute persistence diagrams $\{D_0\}_i$, $\{D_1\}_i$
+        (see Definition \ref{def:per_image})
+        \item Calibrate diagrams to determine common birth/persistence axis
+        ranges, shared across the dataset, then vectorize each diagram into a
+        fixed-size raster using those ranges.
+    \end{enumerate}
+The key design choices that follow are:
+    \begin{itemize}
+        \item Filtration function
+        \item Calibration procedure
+        \item Image resolution
+    \end{itemize}
+Although the latter two points can be optimized with a grid-search, the choice of
+filtration function plays a fundamental role in the optimal extraction of
+information. Various exploratory experiments suggested that the canonical Rips
+filtration does not recover sufficient information about the local density of the
+clouds, and therefore does not provide the model with a complete picture.
+\todo{"various exploratory experiments suggested" is an unsupported assertion
+carrying a genuinely interesting empirical finding. Either promote the evidence
+to Section 7.1, or state it here as a hypothesis and forward-reference.}
+
+In the present iteration of ParamNet, we use the $DTM_k$ filtration, as seen in
+Example \ref{ex:dtm}, which provides a richer summary. Furthermore, the parameter
+$k$ allows us to compute summaries at various scales, which may be combined to
+provide the model with a more complete picture.
+
+The simultaneous use multiple $k$-scales per point cloud introduces complexities
+in the pipeline - specifically how the vectorized persistence summaries are
+encoded and combined to produce the final feature vector for $NN_\phi$. We
+discuss this in the following section.
+
+% -----------------------------------------------------------------------------
+\subsection{Calibration}
+\label{ssec:calibration}
+% NOTE: this is CONTRIBUTION #2 and it is currently three levels deep. The
+% material itself is in good shape -- the fix is positional, plus a figure.
+% Old cross-references pointed at \ref{sec:calibration}, which never existed;
+% label is now \ref{ssec:calibration}.
+% -----------------------------------------------------------------------------
+% [MOVED FROM: old Section 3.2.1 -- unchanged]
+Consider the synthetic training clouds $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$
+and fix the homology dimension $h \in \{0,1\}$ for some choice of filtration. We
+obtain $N_{train}$ persistence diagrams $\{D^{(h)}_i\}_{i=1}^{N_{train}}$. Each
+diagram will have a different distribution of points, some of which may have
+extreme outliers with respect to the full set of diagrams.
+
+In order to ensure that in the resulting persistence images each pixel bears the
+same meaning, we need to calibrate the diagrams to have the same axis ranges. The
+naive approach of calibrating to the maximum deaths and births in order to
+include all points is inadequate due to the resulting relative positioning of the
+bulk of points.
+
+If we have a diagram with very strong outliers and chose universal axes that
+include these outliers, the remaining diagrams will be rescaled in a way that
+places the majority of their points near the origin. The diagrams -- and
+therefore their vectorizations -- will lose a lot of texture.
+
+\todo{FIGURE: naive min/max calibration vs coverage-quantile calibration, same
+diagram, side by side. The "loss of texture" argument is visual and is currently
+carried entirely by prose.}
+
+Our solution is to calibrate according to \emph{per-diagram coverage quantiles}.
+For each training diagram $D_i^{(h)}$, define the three summary statistics
+\begin{equation}
+    b_i^{\min} = \min_{(b,d) \in D_i^{(h)}} b, \qquad
+    b_i^{\max} = \max_{(b,d) \in D_i^{(h)}} b, \qquad
+    p_i^{\max} = \max_{(b,d) \in D_i^{(h)}} (d - b),
+\end{equation}
+i.e. the smallest birth, largest birth, and largest persistence value attained
+\emph{within a single diagram}. Given a coverage level $q \in (0,1)$ and a
+padding factor $\kappa \geq 1$, we set the calibrated birth and persistence
+ranges to be the $q$-quantiles of these per-diagram statistics, taken over the
+training set:
+\begin{equation}
+    \big[\,Q_{1-q}\big(\{b_i^{\min}\}_{i=1}^{N_{train}}\big),\
+    \kappa \cdot Q_{q}\big(\{b_i^{\max}\}_{i=1}^{N_{train}}\big)\,\big]
+    \qquad \text{and} \qquad
+    \big[\,0,\ \kappa \cdot
+    Q_{q}\big(\{p_i^{\max}\}_{i=1}^{N_{train}}\big)\,\big],
+\end{equation}
+where $Q_q(\cdot)$ denotes the empirical $q$-quantile. In practice we take
+$q = 0.99$ and $\kappa = 1.05$, which were determined via grid-search. These two
+ranges are shared by every diagram of homology dimension $h$, for every point
+cloud in the dataset (train, validation, test, and adversarial alike), so that a
+given pixel of the resulting persistence image always refers to the same region
+of birth-persistence space.
+\todo{NOTATION CLASH: $\kappa$ is the padding factor here and the parent
+intensity everywhere else in the paper. Rename the padding factor.}
+
+The key difference with the naive min/max calibration is \emph{what} is being
+quantiled. Pooling all points from all diagrams and taking a quantile over that
+pooled set implicitly weights each diagram by how many topological features it
+produces: a single diagram with an unusually large number of points -- near the
+diagonal or otherwise -- can dominate the resulting bound, while a diagram
+consisting of one strong outlier and few other points contributes only that
+outlier. By instead computing one representative statistic per diagram and
+quantiling \emph{over diagrams}, every training cloud contributes exactly once to
+the calibration, regardless of how many persistence pairs it happens to produce.
+Framing outlier rejection as a coverage fraction over diagrams -- rather than
+over points -- makes the trade-off explicit and controllable: at most
+$\lceil (1-q) N_{train} \rceil$ diagrams may have their most extreme birth or
+persistence value fall outside the calibrated frame (and are clipped rather than
+discarded), while the bulk of the population retains full resolution. The naive
+approach of calibrating to the global maximum is recovered as the degenerate case
+$q \to 1$.
+
+This scheme is also compatible with the stability guarantees of persistence
+images \citep{adams2017persistence}, which are stated for a fixed bandwidth and a
+fixed image domain: since $\sigma_{\text{pixels}}$ is specified in pixel units
+(Definition \ref{def:per_image}) rather than in absolute birth/persistence units,
+and the birth and persistence ranges are calibrated independently of one another,
+a pixel remains a comparable, well-defined location across every image built from
+the calibrated imager -- irrespective of the very different physical spans the
+two axes typically have.
+
+\paragraph{Train/validation/test leakage.}
+Because the calibrated ranges are a property of the training distribution, they
+must be fit \emph{exclusively} on $\{D_i^{(h)}\}_{i \in \text{train}}$, then
+frozen and applied unchanged to validation, test, and adversarial diagrams.
+Fitting the ranges on the full, unsplit population of clouds -- before the
+train/validation/test partition is drawn -- lets information about the held-out
+clouds leak into the calibration used to build every training image, since every
+pixel's meaning is defined relative to the calibrated bounds. As the
+train/validation/test partition is redrawn per random seed, calibration must
+likewise be refit per seed, on that seed's training rows only, and then applied
+frozen to the corresponding validation, test, and adversarial rows.
+
+\paragraph{Degenerate axes.}
+For homology dimension $H_0$, birth values are often identically zero (or
+otherwise carry negligible spread) under the chosen filtration, in which case
+$b_i^{\min} \approx b_i^{\max}$ for all $i$ and the calibrated birth range
+collapses to a point. We detect this case explicitly and fall back to a
+one-dimensional vectorization of the diagram rather than fabricate an axis, since
+a degenerate range would make an entire column of pixels convey no information.
+
+% -----------------------------------------------------------------------------
+\subsection{Encoder and fusion}
+% NOTE: the ARCHITECTURE description stays here; the SWEEP RESULTS that used to
+% be interleaved with it have been moved to Section 7.2. Keep the split clean:
+% this subsection says what the options are, Section 7.2 says which won.
+% -----------------------------------------------------------------------------
+% [MOVED FROM: old Section 3.3]
+Many variations of encoders were tested for this model. We will focus on the
+variation that produced the best results, noting that the encoding step is an
+important aspect that will require further study.
+\todo{REWRITE -- same problem as the vectorization subsection. State the design
+space here; report the outcome in Section 7.2.}
+
+Consider our training clouds $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$. We pick $K$
+scales for our $DTM_k$ filtration, and compute persistence images for $D$
+homology dimensions with resolution $H \times W$. Therefore for batch size $B$,
+the objective is to pick a suitable encoder architecture for the following
+transformation:
+    \begin{equation}
+    (B, K, D, H, W) \xrightarrow{\;\text{Encoder}\;} (B, 128).
+    \end{equation}
+
+When it comes to using multiple images per homology dimension for each cloud, a
+central question is whether each vectorization should go through a shared-weight
+encoder, or be assigned its own independent encoder.
+
+The shared encoder is designed as follows: each $(D, H, W)$ persistence-image
+stack is first augmented with two coordinate channels -- fixed $x$- and
+$y$-coordinate grids linearly spaced over $[-1, 1]$ -- following the CoordConv
+construction \citep{liu2018coordconv}, so that the convolutional stack has access
+to absolute pixel position rather than having to infer it.
+
+This matters here specifically because the birth and persistence axes are
+calibrated (Section~\ref{ssec:calibration}): a fixed pixel location has a fixed,
+shared meaning across the dataset, and CoordConv lets the network exploit that
+directly instead of relearning it.
+
+The coordinate-augmented $(D+2, H, W)$ tensor is then passed through a small
+convolutional stack: three $3\times3$ convolution blocks with channel widths
+$(32, 64, 128)$, each followed by a ReLU, and by $2\times2$ max-pooling with
+spatial dropout between blocks (but not after the last one); the resulting
+feature map is reduced by adaptive average pooling to a single spatial location
+and projected by a linear layer to the embedding dimension $E$.
+
+To apply this one encoder to all $K$ scales, the $k$-axis is folded into the
+batch dimension for a single forward pass -- one call over $B \cdot K$ images
+rather than $K$ separate calls -- so the weights are tied across scales by
+construction rather than by any explicit sharing mechanism.
+
+This produces a $(B, K, E)$ tensor. The next question concerns how the per-$k$
+summary is prepared for $NN_\phi$. The options explored include:
+    \begin{enumerate}
+        \item Flat concatenation of the $K$ per-scale embeddings into a single
+        $(B, K \cdot E)$ vector
+        \item A small 1-D convolutional fusion over the ordered $k$-axis (two
+        $\text{Conv1d}$ layers, letting adjacent scales mix), followed by
+        average-pooling over $k$ into a fixed-width $(B, F)$ vector whose size
+        does not depend on $K$
+        \item The same convolutional fusion, but flattening rather than pooling
+        over $k$, giving a $(B, F \cdot K)$ vector that preserves which position
+        came from which scale at the cost of a width that again grows with $K$
+    \end{enumerate}
+
+\todo{end this subsection by forward-referencing Section 7.2 rather than
+announcing the winner here}
+
+
+% #############################################################################
+% 7. EXPERIMENTS
+% #############################################################################
+% NOTE -- PURPOSE: this section is the structural fix for the whole paper.
+% It does three jobs, in this order:
+%   7.1 the ORIGINAL research question (which topological summary is best) --
+%       currently absent from the draft, must be reconstructed from the
+%       exploratory work already done;
+%   7.2 architecture ablations -- ALREADY DONE, just relocated here;
+%   7.3 estimation performance -- THE EMPTY SLOT. Headers written now so the
+%       report reads as planned rather than unfinished.
+%
+% Open the section with a short paragraph stating the experimental protocol
+% (pointing at Section 5.4) and the metric, so it is not repeated three times.
+% #############################################################################
+\section{Experiments}
+\label{sec:experiments}
+
+\todo{opening paragraph: protocol (Section \ref{sec:simulator}), metric, seeds,
+hardware, and how the three subsections relate}
+
+% -----------------------------------------------------------------------------
+\subsection{Comparison of topological summaries}
+\label{ssec:exp-summaries}
+% NOTE: THE RE-ELEVATED ORIGINAL OBJECTIVE. This subsection is the paper's
+% clearest claim to a contribution independent of the "best model" thread, and
+% it currently exists nowhere in the draft -- only as three deleted sentences
+% ("we tested many, here is the best").
+%
+% WHAT GOES HERE:
+%   * filtration function: Rips vs DTM_k, and DTM across k. This is where the
+%     "Rips does not recover local density" claim from Section 6.1 finally gets
+%     evidence.
+%   * vectorization: persistence image vs Betti curve vs whatever else was run.
+%   * ideally crossed, or at least one held fixed while the other varies.
+%   * homology dimension: H_0 alone, H_1 alone, both.
+%   * INTERPRETATION, not just a table -- which structural information does each
+%     summary retain, and which parameter does it help most? A per-parameter
+%     breakdown here would make the section genuinely interesting rather than a
+%     ranking.
+% -----------------------------------------------------------------------------
+\todo{WRITE THIS SUBSECTION. Much of the underlying work is already done; it
+needs to be recovered from the exploratory experiments and run to a consistent
+protocol (same seeds, same splits, same design grid).}
+
+\todo{TABLE: filtration $\times$ vectorization, test loss mean $\pm$ sd over
+seeds}
+
+\todo{FIGURE: per-parameter error by summary type -- expect $\sigma$ and
+$\kappa$ to behave very differently}
+
+% -----------------------------------------------------------------------------
+\subsection{Architecture ablations}
+\label{ssec:exp-ablations}
+% NOTE: THIS IS ALREADY DONE -- it was hiding as parenthetical prose inside the
+% encoder description. Six configurations x five seeds plus a ten-seed
+% confirmation, with a real finding (instability, not just worse averages).
+% Presented as results it is a legitimate experimental subsection.
+% -----------------------------------------------------------------------------
+% [MOVED FROM: old Section 3.3 -- encoder-mode sweep]
+Experiments suggested that a shared encoder works just as well as the independent
+option: we ran a sweep crossing \emph{encoder mode} (shared-weight vs.
+independent-per-$k$) against \emph{fusion mode}, five seeds per combination, on
+the same $DTM_{5,10,15}$ nested-Thomas setup used throughout. Restricting to the
+simplest fusion strategy (flat concatenation), the shared-weight encoder matched
+the independent one to within seed noise:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+encoder mode & fusion & test loss (mean $\pm$ sd) & failed seeds \\
+\midrule
+shared      & concat & $0.200 \pm 0.009$ & $0/5$ \\
+independent & concat & $0.217 \pm 0.028$ & $0/5$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+\todo{promote to a proper \texttt{table} environment with a caption and label;
+report the full six-configuration cross, not just the two concat rows}
+
+with a ten-seed run of the shared-weight configuration ($0.205 \pm 0.012$)
+confirming the same order of magnitude. Since tying weights across scales also
+cuts the parameter count roughly $K$-fold and removes one design axis, we adopt
+the shared encoder going forward.
+
+% [MOVED FROM: old Section 3.3 -- fusion sweep]
+We determined once again that the simplest option was the most effective, and we
+concatenate the per-$k$ outputs. The full sweep, crossing both encoder mode and
+fusion strategy (six combinations, five seeds each), showed that the two
+convolutional-fusion variants are not simply worse on average but
+\emph{unstable}: individual seeds collapse to a test loss of $\sim\!0.9$--$1.0$,
+while other seeds of the very same configuration land right on the concatenation
+baseline ($\sim\!0.20$).
+
+Only the independent-encoder, flatten-pooled combination converged cleanly on all
+five seeds, but even so it did not outperform plain concatenation
+($0.212 \pm 0.005$ vs.\ $0.200 \pm 0.009$). Flat concatenation was therefore
+preferred not only for its simplicity, but because it was the only strategy --
+together with its shared/independent-encoder counterpart -- that trained reliably
+across seeds without any sign of the collapse observed for the
+convolutional-fusion alternatives.
+
+\todo{FIGURE: per-seed test loss scatter across the six configurations. The
+instability finding is the interesting part and a table of means hides it.}
+
+% -----------------------------------------------------------------------------
+\subsection{Estimation performance}
+\label{ssec:exp-performance}
+% #############################################################################
+% *** THE EMPTY SLOT ***
+% This subsection does not exist yet and is the main outstanding work item.
+% Writing the headers now is what makes the progression report read as PLANNED
+% rather than UNFINISHED. Do not delete these TODOs -- they are the plan.
+% #############################################################################
+% -----------------------------------------------------------------------------
+
+\paragraph{Comparison against classical estimators.}
+\todo{minimum contrast on $K$ and on $g$, and Palm likelihood, run on the SAME
+clouds (Section \ref{sec:simulator}). This is the headline comparison and the
+only one that can substantiate the limitations claimed in Section 1.}
+
+\paragraph{Error surfaces over the design grid.}
+\todo{error as a surface over $(\log\nu, \log\lambda)$ using the grid evaluation
+set. Expect degradation as $\nu \to 1$ (weak identifiability) -- if the model
+degrades more gracefully than minimum contrast there, that IS the result.}
+
+\paragraph{Per-parameter breakdown.}
+\todo{$\kappa$, $\mu$, $\sigma$ separately. They are not equally hard and a
+single scalar loss hides this.}
+
+\paragraph{Performance relative to the irreducible error floor.}
+\todo{report error as a ratio to the single-realization floor defined in
+Section \ref{sec:problem}, so the numbers mean something absolute.}
+
+\paragraph{Extrapolation.}
+\todo{the out-of-range evaluation set -- degradation one increment outside each
+design range.}
+
+\paragraph{Cross-family results.}
+\todo{Thomas / Mat\'ern cluster / nested Thomas. Whether one model trained across
+families beats per-family models is an interesting question in itself, and the
+common reparameterization of Section 5.1 is what makes it askable.}
+
+
+% #############################################################################
+% 8. DISCUSSION AND LIMITATIONS
+% #############################################################################
+% NOTE -- PURPOSE: pre-empt the obvious objections. Short.
+% #############################################################################
+\section{Discussion and Limitations}
+
+\paragraph{The design distribution is a prior.}
+% [MOVED FROM: end of old Section 3.1.4, where it was a stray closing remark]
+Finally, we note that the design distribution acts as a prior, so the trained
+model approximates a posterior summary under it, and its ranges must therefore
+cover the intended application domain.
+\todo{expand -- this is the single most important limitation of any amortized
+estimator and deserves a full paragraph, not a trailing sentence}
+
+\paragraph{Computational cost.}
+\todo{persistence computation scales badly in $n$; this is why the point budget
+of Section 5.1 is capped at 800. State the cost explicitly and compare against
+the cost of minimum contrast.}
+
+\paragraph{Single realization.}
+\todo{the estimator sees one realization; classical methods often assume the
+same, but say so explicitly}
+
+\paragraph{Homogeneity and stationarity.}
+\todo{everything here assumes homogeneous, stationary, isotropic processes}
+
+
+% #############################################################################
+% 9. FUTURE WORK
+% #############################################################################
+% NOTE -- PURPOSE: REQUIRED for the progression report; for the paper this can
+% be folded into Section 8. Keep it concrete and sequenced -- this is the
+% section the panel reads to judge whether there is a viable thesis here.
+% #############################################################################
+\section{Future Work}
+
+\todo{immediate: complete Section \ref{ssec:exp-performance}. Give this a
+timeline -- it is the nearest-term deliverable.}
+
+\todo{near term: the encoder question flagged in Section 6.3 as requiring
+further study -- attention over scales, set-based encoders operating on diagrams
+directly rather than on rasters}
+
+\todo{medium term: inhomogeneous / non-stationary processes, where classical
+closed forms are least available and the topological approach has the most to
+gain -- this is arguably where the thesis-scale contribution lies}
+
+\todo{medium term: real data. Galaxy catalogues if the running example of
+Section 1 is cosmological; name a specific dataset.}
+
+\todo{longer term: uncertainty quantification -- the model currently emits a
+point estimate with no interval, which limits its use as a drop-in replacement
+for likelihood-based methods}
+
+
+% #############################################################################
+% BIBLIOGRAPHY
+% #############################################################################
+\todo{set up references.bib -- currently only \texttt{anai2020dtm},
+\texttt{adams2017persistence}, and \texttt{liu2018coordconv} are cited, and the
+Diggle / Tanaka references in Section 1 are inline text rather than citations}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
