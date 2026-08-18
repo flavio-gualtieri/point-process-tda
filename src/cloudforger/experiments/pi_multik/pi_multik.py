@@ -118,6 +118,7 @@ def build_pi_tensor(
     resolution: int,
     sigma_pixels: float,
     coverage: float,
+    pad: float = 1.05,
     train_idx: np.ndarray | None = None,
     imagers: list[MultiChannelImager] | None = None,
 ) -> tuple[np.ndarray, list[MultiChannelImager]]:
@@ -134,7 +135,7 @@ def build_pi_tensor(
             calibration_diagrams = [diagrams_k[i] for i in train_idx]
             imager = build_calibrated_imager(
                 calibration_diagrams, homology_dims=homology_dims, resolution=resolution,
-                sigma_pixels=sigma_pixels, coverage=coverage, verbose=False,
+                sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, verbose=False,
             )
             imagers.append(imager)
         else:
@@ -325,6 +326,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         resolution = int(self.cfg.get("resolution", 64))
         sigma_pixels = float(self.cfg.get("sigma_pixels", 2.0))
         coverage = float(self.cfg.get("pd_calibration_coverage", 0.99))
+        pad = float(self.cfg.get("pad", 1.05))
         seed = self.cfg["seed"]
         device = prepare_device(seed)
 
@@ -350,7 +352,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         pi_img, imagers = build_pi_tensor(
             train_split, k_values, homology_dims=homology_dims, resolution=resolution,
-            sigma_pixels=sigma_pixels, coverage=coverage, train_idx=train_idx,
+            sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, train_idx=train_idx,
         )
         extra, n_norm, entropy_norms = build_extra(train_split, train_idx, include_entropy=include_entropy)
 
@@ -422,7 +424,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_pi_img, _ = build_pi_tensor(
                 adv_split, k_values, homology_dims=homology_dims, resolution=resolution,
-                sigma_pixels=sigma_pixels, coverage=coverage, imagers=imagers,
+                sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, imagers=imagers,
             )
             adv_extra, _, _ = build_extra(
                 adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,

@@ -19,8 +19,15 @@ def build_calibrated_imager(
     resolution: int = 128,
     sigma_pixels: float = 2.0,
     coverage: float = 0.99,
+    pad: float = 1.05,
     verbose: bool = True,
 ) -> MultiChannelImager:
+    """pad is axis_bounds' padding factor alpha (birth_hi/pers_hi are scaled
+    by pad before rasterizing, so a diagram exactly at the coverage quantile
+    isn't clipped at the image edge) -- previously left at axis_bounds' own
+    1.05 default with no way to override it from here; now exposed so
+    callers (e.g. PIMultiKExperiment's calibration sweep) can sweep it like
+    coverage/sigma_pixels/resolution."""
     if verbose:
         print(calibrate_report(diagrams))
 
@@ -29,7 +36,8 @@ def build_calibrated_imager(
         birth_range, pers_range = axis_bounds(
             diagrams=diagrams,
             homology_dim=dim,
-            coverage=coverage
+            coverage=coverage,
+            pad=pad,
             )
         imagers[dim] = PersistenceImager(
             birth_range=birth_range,
