@@ -1,0 +1,45 @@
+# python scripts/train.py configs/runs/thomas/mincontrast_g.yaml --seed 9371
+#
+# "min contrast on G" classical baseline -- edge-corrected kernel
+# pair-correlation contrast fit for the stationary Thomas process
+# (src/cloudforger/baselines/mincontrast_g.py, new -- see that module's
+# docstring for the empirical_g derivation and the K-vs-G distinction from
+# mincontrast.yaml's sibling). Thomas-only, same reason as mincontrast.yaml:
+# g_thomas(r) = 1 + exp(-r^2/4*sigma^2)/(4*pi*kappa*sigma^2) is specific to
+# the (non-nested) Thomas process -- nested_thomas has no derived closed-form
+# K or g anywhere in this repo (writeup's own \todo), so it's skipped for
+# both mincontrast baselines, not just this one.
+#
+# No filtration/features needed -- reads data/thomas/clouds.pkl directly,
+# same run_classical_baseline dispatch and seed-paired test-partition
+# convention as mincontrast.yaml.
+#
+# Results land under results/thomas/raw/mincontrast_g/seed_<seed>/.
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+
+method:
+  name: mincontrast_g
+  params:
+    n_starts: 10
+
+seeds: [9371, 9372, 9373, 9374, 9375]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]

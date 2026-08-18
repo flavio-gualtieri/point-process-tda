@@ -1,0 +1,46 @@
+# python scripts/generate.py configs/runs/nested_thomas/error_floor.yaml
+#
+# Error-floor estimation dataset, nested_thomas counterpart of
+# thomas/error_floor.yaml -- see that file's header for the full rationale.
+# 50 parameter vectors x 200 realizations, adversarial disabled,
+# data_root=data/error_floor keeps this separate from the main
+# data/nested_thomas/clouds.pkl.
+#
+# No consumer for this yet: nested_thomas has no closed-form K or g (no
+# mincontrast baseline), so unlike thomas/error_floor.yaml there is
+# currently no script that turns this dataset into an actual floor number
+# -- generate it now so it's ready whenever an estimator (vihrs inference
+# on a trained checkpoint, or a derived nested-process K/g) exists.
+#
+# No method: section -- generate.py only, not trainable via train.py.
+# Submit from the point-process-tda repo root:
+#   python scripts/generate.py configs/runs/nested_thomas/error_floor.yaml
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 200
+    random:
+      n_param_vectors: 50
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: false
+
+data_root: data/error_floor

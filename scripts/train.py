@@ -61,7 +61,7 @@ MULTI_K_METHODS = {
     "pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers", "pi_multik_earlyfusion",
     "betti_multik", "vec_multik",
 }
-CLASSICAL_BASELINE_NAMES = {"mincontrast", "palm"}
+CLASSICAL_BASELINE_NAMES = {"mincontrast", "mincontrast_g", "palm"}
 FILE_KEY_TO_FEATURE_NAME = {"pi": "persistence_image", "images": "persistence_image"}
 # file_keys with no filtration dependency -- their results always live under
 # the "raw" tag (paths.RAW_TAG), regardless of what's configured under

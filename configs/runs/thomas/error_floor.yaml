@@ -1,0 +1,49 @@
+# python scripts/generate.py configs/runs/thomas/error_floor.yaml
+#
+# Error-floor estimation dataset (sec:problem's irreducible error floor):
+# 50 parameter vectors x 200 realizations each, thomas. Same design
+# distribution (ranges/derived/constraints) as every other thomas config,
+# just n_param_vectors=50 and reps=200 instead of 8000/1 -- design.reps
+# repeats each of the 50 sampled theta's 200 times consecutively
+# (data_generation/design.py's repeat_vectors), each repeat getting its own
+# seed (base_seed + offset) and so its own independent realization of that
+# SAME theta. adversarial disabled: every one of the 10,000 clouds is
+# usable, no held-out split needed for this purpose.
+#
+# data_root points this at its own data/error_floor/thomas/ tree,
+# SEPARATE from data/thomas/clouds.pkl (the main 8000-cloud population
+# every other thomas config reads/writes) -- this is a generate.py-only
+# config (no `method:` section; scripts/train.py would refuse it).
+#
+# Clouds are ordered in theta-blocks of 200 (data/error_floor/thomas/
+# clouds.pkl row i belongs to theta group i // 200) -- whatever consumes
+# this file for the dispersion computation (e.g. mincontrast) relies on
+# that ordering, not a stored group id.
+#
+# No method: section -- generate.py only, not trainable via train.py.
+# Submit from the point-process-tda repo root:
+#   python scripts/generate.py configs/runs/thomas/error_floor.yaml
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 200
+    random:
+      n_param_vectors: 50
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: false
+
+data_root: data/error_floor

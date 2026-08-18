@@ -719,11 +719,10 @@ regions of volume $|du|$, $|dv|$ centered at $u$ and $v$, respectively.
 % --- validation proper -------------------------------------------------------
 Due to every downstream result being dependent on a diligent cloud-generation
 process, we validate it against the established closed-form second-order theory.
-On $W = [0,1]^2$ we compare $[[3000]]$ realizations at each of three parameter
+On $W = [0,1]^2$ we compare $3000$ realizations at each of three parameter
 triples spanning the design, chosen to span the overlap index: a tight-cluster
 regime ($\nu = 0.07$), a moderate regime ($\nu = 0.22$), and a near-Poisson
 regime ($\nu = 1.00$).
-\todo{fix the $[[3000]]$ placeholder}
 
 For the first moment, $\mathbb{E}[N(W)] = \kappa\mu|W|$. For the second, the
 canonical identity $\mathrm{Var}[N(W)] = \kappa\mu(1+\mu)|W|$ holds only in the
@@ -1337,9 +1336,9 @@ axes) and tensor shapes, refer to REF.
 Vec. & per-channel dim & channels & $\mathcal{L}$ native (T) & $\mathcal{L}$ native (NT) & $\mathcal{L}$ MLP (T) & $\mathcal{L}$ MLP (NT) \\
 \midrule
 PI  & $64\times64=4096$ & 6  & $0.126 \pm 0.008$ (10) & $0.196 \pm 0.006$ (5) & $0.154 \pm 0.012$ (5) & $0.261 \pm 0.011$ (5) \\
-LS  & $16\times128=2048$ & 6  & $0.132 \pm 0.008$ (3)  & $0.250 \pm 0.005$ (3) & \#\#\# & \#\#\# \\
-SIL & $128$              & 12 & $0.165 \pm 0.013$ (3)  & $0.271 \pm 0.012$ (3) & \#\#\# & \#\#\# \\
-BC  & $128$              & 6  & $0.196 \pm 0.014$ (3)  & $0.290 \pm 0.005$ (3) & \#\#\# & \#\#\# \\
+LS  & $16\times128=2048$ & 6  & $0.132 \pm 0.008$ (3)  & $0.250 \pm 0.005$ (3) & $0.167 \pm 0.019$ (5) & $0.284 \pm 0.009$ (5) \\
+SIL & $128$              & 12 & $0.165 \pm 0.013$ (3)  & $0.271 \pm 0.012$ (3) & $0.177 \pm 0.013$ (5) & $0.297 \pm 0.004$ (5) \\
+BC  & $128$              & 6  & $0.196 \pm 0.014$ (3)  & $0.290 \pm 0.005$ (3) & $0.176 \pm 0.009$ (5) & $0.266 \pm 0.003$ (5) \\
 \bottomrule
 \end{tabular}
 \caption{Vectorization methods comparison: ``native'' denote's the methods'
@@ -1351,7 +1350,9 @@ vectorization's own tuned default from Appendix~\ref{app:alt-calibration},
 so the comparison is calibration-fair, not each-vectorization-optimal;
 BC's own appendix-preferred $q=0.99$ scores slightly better
 ($0.179\pm0.012$ T / $0.284\pm0.011$ NT) but is not used here for
-consistency. T = Thomas, NT = nested-Thomas; seed count $n$ in parentheses
+consistency. SIL is fixed at $p=1$ throughout (the SIL-1 arm of
+Appendix~\ref{app:calib-silhouette}) for both the native and MLP path. T =
+Thomas, NT = nested-Thomas; seed count $n$ in parentheses
 (PI native/T uses the 10-seed default run, all other cells use 3--5 seeds --
 see Section~\ref{ssec:encoder-fusion} for the shared training protocol).
 Per-channel dim $\times$ channels gives the flattened tensor size actually
@@ -1378,23 +1379,38 @@ PI & $H_0$ only     & $0.126 \pm 0.006$ & $0.194 \pm 0.006$ \\
 PI & $H_1$ only     & $0.895 \pm 0.019$ & $0.911 \pm 0.013$ \\
 PI & $H_0{+}H_1$ (default) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
 \addlinespace
-LS & $H_0$ only / $H_1$ only & \#\#\# & \#\#\# \\
-BC & $H_0$ only / $H_1$ only & \#\#\# & \#\#\# \\
+LS & $H_0$ only     & $0.135 \pm 0.006$ & $0.246 \pm 0.002$ \\
+LS & $H_1$ only     & \#\#\# & \#\#\# \\
+\addlinespace
+BC & $H_0$ only     & $0.237 \pm 0.012$ & $0.294 \pm 0.014$ \\
+BC & $H_1$ only     & $0.260 \pm 0.019$ & $0.510 \pm 0.009$ \\
 \bottomrule
 \end{tabular}
 \caption{Homology-dimension ablation (C3), $n=5$ seeds per arm, both design
-distributions. Only the PI arm has been run so far; LS and BC rows are
-pending. \#\#\# = not yet run.}
+distributions, native encoder path at the shared $q=0.95$ calibration
+(Section~\ref{ssec:calibration}) rather than each vectorization's own
+appendix-preferred default. PI and BC are complete;
+LS's $H_1$-only arm has not been run (\#\#\# = not yet run) -- LS's
+$H_0{+}H_1$ default is the native row of Table~\ref{tab:main-comparison}
+($0.132\pm0.008$ T / $0.250\pm0.005$ NT, 3 seeds), not repeated here since it
+was not re-run at $n=5$.}
 \label{tab:homology-ablation}
 \end{table}
 
-$H_1$ alone lands within noise of the label-shuffle floor
-(Section~\ref{ssec:exp-summaries}) on both datasets, while $H_0$ alone is
-statistically indistinguishable from the fused $H_0{+}H_1$ default. For the
-persistence image, essentially all the recoverable signal is in $H_0$
+For the persistence image, $H_1$ alone lands within noise of the
+label-shuffle floor (Section~\ref{ssec:exp-summaries}) on both datasets,
+while $H_0$ alone is statistically indistinguishable from the fused
+$H_0{+}H_1$ default -- essentially all the recoverable signal is in $H_0$
 (connected-component birth/death, i.e.\ local density) and $H_1$ (loop
 structure) contributes nothing measurable beyond it on either design
-distribution.
+distribution. The Betti curve does not replicate this collapse: BC's
+$H_1$-only arm ($0.260$ T / $0.510$ NT) is worse than its $H_0$-only arm
+($0.237$ T / $0.294$ NT) but nowhere near the $\approx\!0.9$--$1.0$
+label-shuffle floor that PI's $H_1$-only arm collapses to, on either
+dataset. A feature-count curve therefore retains some usable signal in the
+loop structure that a persistence-image raster, at this calibration, does
+not -- though BC's $H_0$-only number is itself well above PI's, so this is
+not a claim that BC's $H_1$ channel is more informative in absolute terms.
 
 % -----------------------------------------------------------------------------
 \subsection{Architecture ablations}
