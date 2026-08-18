@@ -324,8 +324,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
         homology_dims = tuple(self.cfg.get("homology_dims", (0, 1)))
         include_entropy = bool(self.cfg.get("include_entropy", False))
         resolution = int(self.cfg.get("resolution", 64))
-        sigma_pixels = float(self.cfg.get("sigma_pixels", 2.0))
-        coverage = float(self.cfg.get("pd_calibration_coverage", 0.99))
+        sigma_pixels = float(self.cfg.get("sigma_pixels", 0.5))
+        coverage = float(self.cfg.get("pd_calibration_coverage", 0.95))
         pad = float(self.cfg.get("pad", 1.05))
         seed = self.cfg["seed"]
         device = prepare_device(seed)

@@ -954,10 +954,11 @@ REF.
 A). This is what makes the scheme a methodological contribution rather than a
 persistence-image implementation detail.}
 
-\expt{Calibration has no experiment attached to it anywhere. Minimum:
-[PI | H0+H1 | DTM\{5,10,15\} | 3 | q $\in$ \{0.90,0.95,0.99,1.00\}], where
-$q\to1$ recovers naive min/max, plus the train-only vs full-population leakage
-arm.}
+\expt{The [PI | H0+H1 | DTM\{5,10,15\} | 3 | q $\in$ \{0.90,0.95,0.99,1.00\}]
+arm ($q\to1$ recovering naive min/max) is now run, alongside pad, kernel
+width, and resolution -- see Table~\ref{tab:calibration-sweep} in
+Section~\ref{sec:experiments}. Still missing: the train-only vs
+full-population leakage arm.}
 
 \fig{$\mathcal{L}$ against $q$ with $q=1.00$ marked as the naive endpoint.
 One-parameter family, so this is a line plot, not a table.}
@@ -1069,6 +1070,7 @@ a degenerate range would make an entire column of pixels convey no information.
 
 % -----------------------------------------------------------------------------
 \subsection{Encoder and fusion}
+\label{ssec:encoder-fusion}
 % -----------------------------------------------------------------------------
 
 \expt{[PI | H0+H1 | DTM\{5,10,15\} | 5 | CoordConv removed]. Ideally crossed with
@@ -1130,9 +1132,74 @@ this choice in Section REF by ablation studies.
 \section{Experiments}
 \label{sec:experiments}
 
-\tab{Calibration sweep summary: swept parameter, values, selected value, and
-the spread of $\mathcal{L}$ across the sweep. Compact -- it belongs here rather 
-than in the appendix because it documents the selection procedure.}
+Before comparing vectorizations or architectures, we first quantify the effect
+of the calibration parameters introduced in Section~\ref{ssec:calibration} --
+coverage $q$, padding $\alpha$, kernel width $\sigma_{\text{pixels}}$, and
+raster resolution $G$ -- so that the vectorization comparison of
+Section~\ref{ssec:exp-summaries} runs at a calibration that is itself
+justified rather than assumed. Table~\ref{tab:calibration-sweep} reports the
+one-at-a-time sweep, each arm varying a single parameter around the default
+calibration while holding architecture and the remaining three parameters
+fixed.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+Swept parameter & Value & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Coverage $q$
+  & 0.90            & $0.125 \pm 0.008$ & $0.195 \pm 0.004$ \\
+  & 0.95 (default)  & $0.126 \pm 0.006$ & $0.441 \pm 0.341^\dagger$ \\
+  & 0.99            & $0.122 \pm 0.006$ & $0.203 \pm 0.009$ \\
+  & 1.00 (naive)    & $0.120 \pm 0.005$ & $0.210 \pm 0.004$ \\
+\addlinespace
+Padding $\alpha$
+  & 1.00            & $0.123 \pm 0.007$ & $0.201 \pm 0.008$ \\
+  & 1.05 (default)  & $0.126 \pm 0.007$ & $0.199 \pm 0.007$ \\
+  & 1.10            & $0.125 \pm 0.006$ & $0.202 \pm 0.009$ \\
+\addlinespace
+Kernel width $\sigma_{\text{pixels}}$
+  & 0.5             & $0.124 \pm 0.007$ & $0.192 \pm 0.008$ \\
+  & 1.0             & $0.123 \pm 0.006$ & $0.202 \pm 0.013$ \\
+  & 2.0             & $0.124 \pm 0.009$ & $0.457 \pm 0.329^\dagger$ \\
+\addlinespace
+Resolution $G$
+  & 32              & $0.122 \pm 0.004$ & $0.209 \pm 0.011$ \\
+  & 64 (default)    & $0.125 \pm 0.009$ & $0.199 \pm 0.007$ \\
+  & 128             & $0.635 \pm 0.352^\dagger$ & $0.684 \pm 0.339^\dagger$ \\
+\bottomrule
+\end{tabular}
+\caption{Calibration sweep for the persistence-image (PI) vectorization,
+one-at-a-time around the default calibration ($q=0.95$, $\alpha=1.05$,
+$\sigma_{\text{pixels}}=0.75$, $G=64$), on the \emph{params} task for both
+the Thomas and nested-Thomas design distributions (Section~\ref{sec:simulator}).
+The $\sigma_{\text{pixels}}$ arm sweeps $\{0.5,1.0,2.0\}$, which brackets
+but does not include the $0.75$ default, so no row in that group is marked
+``default''. Diagrams are computed under the DTM filtration fused across
+$k \in \{5,10,15\}$ and homology dimensions $H_0{+}H_1$ (six PI channels
+total, $G \times G$ each), fed to a shared-weight CNN encoder (embedding
+dim $64$, conv channels $32$, $64$, $128$, average pooling, dropout $0.2$)
+with a two-layer MLP head (hidden dims $64$, $32$, dropout $0.1$),
+concatenation fusion across $k$, trained with AdamW ($\text{lr}=10^{-3}$,
+weight decay $3\times10^{-4}$, batch size $32$, up to $500$ epochs with
+early-stopping patience $50$). Cells report $\mathcal{L}$
+(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds: 9371, 9372,
+9373). $^\dagger$ marks configurations that diverge on at least one of the
+three seeds (per-seed $\mathcal{L} \approx 0.9$--$1.0$, i.e.\ no better than
+predicting the design-distribution mean); their mean is dominated by the
+diverged seed(s) and should not be read as a stable estimate. Excluding the
+$^\dagger$ rows, resolution $G=128$ is the only arm that is unambiguously
+bad -- $G\in\{32,64\}$, $\alpha$, and $\sigma_{\text{pixels}}$ all vary
+within one seed-standard-deviation of the default across both datasets.
+Coverage $q$ is the one parameter with a genuine, dataset-dependent
+disagreement: the Thomas optimum moves toward the naive endpoint $q=1.00$
+($0.120$ vs.\ $0.126$ at the default), while nested-Thomas prefers tighter
+coverage at $q=0.90$ ($0.195$) and gets markedly worse as $q\to1$; we
+therefore keep the shared default $q=0.95$ rather than fit $q$ per dataset.}
+\label{tab:calibration-sweep}
+\end{table}
 
 Performing a grid search over all hyperparameters and architectures simultaneously is computationally infeasible, so
 we adopt a greedy selection procedure. We begin by selecting the best architecture at a fixed default calibration,
@@ -1369,6 +1436,129 @@ Section 1 is cosmological; name a specific dataset.}
 point estimate with no interval, which limits its use as a drop-in replacement
 for likelihood-based methods}
 
+
+% #############################################################################
+% APPENDIX
+% #############################################################################
+% NOTE -- PURPOSE: the "Appendix A" forward-referenced from
+% Section~\ref{ssec:calibration} (twice) and Section~\ref{ssec:exp-summaries}
+% -- full calibration detail for every vectorization OTHER than the
+% persistence image, one subsection per vectorization. Only Persistence
+% Landscapes is populated so far; Silhouettes, Betti/Euler curves, and the
+% persistence-statistics floor control are still \todo.
+% #############################################################################
+\appendix
+
+\section{Calibration of Alternative Vectorizations}
+\label{app:alt-calibration}
+
+Section~\ref{ssec:calibration} calibrates the persistence image's birth/persistence
+axes by per-diagram coverage quantiles fit on the training split alone. The same
+$(q, \alpha)$ scheme -- coverage $q$ and padding $\alpha$ over per-diagram
+$b^{\min}, b^{\max}, p^{\max}$ -- carries over unchanged to the 1-D grid
+$[t_{\min}, T]$ underlying landscapes, silhouettes, and Betti/Euler curves, since
+all three are built from the same tent family $\{\Lambda_i(t)\}_i$
+(Definition~\ref{def:tent}) rather than the 2-D birth-persistence surface. This
+appendix reports, per vectorization, the calibration sweeps run at the shared
+multi-scale architecture of Section~\ref{ssec:encoder-fusion}: a CoordConv-augmented
+CNN encoder with weights tied across the DTM scales $k \in \{5,10,15\}$ (folded
+into the batch dimension for a single forward pass), concatenation fusion, and a
+two-layer MLP head, exactly as used for the persistence-image sweep of
+Table~\ref{tab:calibration-sweep}.
+
+\subsection{Persistence Landscapes}
+\label{app:calib-landscape}
+
+For homology dimension $h$ and DTM scale $k$, the landscape layers
+$\lambda_1(t) \geq \lambda_2(t) \geq \dots \geq \lambda_K(t)$ are the order
+statistics of $\{\Lambda_i(t)\}_i$ at each grid point $t$ (Section~\ref{ssec:exp-summaries}),
+giving a $(K, G)$ raster per $(h, k)$ that is fed to the encoder as a
+non-square image (height $K$, width $G$) -- the only structural difference from
+the $G \times G$ persistence image. $K$ is not hand-picked: a coverage rule
+selects, per $(h,k)$, the smallest $K$ such that
+    \[
+    \|\lambda_{K+1}\|_\infty \;\leq\; \tau \cdot \|\lambda_1\|_\infty
+    \]
+for at least a fraction $c$ of training diagrams, capped at $K_{\max}$; the
+per-dimension answers are then reconciled to their shared maximum so that the
+$H_0$ and $H_1$ channels can be stacked into one raster. Three calibration axes
+are therefore specific to this vectorization and are not present in the
+persistence-image sweep: the grid resolution $G$, the rule's own relative
+threshold $\tau$ (fixed at $0.01$ throughout every other experiment in this
+paper), and $K$ itself, which we also sweep as a fixed override against letting
+the rule choose it. Table~\ref{tab:calibration-sweep-landscape} reports all
+three, one-at-a-time, holding $c = 0.99$, $K_{\max} = 16$, and the diagram-grid
+coverage $q = 0.95$ fixed except where swept.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+Swept parameter & Value & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Grid resolution $G$
+  & 64             & $0.135 \pm 0.015$ & $0.249 \pm 0.003$ \\
+  & 128 (default)  & $0.137 \pm 0.008$ & $0.240 \pm 0.003$ \\
+  & 256            & $0.141 \pm 0.014$ & $0.246 \pm 0.002$ \\
+\addlinespace
+$K$-rule threshold $\tau$
+  & 0.5\%            & $0.134 \pm 0.008$ & $0.245 \pm 0.007$ \\
+  & 1\% (default)    & $0.135 \pm 0.010$ & $0.248 \pm 0.006$ \\
+  & 2\%              & $0.146 \pm 0.026$ & $0.243 \pm 0.006$ \\
+\addlinespace
+Fixed $K$ (vs.\ data-derived)
+  & 4                                  & $0.174 \pm 0.013$ & $0.372 \pm 0.023$ \\
+  & 8 (budget-matched, $G=512$)$^\ddagger$ & $0.154 \pm 0.011$ & $0.312 \pm 0.007$ \\
+  & 16                                 & $0.132 \pm 0.012$ & $0.244 \pm 0.006$ \\
+  & data-derived (default)             & $0.133 \pm 0.007$ & $0.245 \pm 0.006$ \\
+\bottomrule
+\end{tabular}
+\caption{Calibration sweep for the persistence-landscape (LS) vectorization,
+one-at-a-time around the native-budget default ($G=128$, $\tau=0.01$, $K$
+data-derived), on the \emph{params} task for both the Thomas and nested-Thomas
+design distributions (Section~\ref{sec:simulator}). Diagrams are computed under
+the DTM filtration fused across $k \in \{5,10,15\}$ and homology dimensions
+$H_0{+}H_1$ (two landscape channels per scale, six total), fed to the same
+CoordConv-augmented CNN encoder used for the persistence-image sweep of
+Table~\ref{tab:calibration-sweep} (shared weights across $k$, embedding dim
+$64$, conv channels $32$, $64$, $128$, average pooling, dropout $0.2$) with a
+two-layer MLP head (hidden dims $64$, $32$, dropout $0.1$), concatenation
+fusion across $k$, trained with AdamW ($\text{lr}=10^{-3}$, weight decay
+$3\times10^{-4}$, batch size $32$, up to $500$ epochs with early-stopping
+patience $50$). The diagram-grid coverage $q = 0.95$ (Section~\ref{ssec:calibration})
+is fixed across every arm; $K$-selection uses coverage $c=0.99$ and cap
+$K_{\max}=16$, both fixed except in the third group. Cells report $\mathcal{L}$
+(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds: 9371, 9372,
+9373). $^\ddagger$ the $G=512$, $K=8$ arm has a $4096$-d feature per $(h,k)$,
+matching the $64\times64$ persistence-image budget exactly; the other three
+rows of that group hold $G=128$ fixed and vary only $K$, so this row is not
+raster-size-matched to them. \textbf{The coverage rule resolved to $K=16$ --
+the cap -- on every arm and seed underlying the first two groups}, so the $G$
+and $\tau$ sweeps report robustness at a $K$ already pinned by $K_{\max}$, not
+by $\tau$ itself; their near-flat $\mathcal{L}$ (differences mostly within one
+seed-sd) is consistent with sweeping a quantity ($G$, $\tau$) that is not
+presently the binding constraint on $K$. The fixed-$K$ group is the
+informative one for this rule: the ``data-derived'' row lands within seed
+noise of the explicit $K=16$ row on both datasets, exactly as expected since
+both resolve to the identical ($G=128$, $K=16$) configuration, while $K=4$ and
+$K=8$ are both markedly and monotonically worse. Within the range tested, more
+landscape layers help and $K_{\max}$ -- not $\tau$ -- is the binding
+constraint; distinguishing the rule's own threshold from its cap would require
+re-running with a larger $K_{\max}$.}
+\label{tab:calibration-sweep-landscape}
+\end{table}
+
+\subsection{Silhouettes}
+\label{app:calib-silhouette}
+\todo{silhouette calibration sweep: grid resolution $G$ and the amplitude
+exponent $p \in \{0,1,2,3\}$ (Section~\ref{ssec:exp-summaries}), same table
+format as Table~\ref{tab:calibration-sweep-landscape}.}
+
+\subsection{Betti and Euler Curves}
+\label{app:calib-betti}
+\todo{Betti/Euler curve calibration sweep: grid resolution $G$ only (no
+$K$-analogue, since Betti curves have no layer-count axis).}
 
 % #############################################################################
 % BIBLIOGRAPHY

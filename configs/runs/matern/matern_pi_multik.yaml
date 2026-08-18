@@ -34,7 +34,7 @@ filtration:
 
 features:
   - name: persistence_image
-    params: {resolution: 64, sigma_pixels: 2.0, homology_dims: [0, 1]}
+    params: {resolution: 64, sigma_pixels: 0.5, homology_dims: [0, 1]}
     # sigma_pixels: Gaussian kernel bandwidth, in pixels, shared by the birth and
     # persistence axes -- provisional pending scripts/sweep_pi_sigma.py
 
@@ -54,9 +54,9 @@ method:
     # above, which scripts/featurize.py still uses to precompute
     # diagrams/persistence_image.pkl for other, non-pi_multik methods.
     resolution: 64
-    sigma_pixels: 2.0
+    sigma_pixels: 0.5
     homology_dims: [0, 1]
-    pd_calibration_coverage: 0.99
+    pd_calibration_coverage: 0.95
 
 seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
 target_label_names: [parent_intensity, hardcore_radius]  # targets to regress -- the only two params MaternHardCoreProcess exposes

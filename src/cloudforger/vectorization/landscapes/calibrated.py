@@ -43,14 +43,22 @@ def choose_K(
     grid: np.ndarray,
     coverage: float = 0.99,
     cap: int = 16,
+    rel_threshold: float = 0.01,
 ) -> tuple[int, np.ndarray]:
     """Smallest K such that the (K+1)-th landscape layer is negligible
-    (sup-norm <= 1% of the first layer's sup-norm) for at least `coverage`
-    of `diagrams`, capped at `cap`. Returns (K, sup_norms) where sup_norms
-    is the (N, cap+1) matrix of ||lambda_k||_inf per diagram -- callers log
-    this even when a config overrides K with a fixed budget value (e.g. the
-    "matched" landscape arm's K=8), so the coverage-rule's own answer stays
-    visible regardless of what K a given run actually trained with.
+    (sup-norm <= `rel_threshold` of the first layer's sup-norm) for at least
+    `coverage` of `diagrams`, capped at `cap`. Returns (K, sup_norms) where
+    sup_norms is the (N, cap+1) matrix of ||lambda_k||_inf per diagram --
+    callers log this even when a config overrides K with a fixed budget
+    value (e.g. the "matched" landscape arm's K=8), so the coverage-rule's
+    own answer stays visible regardless of what K a given run actually
+    trained with.
+
+    rel_threshold is the rule's other knob besides `coverage`: looser
+    (larger, e.g. 0.02) calls more layers negligible sooner -> smaller K;
+    tighter (smaller, e.g. 0.005) demands more decay before a layer counts
+    as negligible -> larger K. Fixed at 0.01 until exposed here for the
+    calibration sweep (see calib_kthr* run tags).
 
     Diagrams with fewer than K+1 points saturate their unused ranks at 0
     (see landscape_from_tents), which trivially satisfies the sup-norm
@@ -66,7 +74,7 @@ def choose_K(
         sup_norms[i] = landscape.max(axis=1)
 
     lambda1 = sup_norms[:, 0]
-    threshold = 0.01 * lambda1
+    threshold = float(rel_threshold) * lambda1
 
     for K in range(1, cap + 1):
         next_layer_sup = sup_norms[:, K]  # row index K == layer K+1 (0-indexed)
@@ -86,6 +94,7 @@ def build_calibrated_landscape(
     pad_factor: float = 1.05,
     K_coverage: float = 0.99,
     K_cap: int = 16,
+    K_rel_threshold: float = 0.01,
     verbose: bool = True,
 ) -> MultiChannelLandscape:
     """One LandscapeTransformer per dim in homology_dims, each on its own
@@ -126,7 +135,9 @@ def build_calibrated_landscape(
     for dim in homology_dims:
         t_min, T = axis_bounds_1d(diagrams, dim, q=q, pad_factor=pad_factor)
         grid = np.linspace(t_min, T, G)
-        chosen_K, sup_norms = choose_K(diagrams, dim, grid, coverage=K_coverage, cap=K_cap)
+        chosen_K, sup_norms = choose_K(
+            diagrams, dim, grid, coverage=K_coverage, cap=K_cap, rel_threshold=K_rel_threshold,
+        )
         per_dim[dim] = (t_min, T, chosen_K, sup_norms)
 
     shared_K = max(chosen_K for _, _, chosen_K, _ in per_dim.values()) if K is None else None

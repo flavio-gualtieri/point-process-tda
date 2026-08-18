@@ -91,6 +91,7 @@ def build_landscape_tensor(
     pad_factor: float,
     K_coverage: float = 0.99,
     K_cap: int = 16,
+    K_rel_threshold: float = 0.01,
     train_idx: np.ndarray | None = None,
     fitted: list | None = None,
 ) -> tuple[np.ndarray, list]:
@@ -114,7 +115,7 @@ def build_landscape_tensor(
             calibration_diagrams = [diagrams_k[i] for i in train_idx]
             landscape = build_calibrated_landscape(
                 calibration_diagrams, homology_dims=homology_dims, G=G, K=K, q=q, pad_factor=pad_factor,
-                K_coverage=K_coverage, K_cap=K_cap, verbose=False,
+                K_coverage=K_coverage, K_cap=K_cap, K_rel_threshold=K_rel_threshold, verbose=False,
             )
             fitted.append(landscape)
         else:
@@ -243,6 +244,7 @@ def _build_tensor(
             split, k_values, homology_dims,
             G=int(cfg.get("G", 128)), K=cfg.get("K"), q=q, pad_factor=pad_factor,
             K_coverage=float(cfg.get("K_coverage", 0.99)), K_cap=int(cfg.get("K_cap", 16)),
+            K_rel_threshold=float(cfg.get("K_rel_threshold", 0.01)),
             train_idx=train_idx, fitted=fitted,
         )
     if vectorization == "silhouette":
@@ -258,7 +260,7 @@ def _build_tensor(
         # to pi_multik.PIMultiKExperiment entirely (see run() below).
         return pi_multik.build_pi_tensor(
             split, k_values, homology_dims=homology_dims,
-            resolution=int(cfg.get("resolution", 64)), sigma_pixels=float(cfg.get("sigma_pixels", 2.0)),
+            resolution=int(cfg.get("resolution", 64)), sigma_pixels=float(cfg.get("sigma_pixels", 0.5)),
             coverage=q, train_idx=train_idx, imagers=fitted,
         )
     raise ValueError(f"vec_multik: unknown vectorization {vectorization!r}. Choices: {VECTORIZATIONS}")

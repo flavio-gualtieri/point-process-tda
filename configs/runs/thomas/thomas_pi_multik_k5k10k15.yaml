@@ -51,7 +51,7 @@ filtration:
 
 features:
   - name: persistence_image
-    params: {resolution: 64, sigma_pixels: 0.75, homology_dims: [0, 1], pd_calibration_coverage: 0.95}
+    params: {resolution: 64, sigma_pixels: 0.5, homology_dims: [0, 1], pd_calibration_coverage: 0.95}
 
 method:
   name: pi_multik
@@ -64,7 +64,7 @@ method:
     # above, which scripts/featurize.py still uses to precompute
     # diagrams/persistence_image.pkl for other, non-pi_multik methods.
     resolution: 64
-    sigma_pixels: 0.75
+    sigma_pixels: 0.5
     pd_calibration_coverage: 0.95
 
     embedding_dim: 64

@@ -1,0 +1,184 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.19107002414408183,
+  "test_loss_per_target": {
+    "parent_intensity": 0.2694333493709564,
+    "meta_offspring": 0.40859904885292053,
+    "meta_cluster_scale": 0.1359243392944336,
+    "mean_offspring": 0.0934567078948021,
+    "cluster_scale": 0.04793665185570717
+  },
+  "seed": 9373,
+  "git_commit": "cf7f6aa82bc034eb8c40953fc6f3c13a5b55ff75",
+  "git_dirty": true,
+  "timestamp": "2026-08-18T17:20:03.293312+00:00",
+  "run_tag": "calib_sigma10",
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9373,
+    "homology_dims": [
+      0,
+      1
+    ],
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 1.0,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "target_label_names": [
+      "parent_intensity",
+      "meta_offspring",
+      "meta_cluster_scale",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "log_label_names": [
+      "parent_intensity",
+      "meta_offspring",
+      "meta_cluster_scale",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "run_tag": "calib_sigma10",
+    "k_values": [
+      5,
+      10,
+      15
+    ],
+    "channels": [
+      "k5_h0",
+      "k5_h1",
+      "k10_h0",
+      "k10_h1",
+      "k15_h0",
+      "k15_h1"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.001390479639916306,
+            0.472295295656057
+          ],
+          "pers_range": [
+            0.0,
+            0.42298668719107535
+          ],
+          "resolution": 64,
+          "sigma_pixels": 1.0,
+          "sigma_birth": 0.0073578877502521985,
+          "sigma_pers": 0.006609166987360552,
+          "weight_fn": "linear_weight"
+        },
+        "1": {
+          "birth_range": [
+            0.004026582179881548,
+            0.5107331091717086
+          ],
+          "pers_range": [
+            0.0,
+            0.1825826803157123
+          ],
+          "resolution": 64,
+          "sigma_pixels": 1.0,
+          "sigma_birth": 0.007917289484247298,
+          "sigma_pers": 0.0028528543799330045,
+          "weight_fn": "linear_weight"
+        }
+      },
+      "10": {
+        "0": {
+          "birth_range": [
+            0.003257696379815327,
+            0.5868637408552054
+          ],
+          "pers_range": [
+            0.0,
+            0.4538215831932802
+          ],
+          "resolution": 64,
+          "sigma_pixels": 1.0,
+          "sigma_birth": 0.00911884444492797,
+          "sigma_pers": 0.007090962237395003,
+          "weight_fn": "linear_weight"
+        },
+        "1": {
+          "birth_range": [
+            0.0060652746496094746,
+            0.5783524910830338
+          ],
+          "pers_range": [
+            0.0,
+            0.17413441915954078
+          ],
+          "resolution": 64,
+          "sigma_pixels": 1.0,
+          "sigma_birth": 0.008941987756772254,
+          "sigma_pers": 0.0027208502993678247,
+          "weight_fn": "linear_weight"
+        }
+      },
+      "15": {
+        "0": {
+          "birth_range": [
+            0.005199442444904922,
+            0.6656100129032868
+          ],
+          "pers_range": [
+            0.0,
+            0.46685913708098226
+          ],
+          "resolution": 64,
+          "sigma_pixels": 1.0,
+          "sigma_birth": 0.010318915163412217,
+          "sigma_pers": 0.007294674016890348,
+          "weight_fn": "linear_weight"
+        },
+        "1": {
+          "birth_range": [
+            0.008372783498755608,
+            0.6383420152378291
+          ],
+          "pers_range": [
+            0.0,
+            0.16733583018562168
+          ],
+          "resolution": 64,
+          "sigma_pixels": 1.0,
+          "sigma_birth": 0.009843269245923023,
+          "sigma_pers": 0.0026146223466503387,
+          "weight_fn": "linear_weight"
+        }
+      }
+    }
+  },
+  "adversarial_loss": 0.2080248557329178,
+  "adversarial_loss_per_target": {
+    "parent_intensity": 0.285880446434021,
+    "meta_offspring": 0.4430105984210968,
+    "meta_cluster_scale": 0.15252426266670227,
+    "mean_offspring": 0.10529226064682007,
+    "cluster_scale": 0.053416699171066284
+  },
+  "adversarial_path": "/gpfs/scratch/qp252676/globus/point-process-tda/data/nested_thomas/adversarial_clouds.pkl"
+}

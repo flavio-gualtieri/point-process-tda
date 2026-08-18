@@ -191,8 +191,8 @@ class PIMultiKFusionExperiment(MultiSourceExperiment):
         # Persistence-image calibration/resolution -- method params now,
         # fit per seed below; see pi_multik.py's module docstring.
         resolution = int(self.cfg.get("resolution", 64))
-        sigma_pixels = float(self.cfg.get("sigma_pixels", 2.0))
-        coverage = float(self.cfg.get("pd_calibration_coverage", 0.99))
+        sigma_pixels = float(self.cfg.get("sigma_pixels", 0.5))
+        coverage = float(self.cfg.get("pd_calibration_coverage", 0.95))
         seed = self.cfg["seed"]
         device = prepare_device(seed)
 
