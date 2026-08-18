@@ -44,16 +44,26 @@
 \newcommand{\mo}{\mu}
 
 % ----------------------------------------------------------------------------
-% Draft annotations -- set \draftfalse to hide all TODOs
+% Draft annotations
+%   \todo -- prose to write            (red)
+%   \fix  -- proposed replacement text (blue)
+%   \tab  -- TABLE required here       (green)
+%   \fig  -- FIGURE required here      (magenta)
+%   \expt -- EXPERIMENT required to support the claim above (orange)
+%            (named \expt, not \exp, since \exp is LaTeX's built-in
+%            exponential-function operator)
 % ----------------------------------------------------------------------------
 \newif\ifdraft
 \drafttrue
 \ifdraft
   \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
   \newcommand{\fix}[1]{\textcolor{blue}{[FIX: #1]}}
+  \newcommand{\tab}[1]{\textcolor{teal}{\textbf{[TABLE:] }#1}}
+  \newcommand{\fig}[1]{\textcolor{magenta}{\textbf{[FIGURE:] }#1}}
+  \newcommand{\expt}[1]{\textcolor{orange}{\textbf{[EXPT:] }#1}}
 \else
-  \newcommand{\todo}[1]{}
-  \newcommand{\fix}[1]{}
+  \newcommand{\todo}[1]{}\newcommand{\fix}[1]{}
+  \newcommand{\tab}[1]{}\newcommand{\fig}[1]{}\newcommand{\expt}[1]{}
 \fi
 
 % ----------------------------------------------------------------------------
@@ -190,18 +200,18 @@ a closed-form or a choice of summary statistic.
 % --- (iv) contributions ------------------------------------------------------
 \subsection{Contributions}
 \label{ssec:contributions}
-\todo{MISSING CONTRIBUTIONS LIST. Draft it as:
- 1. a systematic comparison of vectorized topological summaries as features for
-    SPP parameter estimation (the ORIGINAL objective -- re-elevate it);
- 2. a per-diagram coverage-quantile calibration scheme for vectorizing across a
-    heterogeneous population of diagrams, with an explicit leakage protocol;
- 3. a validated multi-family simulator + evaluation protocol, including an exact
-    finite-window variance identity;
- 4. an estimator covering Thomas / Mat\'ern cluster / nested Thomas under a
-    common reparameterization.
-NOTE: architectural novelty is NOT on this list -- see Section 2.}
-
-\todo{roadmap paragraph}
+\todo{CONTRIBUTIONS LIST.
+    \begin{enumerate}
+        \item a systematic comparison of vectorized topological summaries as features for
+        SPP parameter estimation (the ORIGINAL objective -- re-elevate it);
+        \item a per-diagram coverage-quantile calibration scheme for vectorizing across a
+        heterogeneous population of diagrams, with an explicit leakage protocol;
+        \item a validated multi-family simulator + evaluation protocol, including an exact
+        finite-window variance identity;
+        \item an estimator covering Thomas / Mat\'ern cluster / nested Thomas under a
+        common reparameterization.
+    \end{enumerate}
+}
 
 
 % #############################################################################
@@ -261,21 +271,10 @@ that are alive at each scale.}
 % #############################################################################
 % 3. BACKGROUND
 % #############################################################################
-% NOTE -- PURPOSE: give the reader only what is needed downstream.
-% Currently ~40% of the draft and written as neutral textbook exposition.
-%
-% ACTIONS:
-%   * CUT hard. Keep intensity, Neyman--Scott, the three families; keep
-%     filtration -> diagram -> vectorization.
-%   * MOVED OUT: the $g$ / $K$ definitions now live in Section 5.3, which is
-%     the only place they are used.
-%   * ADD the missing justification paragraph at 3.2 (see \todo there).
-%   * The literature-review placeholder lives at the end of this section.
-% #############################################################################
+
 \section{Background}
 \label{sec:background}
 
-% [MOVED FROM: old Section 2 preamble]
 We provide the background in SPPs and persistent homology required for this
 discussion. Readers with a working understanding of both may skip to
 Section \ref{sec:method}.
@@ -283,7 +282,6 @@ Section \ref{sec:method}.
 % -----------------------------------------------------------------------------
 \subsection{Spatial point processes}
 \label{ssec:spp}
-% NOTE: keep as is. This is tight and load-bearing.
 % -----------------------------------------------------------------------------
 
     \begin{definition}[Intensity function]
@@ -337,8 +335,6 @@ used in Section 5 but never defined}
 % -----------------------------------------------------------------------------
 \subsection{Persistent homology}
 \label{ssec:persistence}
-% NOTE: mechanically complete but intellectually silent. It defines everything
-% EXCEPT the one thing the reader needs.
 % -----------------------------------------------------------------------------
 
 Radially averaged statistics -- such as the $g$ and $K$ functions -- collapse
@@ -357,8 +353,6 @@ For each $d \in \N$, the $d$-dimensional persistence summary requires no closed 
 and no assumption about which process family generated it.
 \todo{Notation clash with 'd'}
 
-
-% [MOVED FROM: old Section 2.3 -- unchanged]
 Let $X$ be a point process on $R^d$ and $W \subseteq \R^d$ a bounded window with
 $|X \cap W| = n$ . Enumerate the points of $X \cap W$ to construct a point cloud
 $\pc = \{x_1, ..., x_n\} \subset \R^d$. Let $\Sigma(\pc)$ denote the \emph{full
@@ -474,21 +468,32 @@ simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$
     \end{definition}
 
     \begin{definition}[Betti curve]
-        For fixed homology dimension $k$, the Betti curve is the
-        right-continuous step function counting $k$-features alive at scale $r$:
+        For fixed homology dimension $k$, the Betti curve is the right-continuous
+        step function counting $k$-features alive at scale $r$:
             \[
             \beta_k(r) = \#\{i : b_i \leq r < d_i\}
             = \sum_i \1[b_i \leq r < d_i].
             \]
     \end{definition}
 
-\todo{list here the OTHER vectorizations that were implemented and tested --
-they are the objects compared in Section 7.1 and must be defined somewhere}
+\todo{Add the tent function $\Lambda_i(t)=\max(0,\min(t-b_i,d_i-t))$ here.
+Landscapes, silhouettes and (indirectly) persistence images are all built from
+it, so defining it once in Background lets Section 7.1 define three
+vectorizations in a paragraph each instead of a page each.}
+
+\todo{Keep ONLY the persistence image definition in full here. Landscape,
+silhouette, Betti/Euler and statistics are defined compactly in
+Section \ref{ssec:exp-summaries}, where they are evaluated. Do not define them
+twice.}
+
+\fig{Schematic: one point cloud $\rightarrow$ its $H_0/H_1$ diagrams $\rightarrow$ the five
+vectorizations side by side (PI raster, landscape stack, silhouette curve, Betti
+curve, statistics bar). One tight-cluster cloud and one near-Poisson cloud.
+This is the figure that makes the paper legible to a reader who does not know
+TDA, and it does double duty as the visual key for Section 7.1.}
 
 % -----------------------------------------------------------------------------
 \subsection{Background reading}
-% NOTE: PROGRESSION-REPORT SLOT. Deliberately deferred to last.
-% For the report this doubles as the literature-review requirement.
 % -----------------------------------------------------------------------------
 \todo{WRITE LAST. Reading clusters to cover:
  (a) classical SPP estimation -- Diggle, minimum contrast, Palm likelihood,
@@ -504,12 +509,7 @@ they are the objects compared in Section 7.1 and must be defined somewhere}
 % #############################################################################
 % 4. PROBLEM SETUP
 % #############################################################################
-% NOTE -- PURPOSE: state formally what is being estimated and what "good" means,
-% BEFORE any architecture is described. NEW SECTION, assembled from material
-% that was previously scattered across the top of the old Model section and the
-% bottom of data generation.
-% Short: half a page.
-% #############################################################################
+
 \section{Problem Setup}
 \label{sec:problem}
 
@@ -528,8 +528,6 @@ parameter value gives rise to a spread of plausible $\pc$, and it is this irredu
 spread —- not any weakness of a particular estimator -— that sets the error floor 
 characterized below.
 
-
-% [MOVED FROM: old Section 3, loss + log-normalization]
 The model is trained on a training set of synthetic clouds
 $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$ by backpropagating the RMS loss
     \[
@@ -545,8 +543,6 @@ dominate this loss, we train in log-normalized parameter space,
 where -- abusing notation -- $\mu_{\log\theta}, \sigma_{\log\theta}$ denote the
 mean and standard deviation of the logged parameters.
 
-% [MOVED FROM: end of old Section 3.1.1 -- belongs here, as the definition of
-%  what success means]
 We draw one realization per parameter vector. The dispersion of $\hat\theta$
 across realizations sharing a common $\theta$ gives the irreducible error floor
 against which the model's performance should be read.
@@ -558,18 +554,10 @@ Section 7.3 -- it is the yardstick for every reported number}
 % #############################################################################
 % 5. SIMULATOR AND EXPERIMENTAL DESIGN
 % #############################################################################
-% NOTE -- PURPOSE: this was buried as a subsection of "Model". PROMOTED.
-% Frame it as THE BENCHMARK, not as setup: it is a contribution in its own
-% right (validated multi-family simulator + exact finite-window identity +
-% evaluation protocol). It is also the strongest evidence of rigour available
-% for the progression report -- it must be visible in the table of contents.
-%
-% This section is essentially DONE. Light edits only.
-% #############################################################################
+
 \section{Simulator and Experimental Design}
 \label{sec:simulator}
 
-% [MOVED FROM: old Section 3.1]
 Training data consists of pairs $(\pc_i, \theta_i)$ in which $\theta_i$ is drawn
 from a design distribution $\Pi$ over parameters space and each $\pc_i$ is a
 single realization of the corresponding process. We describe the design
@@ -578,8 +566,8 @@ the synthetic data.
 
 % -----------------------------------------------------------------------------
 \subsection{Design distribution}
-% NOTE: done. The reparameterization argument is good and should be kept intact.
 % -----------------------------------------------------------------------------
+
 The naive approach of sampling $(\kappa, \mu, \sigma)$ uniformly and
 independently from intervals is inadequate. Firstly, point processes can
 typically be separated into qualitative regimes of interest, which occupy curved
@@ -633,8 +621,8 @@ realized acceptance rate is $24.8\%$.
 
 % -----------------------------------------------------------------------------
 \subsection{Sampling algorithm}
-% NOTE: done.
 % -----------------------------------------------------------------------------
+
 The various instances of a the Neyman--Scott construction may be generated by a
 single algorithm. The only part that is different for each instance is the
 displacement kernel $k$ and the offspring count distribution. For a window
@@ -669,16 +657,8 @@ boundary operation is the containment filter at step 5.
 % -----------------------------------------------------------------------------
 \subsection{Validation}
 \label{ssec:verification}
-% NOTE: this is a CONTRIBUTION, not an implementation note. The exact
-% finite-window Var[N(W)] and the 175% discrepancy with the canonical identity
-% deserve prominence -- probably a figure showing the gap as a function of nu.
-%
-% The $g$ and $K$ definitions have been MOVED HERE from the old Background,
-% because this is the only place in the paper that uses them.
 % -----------------------------------------------------------------------------
 
-% --- moved definitions -------------------------------------------------------
-% [MOVED FROM: old Section 2.2 -- trim to only what is used below]
 Throughout this section, let $X$ denote a point process on $\R^d$. We write
 $u, v \in \R^d$ for points (precise locations) and $du$, $dv$ for infinitesimal
 regions of volume $|du|$, $|dv|$ centered at $u$ and $v$, respectively.
@@ -730,12 +710,7 @@ regions of volume $|du|$, $|dv|$ centered at $u$ and $v$, respectively.
         see within a distance $r$ of a typical point in $X$.
     \end{definition}
 
-\todo{consider double duty for these definitions: they also give the cleanest
-statement of what a radially averaged second-order statistic CANNOT see, which
-is the argument Section 3.2 needs. Cross-reference rather than duplicate.}
-
 % --- validation proper -------------------------------------------------------
-% [MOVED FROM: old Section 3.1.3 -- unchanged]
 Due to every downstream result being dependent on a diligent cloud-generation
 process, we validate it against the established closed-form second-order theory.
 On $W = [0,1]^2$ we compare $[[3000]]$ realizations at each of three parameter
@@ -766,7 +741,7 @@ $\kappa\mu(1+\mu)$, confirming the two agree in the appropriate limit. The gap
 between them reaches $175\%$ at $\nu = 1$, so \eqref{eq:varN} is used as the
 comparison target.
 
-\todo{FIGURE: canonical identity vs \eqref{eq:varN} as a function of $\nu$, with
+\fig{Canonical identity vs \eqref{eq:varN} as a function of $\nu$, with
 the empirical points overlaid. This makes the 175\% claim visible in one glance
 and is the cheapest high-value figure in the paper.}
 
@@ -806,11 +781,8 @@ sampler.
 
 % -----------------------------------------------------------------------------
 \subsection{Splits and evaluation protocol}
-% NOTE: RENAMED from "Splits". This is the evaluation protocol for the whole
-% paper and was previously invisible, buried at the bottom of data generation.
-% Section 7.3 should reference this subsection directly.
 % -----------------------------------------------------------------------------
-% [MOVED FROM: old Section 3.1.4]
+
 Data are split by parameter vector, never by realization, so that no parameter
 value appears in both training and evaluation. Beyond the random test split we
 generate two further evaluation sets: a grid over the design grid, permitting
@@ -862,18 +834,22 @@ $\mathcal{L}$ as defined here, and not the un-averaged training loss}
 % #############################################################################
 % 6. METHOD: PARAMNET
 % #############################################################################
-% NOTE -- PURPOSE: describe the pipeline. Present it honestly as an instance of
-% a known pattern (cf. Section 2), with the genuinely interesting choices
-% flagged as CHOICES to be evaluated in Section 7 -- not as conclusions.
-%
-% GLOBAL EDIT REQUIRED IN THIS SECTION:
-% every sentence of the form "we tested many variants and present the best"
-% must become "we compare X, Y, Z; results in Section 7.x". There are at least
-% three such sentences and they are what currently deletes the comparison
-% thread from the paper.
-% #############################################################################
 \section{Method: ParamNet}
 \label{sec:method}
+
+\todo{PIPELINE EQUATION IS WRONG. The native encoder emits $E=64$, not $128$,
+and flat concatenation over $n_k=3$ scales gives $192$, plus the $\log N(x)$
+side feature = $193$ into the head. Replace $e \in \R^{128}$ throughout with
+$e \in \R^{n_k \cdot E}$ and give the concrete numbers once. Note the MLP
+control path uses $E=128$; state that where it is introduced, not here.}
+
+\todo{The $\log N(x)$ side feature is appended in every configuration but is
+never mentioned in the paper. It must appear in the pipeline equation and in
+Section \ref{sec:problem}: an estimator that is handed the point count is not a
+purely topological estimator, and $\lambda = \kappa\mu$ is close to recoverable
+from $N$ alone.}
+\expt{[none (log N only) | -- | -- | 5] and [PI | H0+H1 | DTM\{5,10,15\} | 5 |
+log N removed]. Without these two the topological contribution is unquantified.}
 
 Let $\pc$ denote a point cloud, $v$ its vectorized persistence summary, and
 $e \in \R^{128}$ the resulting feature vector. ParamNet follows the pipeline
@@ -905,7 +881,6 @@ picking one on prior grounds; the comparison, and what it reveals about the
 structure each vectorization does and does not preserve, is the subject of 
 Section~\ref{ssec:exp-summaries}.
 
-
 The vectorized summary $v$ is passed through an encoder to obtain the
 feature vector $e \in \R^{128}$, which is then given to the FCNN
 $NN_\phi: \R^{128} \to \R^{n_params}$ to produce the estimate
@@ -917,12 +892,18 @@ linear layer mapping to the $n_{params}=3$ outputs $(\hat\kappa, \hat\mu, \hat\s
 \subsection{Filtration and vectorization}
 % -----------------------------------------------------------------------------
 
-We implemented and tested \todo{N} vectorizations of the persistence diagram,
-whose relative efficacies are the subject of Section \ref{ssec:exp-summaries}.
-For the remainder of this section we describe the pipeline as instantiated with
-persistence images computed under the $DTM_k$ filtration, which is the
+\expt{Rips vs DTM claim still unsupported: [PI | H0+H1 | Rips | 5] against
+[PI | H0+H1 | DTM\{5,10,15\} | 5]. Check the deficit concentrates in
+$\kappa,\mu$ rather than $\sigma$ -- if it does not, the mechanism stated in
+this subsection is wrong.}
+\tab{Filtration comparison: Rips, DTM$_5$, DTM$_{10}$, DTM$_{15}$,
+DTM$_{\{5,10,15\}}$. Columns: $\mathcal{L}$, per-parameter
+$\mathcal{L}^\kappa,\mathcal{L}^\mu,\mathcal{L}^\sigma$, failed seeds.}
+
+We describe the pipeline implemented for the
+persistence image vectorization computed under the $DTM_k$ filtration, which is the
 configuration carried through the rest of the paper. We give this configuration
-in full because it is the one that raises design questions the alternatives do
+in full because it is the most the one that raises design questions the alternatives do
 not: the birth and persistence axes must be calibrated to a common frame before
 the diagrams can be rasterized, and computing summaries at several values of $k$
 leaves open how the resulting images are to be encoded and combined.
@@ -941,25 +922,48 @@ The key design choices that follow are the filtration function, the calibration
 procedure, and the image resolution. The latter two can be optimized with a
 grid-search, but the choice of filtration function plays a fundamental role in
 what information is available to be extracted at all. We use the $DTM_k$
-filtration of Example \ref{ex:dtm} rather than the canonical Rips filtration:
+filtration (see Example \ref{ex:dtm}) rather than the canonical Rips filtration.
 Rips is built from inter-point distances alone, so it is sensitive to the
 sparsest connection between two regions and does not register how densely those
 regions are occupied, whereas $DTM_k$ averages over $k$ nearest neighbours and
 so responds to local density directly. Since the parameters we wish to recover
 are density parameters, we expect this to matter, and Section
-\ref{ssec:exp-summaries} reports the comparison that bears this out.
+REF reports the results that informed this decision.
 Furthermore, the parameter $k$ allows us to compute summaries at various scales,
-which may be combined to provide the model with a more complete picture.
+which may be combined to provide the model with a more complete picture that includes
+both fine and coarse summaries.
+
+Four alternative vectorizations -- landscapes, silhouettes, Betti/Euler curves, and
+a persistence-statistics floor control -- are defined and compared in Section 
+REF.
 
 % -----------------------------------------------------------------------------
 \subsection{Calibration}
 \label{ssec:calibration}
-% NOTE: this is CONTRIBUTION #2 and it is currently three levels deep. The
-% material itself is in good shape -- the fix is positional, plus a figure.
-% Old cross-references pointed at \ref{sec:calibration}, which never existed;
-% label is now \ref{ssec:calibration}.
 % -----------------------------------------------------------------------------
-% [MOVED FROM: old Section 3.2.1 -- unchanged]
+
+\todo{Add one sentence: the coverage-quantile rule transfers unchanged to the
+1-D grid calibration used by landscapes, silhouettes and Betti curves (Appendix
+A). This is what makes the scheme a methodological contribution rather than a
+persistence-image implementation detail.}
+
+\todo{RESOLVE CONTRADICTION WITH CODE. This subsection claims a fallback to a
+one-dimensional vectorization when the birth axis is degenerate; the
+implementation raises instead. Under DTM the $H_0$ births are nonzero so the
+case never fires -- say that, and do not describe a fallback that does not
+exist.}
+
+\expt{Calibration has no experiment attached to it anywhere. Minimum:
+[PI | H0+H1 | DTM\{5,10,15\} | 3 | q $\in$ \{0.90,0.95,0.99,1.00\}], where
+$q\to1$ recovers naive min/max, plus the train-only vs full-population leakage
+arm.}
+
+\fig{$\mathcal{L}$ against $q$ with $q=1.00$ marked as the naive endpoint.
+One-parameter family, so this is a line plot, not a table.}
+\fig{Naive vs coverage-quantile calibration applied to the same diagram, side
+by side. The "loss of texture" argument is visual and is currently carried
+entirely by prose.}
+
 Consider the synthetic training clouds $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$
 and fix the homology dimension $h \in \{0,1\}$ for some choice of filtration. We
 obtain $N_{train}$ persistence diagrams $\{D^{(h)}_i\}_{i=1}^{N_{train}}$. Each
@@ -967,14 +971,11 @@ diagram will have a different distribution of points, some of which may have
 extreme outliers with respect to the full set of diagrams.
 
 In order to ensure that in the resulting persistence images each pixel bears the
-same meaning, we need to calibrate the diagrams to have the same axis ranges. The
-naive approach of calibrating to the maximum deaths and births in order to
-include all points is inadequate due to the resulting relative positioning of the
-bulk of points.
-
-If we have a diagram with very strong outliers and chose universal axes that
-include these outliers, the remaining diagrams will be rescaled in a way that
-places the majority of their points near the origin. The diagrams -- and
+same meaning, we calibrate the diagrams to have the same axis ranges. The
+naive approach of calibrating to the maximum deaths and births (thus including all
+points) is inadequate due to the resulting relative positioning of the
+bulk of points: if we have a diagram with very strong outliers, the remaining diagrams
+will be rescaled in a way that places the majority of their points near the origin. The diagrams -- and
 therefore their vectorizations -- will lose a lot of texture.
 
 \todo{FIGURE: naive min/max calibration vs coverage-quantile calibration, same
@@ -1053,11 +1054,27 @@ a degenerate range would make an entire column of pixels convey no information.
 
 % -----------------------------------------------------------------------------
 \subsection{Encoder and fusion}
-% NOTE: the ARCHITECTURE description stays here; the SWEEP RESULTS that used to
-% be interleaved with it have been moved to Section 7.2. Keep the split clean:
-% this subsection says what the options are, Section 7.2 says which won.
 % -----------------------------------------------------------------------------
-% [MOVED FROM: old Section 3.3]
+
+\todo{Rewrite declaratively per the agreed pattern: state the shared-weight
+encoder + flat concatenation outright, track dimensions end to end
+($(N_b,n_k,C,64,64) \to (N_b\!\cdot\!n_k,C{+}2,64,64) \to (N_b,n_k,64) \to
+(N_b,193)$), and close with ONE forward-reference sentence to Section
+\ref{ssec:exp-ablations}. Delete the posed question and the enumerated menu of
+three fusion options -- the alternatives are defined where they are evaluated.}
+
+\todo{Add the CoordConv mechanism claim explicitly: calibration is what makes a
+pixel position meaningful across the dataset, and CoordConv is what lets the
+network use it. State it as a claim so the ablation below has something to test.}
+\expt{[PI | H0+H1 | DTM\{5,10,15\} | 5 | CoordConv removed]. Ideally crossed with
+the calibration scheme -- the claim predicts CoordConv helps MORE under
+calibrated axes than under naive ones, which would weld the two contributions
+together.}
+
+\expt{Multi-$k$ is the reason this subsection exists but is never justified:
+[PI | H0+H1 | DTM\{5\} | 5], [PI | H0+H1 | DTM\{10\} | 5],
+[PI | H0+H1 | DTM\{15\} | 5] against the fused arm.}
+
 Many variations of encoders were tested for this model. We will focus on the
 variation that produced the best results, noting that the encoding step is an
 important aspect that will require further study.
@@ -1127,63 +1144,77 @@ announcing the winner here}
 % #############################################################################
 % 7. EXPERIMENTS
 % #############################################################################
-% NOTE -- PURPOSE: this section is the structural fix for the whole paper.
-% It does three jobs, in this order:
-%   7.1 the ORIGINAL research question (which topological summary is best) --
-%       currently absent from the draft, must be reconstructed from the
-%       exploratory work already done;
-%   7.2 architecture ablations -- ALREADY DONE, just relocated here;
-%   7.3 estimation performance -- THE EMPTY SLOT. Headers written now so the
-%       report reads as planned rather than unfinished.
-%
-% Open the section with a short paragraph stating the experimental protocol
-% (pointing at Section 5.4) and the metric, so it is not repeated three times.
-% #############################################################################
+
 \section{Experiments}
 \label{sec:experiments}
 
-\todo{opening paragraph: protocol (Section \ref{sec:simulator}), metric, seeds,
-hardware, and how the three subsections relate}
+\todo{State the greedy selection order in one paragraph: architecture chosen at
+a fixed default calibration; calibration then swept at the chosen architecture;
+confirmation pass re-running the two leading architectures at the selected
+calibration; vectorization-specific parameters swept last with everything else
+frozen. A stated order is what makes this defensible -- silence is what invites
+the objection.}
+\tab{Calibration sweep summary: swept parameter, values, selected value, and
+the spread of $\mathcal{L}$ across the sweep. Compact -- it belongs here rather
+than in the appendix because it documents the selection procedure.}
 
-% -----------------------------------------------------------------------------
-\subsection{Comparison of topological summaries}
+\subsection{Vectorization Comparisons}
 \label{ssec:exp-summaries}
-% NOTE: THE RE-ELEVATED ORIGINAL OBJECTIVE. This subsection is the paper's
-% clearest claim to a contribution independent of the "best model" thread, and
-% it currently exists nowhere in the draft -- only as three deleted sentences
-% ("we tested many, here is the best").
-%
-% WHAT GOES HERE:
-%   * filtration function: Rips vs DTM_k, and DTM across k. This is where the
-%     "Rips does not recover local density" claim from Section 6.1 finally gets
-%     evidence.
-%   * vectorization: persistence image vs Betti curve vs whatever else was run.
-%   * ideally crossed, or at least one held fixed while the other varies.
-%   * homology dimension: H_0 alone, H_1 alone, both.
-%   * INTERPRETATION, not just a table -- which structural information does each
-%     summary retain, and which parameter does it help most? A per-parameter
-%     breakdown here would make the section genuinely interesting rather than a
-%     ranking.
-% -----------------------------------------------------------------------------
-\todo{WRITE THIS SUBSECTION. Much of the underlying work is already done; it
-needs to be recovered from the exploratory experiments and run to a consistent
-protocol (same seeds, same splits, same design grid).}
 
-\todo{TABLE: filtration $\times$ vectorization, test loss mean $\pm$ sd over
-seeds}
+\todo{Open with the DIAGNOSTIC framing, not the ranking. Three hypotheses,
+stated before any numbers: (i) does raster/curve shape earn its keep over 18
+order statistics (STAT floor control); (ii) does feature multiplicity matter
+(landscape order statistics vs silhouette averaging); (iii) is the signed count
+sufficient (Euler nested inside Betti). "PI wins" is one line and cannot carry
+a section.}
 
-\todo{FIGURE: per-parameter error by summary type -- expect $\sigma$ and
-$\kappa$ to behave very differently}
+\todo{Compact definitions, one short paragraph each, all built on the tent
+function from Section \ref{ssec:persistence}: landscape (Eq.\ order statistics
+of tents), silhouette (persistence-weighted mean of tents, $p$ as an arm),
+Betti/Euler (feature counts at each scale, $\chi=\beta_0-\beta_1$), statistics
+(18 scalars, floor control). Full calibration and tensor shapes go to Appendix A.}
+
+\todo{FAIRNESS. Silhouette is run as four arms ($p\in\{0,1,2,3\}$) and the
+landscape gets a data-derived $K$; persistence images get one fixed
+$64\times64$ configuration. Either report SIL as the mean over $p$ with the
+breakdown in the appendix, or pre-declare $p=1$ as the headline arm. Do not
+compare best-of-four against best-of-one.}
+
+\todo{Foreground the MLP control path early: every vectorization including the
+persistence image is also run through the identical architecture-agnostic
+\texttt{FlattenMLPEncoder}. If the ordering holds on both paths, the result is
+about the summary and not the encoder. This is the strongest methodological
+feature of the comparison and should not be buried.}
+
+\expt{C1 native path, 8 arms $\times$ 5 seeds; C2 MLP path, 9 arms (incl.\ STAT)
+$\times$ 5 seeds.}
+\tab{MAIN COMPARISON. Rows = vectorization; columns = $\mathcal{L}$ (native),
+$\mathcal{L}$ (MLP), per-parameter breakdown, vectorization dimension,
+parameter count, failed seeds. The dimension column matters: PI at
+$64\times64$ per (dim,scale) is 4096-d against a Betti curve's 128-d, and a
+reader will otherwise assume the comparison was capacity-matched.}
+\fig{Per-parameter error by vectorization, grouped bars, $\kappa/\mu/\sigma$.
+This is the figure that carries the diagnostic claim -- the scalar table only
+carries the ranking.}
+\fig{Native vs MLP path scatter, one point per vectorization. Points near the
+diagonal = the summary is doing the work; large vertical spread = the encoder is.}
+\tab{Homology-dimension ablation (C3): PI, LS, BC $\times$ \{H0, H1, H0+H1\}.}
 
 % -----------------------------------------------------------------------------
 \subsection{Architecture ablations}
 \label{ssec:exp-ablations}
-% NOTE: THIS IS ALREADY DONE -- it was hiding as parenthetical prose inside the
-% encoder description. Six configurations x five seeds plus a ten-seed
-% confirmation, with a real finding (instability, not just worse averages).
-% Presented as results it is a legitimate experimental subsection.
 % -----------------------------------------------------------------------------
-% [MOVED FROM: old Section 3.3 -- encoder-mode sweep]
+
+\todo{Add one sentence stating this sweep was run on the persistence-image arm
+at the default calibration, and that Section \ref{ssec:exp-summaries} confirms
+persistence images are the arm worth ablating. Sequencing matters: had another
+vectorization won, this subsection would describe a configuration the paper
+does not ship.}
+\tab{Full six-way encoder\_mode $\times$ fusion\_mode, promoted from the current
+\texttt{center} environment to a proper table with caption and label.}
+\fig{Per-seed loss scatter across the six configurations. The instability
+finding is the interesting part and a table of means hides it.}
+
 Experiments suggested that a shared encoder works just as well as the independent
 option: we ran a sweep crossing \emph{encoder mode} (shared-weight vs.
 independent-per-$k$) against \emph{fusion mode}, five seeds per combination, on
@@ -1274,6 +1305,17 @@ common reparameterization of Section 5.1 is what makes it askable.}
 % NOTE -- PURPOSE: pre-empt the obvious objections. Short.
 % #############################################################################
 \section{Discussion and Limitations}
+
+\todo{Add a paragraph on the negative results: three alternative vectorizations
+were implemented and none improved on persistence images. Say plainly what this
+does and does not license -- it is evidence about these summaries under this
+architecture and this design distribution, not a general claim about
+vectorizations.}
+\todo{Add: the per-diagram coverage rule was inherited unchanged by the 1-D
+summaries for comparability, which may not be optimal for each individually.}
+\tab{Compute cost: feature-extraction time per cloud by vectorization, training
+time, and amortized inference time per cloud against minimum contrast per cloud.
+The last comparison strongly favours the method and is currently unmentioned.}
 
 \paragraph{The design distribution is a prior.}
 % [MOVED FROM: end of old Section 3.1.4, where it was a stray closing remark]
