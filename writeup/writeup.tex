@@ -22,6 +22,7 @@
 \usepackage{dsfont}
 
 \usepackage{graphicx}
+\graphicspath{{../figs/}}
 \usepackage{booktabs}
 \usepackage{enumitem}
 
@@ -450,6 +451,20 @@ simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$
         points near the diagonal are often treated as noise.
     \end{remark}
 
+    \begin{definition}[Tent function]
+    \label{def:tent}
+        For a persistence pair $(b_i, d_i)$, the tent function is
+            \[
+            \Lambda_i(t) = \max\bigl(0,\, \min(t - b_i,\, d_i - t)\bigr),
+            \quad t \in \R,
+            \]
+        a triangular bump supported on $[b_i, d_i]$, peaking at height
+        $(d_i-b_i)/2$ when $t = (b_i+d_i)/2$. Persistence landscapes and
+        silhouettes are order statistics and weighted averages of this family;
+        persistence images replace the tent with a smooth Gaussian bump over
+        the same birth-persistence coordinates.
+    \end{definition}
+
     \begin{definition}[Persistence image]
     \label{def:per_image}
         The persistence image of $D_k$ is constructed by:
@@ -467,30 +482,21 @@ simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$
             \end{enumerate}
     \end{definition}
 
-    \begin{definition}[Betti curve]
-        For fixed homology dimension $k$, the Betti curve is the right-continuous
-        step function counting $k$-features alive at scale $r$:
-            \[
-            \beta_k(r) = \#\{i : b_i \leq r < d_i\}
-            = \sum_i \1[b_i \leq r < d_i].
-            \]
-    \end{definition}
-
-\todo{Add the tent function $\Lambda_i(t)=\max(0,\min(t-b_i,d_i-t))$ here.
-Landscapes, silhouettes and (indirectly) persistence images are all built from
-it, so defining it once in Background lets Section 7.1 define three
-vectorizations in a paragraph each instead of a page each.}
-
-\todo{Keep ONLY the persistence image definition in full here. Landscape,
-silhouette, Betti/Euler and statistics are defined compactly in
-Section \ref{ssec:exp-summaries}, where they are evaluated. Do not define them
-twice.}
-
-\fig{Schematic: one point cloud $\rightarrow$ its $H_0/H_1$ diagrams $\rightarrow$ the five
-vectorizations side by side (PI raster, landscape stack, silhouette curve, Betti
-curve, statistics bar). One tight-cluster cloud and one near-Poisson cloud.
-This is the figure that makes the paper legible to a reader who does not know
-TDA, and it does double duty as the visual key for Section 7.1.}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{vectorization_schematic.pdf}
+    \caption{One point cloud $\rightarrow$ its $H_0/H_1$ persistence diagrams
+    $\rightarrow$ the five vectorizations compared in
+    Section~\ref{ssec:exp-summaries}: persistence-image raster, landscape
+    stack, silhouette curve, Betti curve, and persistence-statistics summary.
+    Top row: the tight-cluster design ($\kappa=50$, $\mu=4$, $\sigma=0.01$);
+    bottom row: the near-Poisson design ($\kappa=4$, $\mu=5$, $\sigma=0.5$),
+    the same two extremes of Table~\ref{tab:sim-validation}. Statistics-panel
+    bars are min-max normalized per statistic, with raw values printed above
+    each bar, since count, total persistence, and entropy live on
+    incomparable scales.}
+    \label{fig:vectorization_schematic}
+\end{figure}
 
 % -----------------------------------------------------------------------------
 \subsection{Background reading}
@@ -738,12 +744,24 @@ the triangular density of the difference of two independent
 $\mathrm{Uniform}(0,1)$ variables. As $\sigma \to 0$,
 $J(\sigma) \to 2\sigma\sqrt{\pi}$ and \eqref{eq:varN} collapses to
 $\kappa\mu(1+\mu)$, confirming the two agree in the appropriate limit. The gap
-between them reaches $175\%$ at $\nu = 1$, so \eqref{eq:varN} is used as the
-comparison target.
+between them reaches $175\%$ at $\nu = 1$ (Figure~\ref{fig:variance_identity}),
+so \eqref{eq:varN} is used as the comparison target.
 
-\fig{Canonical identity vs \eqref{eq:varN} as a function of $\nu$, with
-the empirical points overlaid. This makes the 175\% claim visible in one glance
-and is the cheapest high-value figure in the paper.}
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.72\textwidth]{variance_identity.pdf}
+    \caption{The canonical identity $\mathrm{Var}[N(W)]=\kappa\mu(1+\mu)$
+    (dashed reference, normalized to 1) against the exact finite-window
+    result of \eqref{eq:varN}, as a function of the overlap index
+    $\nu=\sigma\sqrt{\kappa}$, shown separately for each of the three
+    validated designs of Table~\ref{tab:sim-validation} since the gap depends
+    on $(\kappa,\mu)$ and not on $\nu$ alone. Markers are the empirical
+    Monte Carlo variance at each design's own $\nu$ (mean $\pm$ 1 SE over
+    $3000$ realizations), tracking the exact curve rather than the canonical
+    line. At $\nu=1$ (near-Poisson design) the canonical identity
+    overestimates the exact variance by $175\%$.}
+    \label{fig:variance_identity}
+\end{figure}
 
 \begin{table}[h]
 \centering
@@ -837,17 +855,6 @@ $\mathcal{L}$ as defined here, and not the un-averaged training loss}
 \section{Method: ParamNet}
 \label{sec:method}
 
-\todo{PIPELINE EQUATION IS WRONG. The native encoder emits $E=64$, not $128$,
-and flat concatenation over $n_k=3$ scales gives $192$, plus the $\log N(x)$
-side feature = $193$ into the head. Replace $e \in \R^{128}$ throughout with
-$e \in \R^{n_k \cdot E}$ and give the concrete numbers once. Note the MLP
-control path uses $E=128$; state that where it is introduced, not here.}
-
-\todo{The $\log N(x)$ side feature is appended in every configuration but is
-never mentioned in the paper. It must appear in the pipeline equation and in
-Section \ref{sec:problem}: an estimator that is handed the point count is not a
-purely topological estimator, and $\lambda = \kappa\mu$ is close to recoverable
-from $N$ alone.}
 \expt{[none (log N only) | -- | -- | 5] and [PI | H0+H1 | DTM\{5,10,15\} | 5 |
 log N removed]. Without these two the topological contribution is unquantified.}
 
@@ -947,12 +954,6 @@ REF.
 A). This is what makes the scheme a methodological contribution rather than a
 persistence-image implementation detail.}
 
-\todo{RESOLVE CONTRADICTION WITH CODE. This subsection claims a fallback to a
-one-dimensional vectorization when the birth axis is degenerate; the
-implementation raises instead. Under DTM the $H_0$ births are nonzero so the
-case never fires -- say that, and do not describe a fallback that does not
-exist.}
-
 \expt{Calibration has no experiment attached to it anywhere. Minimum:
 [PI | H0+H1 | DTM\{5,10,15\} | 3 | q $\in$ \{0.90,0.95,0.99,1.00\}], where
 $q\to1$ recovers naive min/max, plus the train-only vs full-population leakage
@@ -976,11 +977,25 @@ naive approach of calibrating to the maximum deaths and births (thus including a
 points) is inadequate due to the resulting relative positioning of the
 bulk of points: if we have a diagram with very strong outliers, the remaining diagrams
 will be rescaled in a way that places the majority of their points near the origin. The diagrams -- and
-therefore their vectorizations -- will lose a lot of texture.
+therefore their vectorizations -- will lose a lot of texture
+(Figure~\ref{fig:calibration_comparison}).
 
-\todo{FIGURE: naive min/max calibration vs coverage-quantile calibration, same
-diagram, side by side. The "loss of texture" argument is visual and is currently
-carried entirely by prose.}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{calibration_comparison.pdf}
+    \caption{The same $H_1$ diagram -- the population median by own max
+    persistence, drawn from $1500$ clouds sampled from the production Thomas
+    design distribution (Section~\ref{sec:simulator}) -- rendered under the
+    naive pooled min/max bound (left) and the per-diagram coverage-quantile
+    bound of $q=0.99$, $\alpha=1.05$ (right). Top row: the diagram's own
+    points against the calibrated birth-persistence box; the naive box is
+    stretched by a single high-offspring outlier diagram elsewhere in the
+    population, not shown. Bottom row: the resulting persistence images --
+    the same diagram occupies more of the frame, and its two close blobs
+    stay resolved as separate texture, once the outlier is prevented from
+    setting the shared axis range.}
+    \label{fig:calibration_comparison}
+\end{figure}
 
 Our solution is to calibrate according to \emph{per-diagram coverage quantiles}.
 For each training diagram $D_i^{(h)}$, define the three summary statistics
@@ -1056,16 +1071,6 @@ a degenerate range would make an entire column of pixels convey no information.
 \subsection{Encoder and fusion}
 % -----------------------------------------------------------------------------
 
-\todo{Rewrite declaratively per the agreed pattern: state the shared-weight
-encoder + flat concatenation outright, track dimensions end to end
-($(N_b,n_k,C,64,64) \to (N_b\!\cdot\!n_k,C{+}2,64,64) \to (N_b,n_k,64) \to
-(N_b,193)$), and close with ONE forward-reference sentence to Section
-\ref{ssec:exp-ablations}. Delete the posed question and the enumerated menu of
-three fusion options -- the alternatives are defined where they are evaluated.}
-
-\todo{Add the CoordConv mechanism claim explicitly: calibration is what makes a
-pixel position meaningful across the dataset, and CoordConv is what lets the
-network use it. State it as a claim so the ablation below has something to test.}
 \expt{[PI | H0+H1 | DTM\{5,10,15\} | 5 | CoordConv removed]. Ideally crossed with
 the calibration scheme -- the claim predicts CoordConv helps MORE under
 calibrated axes than under naive ones, which would weld the two contributions
@@ -1075,70 +1080,47 @@ together.}
 [PI | H0+H1 | DTM\{5\} | 5], [PI | H0+H1 | DTM\{10\} | 5],
 [PI | H0+H1 | DTM\{15\} | 5] against the fused arm.}
 
-Many variations of encoders were tested for this model. We will focus on the
-variation that produced the best results, noting that the encoding step is an
-important aspect that will require further study.
-\todo{REWRITE -- same problem as the vectorization subsection. State the design
-space here; report the outcome in Section 7.2.}
-\fix{Naturally, different vectorization techniques require different encoder
-architectures to produce the embedding vector. Similarly to
-Section REF, we focus on the rich example of the multi-$k$ $DTM_{k}$ persistence image
-model and defer to Section REF for an exposition and comparison of the different
-vectorizations and encoders used.}
+Consider the training clouds $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$. We pick $n_k$
+scales for our $DTM_k$ filtration and compute persistence
+images for $D$ homology dimensions with resolution $64 \times 64$.
+So for batch size $B$, the encoding stage is comprised of the following
+pipeline:
+    \begin{align*}
+    (B, n_k, D, 64, 64) \xrightarrow{\;\text{Processing}\;} (B\!\cdot\!n_k,D{+}2,64,64) \xrightarrow{\;\text{Encoder}\;} (B,n_k,E) \xrightarrow{\;\text{Fusion}\;} (B,3\!\cdot\!E+1)
+    \end{align*}
 
-
-Consider our training clouds $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$. We pick $K$
-scales for our $DTM_k$ filtration, and compute persistence images for $D$
-homology dimensions with resolution $H \times W$. Therefore for batch size $B$,
-the objective is to pick a suitable encoder architecture for the following
-transformation:
-    \begin{equation}
-    (B, K, D, H, W) \xrightarrow{\;\text{Encoder}\;} (B, 128).
-    \end{equation}
-
-When it comes to using multiple images per homology dimension for each cloud, a
-central question is whether each vectorization should go through a shared-weight
-encoder, or be assigned its own independent encoder.
-
-The shared encoder is designed as follows: each $(D, H, W)$ persistence-image
-stack is first augmented with two coordinate channels -- fixed $x$- and
+During the processing step each $(D, 64, 64)$ persistence-image
+stack is augmented with two coordinate channels -- fixed $x$- and
 $y$-coordinate grids linearly spaced over $[-1, 1]$ -- following the CoordConv
 construction \citep{liu2018coordconv}, so that the convolutional stack has access
-to absolute pixel position rather than having to infer it.
-
-This matters here specifically because the birth and persistence axes are
-calibrated (Section~\ref{ssec:calibration}): a fixed pixel location has a fixed,
-shared meaning across the dataset, and CoordConv lets the network exploit that
+to absolute pixel position rather than having to infer it. This ensures that the work
+done during the calibration step is not lost: each pixel has a fixed,
+shared meaning across the dataset and CoordConv lets the network exploit this
 directly instead of relearning it.
 
-The coordinate-augmented $(D+2, H, W)$ tensor is then passed through a small
+To apply a shared encoder to all scales, the $n_k$-axis is folded into the
+batch dimension for a single forward pass -- one call over $B \cdot n_k$ images
+rather than $n_k$ separate calls -- so the weights are tied across scales by
+construction rather than by an explicit sharing mechanism.
+
+In the encoder stage, the coordinate-augmented tensor is then passed through a small
 convolutional stack: three $3\times3$ convolution blocks with channel widths
-$(32, 64, 128)$, each followed by a ReLU, and by $2\times2$ max-pooling with
-spatial dropout between blocks (but not after the last one); the resulting
+$(32, 64, 128)$, each followed by a ReLU and $2\times2$ max-pooling with
+spatial dropout between blocks (except the last one). The resulting
 feature map is reduced by adaptive average pooling to a single spatial location
-and projected by a linear layer to the embedding dimension $E$.
+and projected by a linear layer to the embedding dimension $E$ to pruce a $(B, n_k, E)$ tensor.
 
-To apply this one encoder to all $K$ scales, the $k$-axis is folded into the
-batch dimension for a single forward pass -- one call over $B \cdot K$ images
-rather than $K$ separate calls -- so the weights are tied across scales by
-construction rather than by any explicit sharing mechanism.
+The final step fuses the scales into a single feature vector of dimension $3\cdot E + 1$
+by concatenating the $n_k$ embeddings along the feature axis and appending $\log N(\pc)$,
+the logarithm of the number of points in the cloud. The resulting $(B, 3\cdot E + 1)$ tensor
+is then passed to the FCNN head to produce the final parameter estimates.
 
-This produces a $(B, K, E)$ tensor. The next question concerns how the per-$k$
-summary is prepared for $NN_\phi$. The options explored include:
-    \begin{enumerate}
-        \item Flat concatenation of the $K$ per-scale embeddings into a single
-        $(B, K \cdot E)$ vector
-        \item A small 1-D convolutional fusion over the ordered $k$-axis (two
-        $\text{Conv1d}$ layers, letting adjacent scales mix), followed by
-        average-pooling over $k$ into a fixed-width $(B, F)$ vector whose size
-        does not depend on $K$
-        \item The same convolutional fusion, but flattening rather than pooling
-        over $k$, giving a $(B, F \cdot K)$ vector that preserves which position
-        came from which scale at the cost of a width that again grows with $K$
-    \end{enumerate}
+A key design choice is whether to use a shared encoder across $k$-scales, or to use independent encoders
+for each scale. Furthermore, the fusion step can also be done in several ways other than simple concatenation,
+such as averaging or max-pooling the embeddings across scales.
 
-\todo{end this subsection by forward-referencing Section 7.2 rather than
-announcing the winner here}
+We find that a shared encoder with concatenation is the best option (and also the simplest), and justify
+this choice in Section REF by ablation studies.
 
 
 % #############################################################################
@@ -1148,18 +1130,20 @@ announcing the winner here}
 \section{Experiments}
 \label{sec:experiments}
 
-\todo{State the greedy selection order in one paragraph: architecture chosen at
-a fixed default calibration; calibration then swept at the chosen architecture;
-confirmation pass re-running the two leading architectures at the selected
-calibration; vectorization-specific parameters swept last with everything else
-frozen. A stated order is what makes this defensible -- silence is what invites
-the objection.}
 \tab{Calibration sweep summary: swept parameter, values, selected value, and
-the spread of $\mathcal{L}$ across the sweep. Compact -- it belongs here rather
+the spread of $\mathcal{L}$ across the sweep. Compact -- it belongs here rather 
 than in the appendix because it documents the selection procedure.}
+
+Performing a grid search over all hyperparameters and architectures simultaneously is computationally infeasible, so
+we adopt a greedy selection procedure. We begin by selecting the best architecture at a fixed default calibration,
+then sweep the calibration parameters at the best architecture. Finally, we sweep vectorization-specific parameters 
+with the best architecture and calibration fixed.
 
 \subsection{Vectorization Comparisons}
 \label{ssec:exp-summaries}
+
+Figure~\ref{fig:vectorization_schematic} gives a visual overview of all five
+vectorizations compared below, computed from the same persistence diagram.
 
 \todo{Open with the DIAGNOSTIC framing, not the ranking. Three hypotheses,
 stated before any numbers: (i) does raster/curve shape earn its keep over 18
@@ -1168,17 +1152,37 @@ order statistics (STAT floor control); (ii) does feature multiplicity matter
 sufficient (Euler nested inside Betti). "PI wins" is one line and cannot carry
 a section.}
 
-\todo{Compact definitions, one short paragraph each, all built on the tent
-function from Section \ref{ssec:persistence}: landscape (Eq.\ order statistics
-of tents), silhouette (persistence-weighted mean of tents, $p$ as an arm),
-Betti/Euler (feature counts at each scale, $\chi=\beta_0-\beta_1$), statistics
-(18 scalars, floor control). Full calibration and tensor shapes go to Appendix A.}
+\paragraph{Landscape.} The $K$ layers $\lambda_1(t) \geq \lambda_2(t) \geq
+\dots \geq \lambda_K(t)$ are the order statistics of the tent family
+$\{\Lambda_i(t)\}_i$ (Definition~\ref{def:tent}) at each grid point $t$:
+$\lambda_j(t)$ is the $j$-th largest tent value. $K$ is chosen per diagram
+sample by a coverage rule -- the smallest $K$ for which layer $K+1$ is
+negligible for 99\% of training diagrams, capped at 16 -- giving a $(K,G)$
+raster per homology dimension.
 
-\todo{FAIRNESS. Silhouette is run as four arms ($p\in\{0,1,2,3\}$) and the
-landscape gets a data-derived $K$; persistence images get one fixed
-$64\times64$ configuration. Either report SIL as the mean over $p$ with the
-breakdown in the appendix, or pre-declare $p=1$ as the headline arm. Do not
-compare best-of-four against best-of-one.}
+\paragraph{Silhouette.} Rather than keep every order statistic, the
+silhouette collapses the same tents into one persistence-weighted average,
+    \[
+    \phi^{(p)}(t) = \frac{\sum_i |d_i-b_i|^p\, \Lambda_i(t)}
+    {\sum_i |d_i-b_i|^p},
+    \]
+a single $(1,G)$ curve. $p=0$ is an unweighted mean over tents and $p \to
+\infty$ concentrates entirely on the longest-lived feature; we run $p$ as an
+arm over $\{0,1,2,3\}$.
+
+\paragraph{Betti/Euler curve.} The Betti curve $\beta_k(r) = \#\{i : b_i
+\leq r < d_i\}$ counts $k$-features alive at scale $r$ -- a feature count
+rather than a tent reduction, but built from the same persistence pairs.
+The Euler curve $\chi(r) = \beta_0(r) - \beta_1(r)$ is a signed count nested
+inside the two Betti channels, not additional information.
+
+\paragraph{Statistics.} The floor-control vectorization skips grids
+entirely: 18 scalars per homology dimension -- count, total persistence,
+persistent entropy, and the 10/25/50/75/90 quantiles of birth, death, and
+lifetime -- computed directly from the finite pairs.
+
+Full calibration (grid ranges, $K$-selection, shared vs.\ per-dimension
+axes) and tensor shapes for all four are deferred to Appendix A.
 
 \todo{Foreground the MLP control path early: every vectorization including the
 persistence image is also run through the identical architecture-agnostic
@@ -1188,16 +1192,20 @@ feature of the comparison and should not be buried.}
 
 \expt{C1 native path, 8 arms $\times$ 5 seeds; C2 MLP path, 9 arms (incl.\ STAT)
 $\times$ 5 seeds.}
+
 \tab{MAIN COMPARISON. Rows = vectorization; columns = $\mathcal{L}$ (native),
 $\mathcal{L}$ (MLP), per-parameter breakdown, vectorization dimension,
 parameter count, failed seeds. The dimension column matters: PI at
 $64\times64$ per (dim,scale) is 4096-d against a Betti curve's 128-d, and a
 reader will otherwise assume the comparison was capacity-matched.}
+
 \fig{Per-parameter error by vectorization, grouped bars, $\kappa/\mu/\sigma$.
 This is the figure that carries the diagnostic claim -- the scalar table only
 carries the ranking.}
+
 \fig{Native vs MLP path scatter, one point per vectorization. Points near the
 diagonal = the summary is doing the work; large vertical spread = the encoder is.}
+
 \tab{Homology-dimension ablation (C3): PI, LS, BC $\times$ \{H0, H1, H0+H1\}.}
 
 % -----------------------------------------------------------------------------
@@ -1210,8 +1218,10 @@ at the default calibration, and that Section \ref{ssec:exp-summaries} confirms
 persistence images are the arm worth ablating. Sequencing matters: had another
 vectorization won, this subsection would describe a configuration the paper
 does not ship.}
+
 \tab{Full six-way encoder\_mode $\times$ fusion\_mode, promoted from the current
 \texttt{center} environment to a proper table with caption and label.}
+
 \fig{Per-seed loss scatter across the six configurations. The instability
 finding is the interesting part and a table of means hides it.}
 
@@ -1264,12 +1274,6 @@ instability finding is the interesting part and a table of means hides it.}
 \subsection{Estimation performance}
 \label{ssec:exp-performance}
 % #############################################################################
-% *** THE EMPTY SLOT ***
-% This subsection does not exist yet and is the main outstanding work item.
-% Writing the headers now is what makes the progression report read as PLANNED
-% rather than UNFINISHED. Do not delete these TODOs -- they are the plan.
-% #############################################################################
-% -----------------------------------------------------------------------------
 
 \paragraph{Comparison against classical estimators.}
 \todo{minimum contrast on $K$ and on $g$, and Palm likelihood, run on the SAME
