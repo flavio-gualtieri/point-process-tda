@@ -143,35 +143,33 @@ processes to obtain novel insights.
 \todo{pick ONE application and carry it through the whole paper as the running
 example -- galaxy clustering is the natural choice given the related work}
 
-The ability to infer the parameters of SPPs is of particular interest because a
-wealth of canonical summary statistics become readily available once these
-parameters are known, such as ...
-\todo{this motivation is CIRCULAR and must be replaced. Classical methods
-estimate parameters FROM summary statistics, not the other way round. The real
-argument: the parameters are the physically interpretable quantities
-($\kappa$ = cluster density, $\mu$ = occupancy, $\sigma$ = cluster scale), and
-existing estimators are fragile in nameable regimes.}
-\fix{The parameters of spatial point processes are of particular interest because 
-they are interpretable scientific quantities. For example ...}
+The parameters of spatial point processes are of particular interest because 
+they are interpretable scientific quantities.
+\todo{For example ...}
 
 
 % --- (ii) limitations of existing estimators ---------------------------------
 A number of parameter estimation methods have been proposed, typically relying
-on closed-form expressions for summary statistics, for example the $K$ and $g$
-functions.
-\todo{these three become a short paragraph with citations, not a bullet list}
-\begin{itemize}[nosep]
-  \item Minimum contrast on $K$ or $g$ (Diggle 2003).
-  \item Palm likelihood (Tanaka, Ogata \& Stoyan 2008).
-  \item Bayesian and MCMC.
-\end{itemize}
+on closed-form expressions for summary statistics, for example the $K$ and $L$
+functions (see Section \ref{ssec:spp}). Minimum contrast estimation fits parameters by numerically
+minimizing a discrepancy between the empirical and theoretical curve, most
+commonly for $K$ or $g$ \citep{diggle2003spatial}. Palm likelihood instead
+builds a composite likelihood from the process's Palm intensity, and has been
+developed specifically for Neyman--Scott processes \citep{tanaka2008parameter}.
+Fully Bayesian approaches treat the unobserved parent locations as latent
+variables and sample the posterior over $\theta$ by MCMC
+\citep{moller2004statistical}.
 
-These methods have limitations we hope to address.
-Firstly, existing methods rely on the existence of closed-form expressions of
-summary statistics -- such as the $K$-function -- which may not exist for every process.
-Secondly, classical parameter estimation
-methods suffer from hyperparameter sensitivity, specifically the minimum contrast method
-depends on $(r_{max}, q, p)$. Thirdly, classical methods become unstable as the process approaches complete
+These methods have three limitations we hope to address.
+
+Firstly, they rely on the existence of closed-form expressions of
+summary statistics which may not exist for every process.
+
+Secondly, classical parameter estimation methods suffer from 
+hyperparameter sensitivity, specifically the minimum contrast method
+depends on $(r_{max}, q, p)$. 
+
+Finally, classical methods become unstable as the process approaches complete
 spatial randomness. As the overlap index $\nu$ grows the clusters merge, so
 $\kappa$ and $\mu$ cease to be separately identifiable from a single
 realization: a small parent intensity with large clusters and a large parent
@@ -188,9 +186,10 @@ visible rather than averaged away.
 These limitations motivate the use of persistence-based features which provide a
 multi-scale, process-agnostic descriptor of the point cloud that does not require
 a closed-form or a choice of summary statistic.
-\todo{More mechanism}
 
 % --- (iv) contributions ------------------------------------------------------
+\subsection{Contributions}
+\label{ssec:contributions}
 \todo{MISSING CONTRIBUTIONS LIST. Draft it as:
  1. a systematic comparison of vectorized topological summaries as features for
     SPP parameter estimation (the ORIGINAL objective -- re-elevate it);
@@ -283,6 +282,7 @@ Section \ref{sec:method}.
 
 % -----------------------------------------------------------------------------
 \subsection{Spatial point processes}
+\label{ssec:spp}
 % NOTE: keep as is. This is tight and load-bearing.
 % -----------------------------------------------------------------------------
 
