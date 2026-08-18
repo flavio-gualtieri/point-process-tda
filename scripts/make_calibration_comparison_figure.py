@@ -2,11 +2,24 @@
 # scripts/make_calibration_comparison_figure.py
 """Build the "naive min/max vs coverage-quantile calibration" figure
 requested by the \\fig{} TODO in writeup/writeup.tex Section 6.2
-(Calibration): the same H1 diagram rendered under the two calibration
+(Calibration): the same H0 diagram rendered under the two calibration
 schemes, side by side, to make the "loss of texture" argument -- currently
 carried entirely by prose -- visual.
 
-Population: 4000 clouds drawn from the SAME reparametrized design
+H0, not Rips: a plain Rips filtration on a point cloud gives every vertex
+birth 0 (all points exist from the start), so H0's birth axis is degenerate
+by construction -- axis_bounds() correctly refuses this
+("H0 birth axis is degenerate; use a 1-D vectorizer"). We use the DTM
+filtration instead (src/cloudforger/data_generation/filtration/dtm.py,
+k=5, q=2.0 -- the same k the production DTM configs use, e.g.
+configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml), whose birth value is
+each point's local-density estimate, so H0 birth is genuinely
+diagram-to-diagram variable. maxdim=0 (rather than production's maxdim=1)
+is a deliberate cost cut: an H0-only complex needs only edges, not
+triangles, which is ~25x faster to build and is exactly the homology
+dimension this figure uses -- it does not change which points enter H0.
+
+Population: 2000 clouds drawn from the SAME reparametrized design
 distribution used in production (K=kappa, EN=kappa*mu, c=nu, log-uniform
 over the exact ranges/derived-fields/constraint of
 configs/runs/thomas/thomas_pi_multik.yaml), not a hand-picked pair of
@@ -49,7 +62,7 @@ from cloudforger.data_generation.design import (  # noqa: E402
     passes,
     sample_param_vector,
 )
-from cloudforger.data_generation.filtration.rips import RipsFiltration  # noqa: E402
+from cloudforger.data_generation.filtration.dtm import DTMFiltration  # noqa: E402
 from cloudforger.data_generation.point_processes.thomas import ThomasProcess  # noqa: E402
 from cloudforger.vectorization.persistence_images.persistence_image import (  # noqa: E402
     PersistenceImager,
@@ -74,10 +87,12 @@ DERIVED = {
 }
 CONSTRAINTS = ["mean_offspring >= 2.5"]
 
-N_POPULATION = 4000
+N_POPULATION = 2000
 SEED = 20260818
 COVERAGE, PAD = 0.95, 1.05  # the production defaults quoted in the text (q=0.95, alpha=1.05)
 RESOLUTION = 64  # matches Definition per_image / production configs
+HOMOLOGY_DIM = 0
+DTM_K, DTM_Q = 5, 2.0  # matches configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml's first DTM channel
 
 BLUE = "#2a78d6"
 ORANGE = "#eb6834"
@@ -97,7 +112,7 @@ plt.rcParams.update({
 def sample_population():
     rng = np.random.default_rng(SEED)
     W = Box(low=np.array([0.0, 0.0]), high=np.array([1.0, 1.0]))
-    filtration = RipsFiltration(maxdim=1)
+    filtration = DTMFiltration(k=DTM_K, q=DTM_Q, maxdim=0)  # maxdim=0: H0 only, see module docstring
     diagrams, params = [], []
     seed_ctr = 0
     while len(diagrams) < N_POPULATION:
@@ -114,7 +129,7 @@ def sample_population():
     return diagrams, params
 
 
-def naive_bounds(diagrams, homology_dim=1):
+def naive_bounds(diagrams, homology_dim=HOMOLOGY_DIM):
     """Literal pooled min/max over every point of every diagram -- the
     "naive" scheme the text contrasts with axis_bounds' per-diagram quantile."""
     births, perss = [], []
@@ -128,10 +143,10 @@ def naive_bounds(diagrams, homology_dim=1):
     return (float(births.min()), float(births.max())), (0.0, float(perss.max()))
 
 
-def pick_typical(diagrams, homology_dim=1, bulk_percentile=60.0):
+def pick_typical(diagrams, homology_dim=HOMOLOGY_DIM, bulk_percentile=60.0):
     """Among the non-outlier bulk of the population (own max persistence at
     or below `bulk_percentile` -- i.e. NOT the diagram setting the naive
-    bound), pick the one with the most H1 features. A sparse bulk diagram
+    bound), pick the one with the most H0 features. A sparse bulk diagram
     would show the axis-compression effect too, but with only 1-2 blobs to
     begin with there is little "texture" left to visibly lose; the
     richest-textured ordinary diagram makes the naive/quantile contrast
@@ -147,10 +162,12 @@ def pick_typical(diagrams, homology_dim=1, bulk_percentile=60.0):
     return int(eligible[np.argmax(n_pairs[eligible])])
 
 
-def plot_box_panel(ax, diagram, birth_range, pers_range, title, box_color, crop=None):
-    pairs = diagram.finite_pairs(1)
+def plot_box_panel(ax, diagram, birth_range, pers_range, title, box_color, crop=None, dim=HOMOLOGY_DIM):
+    pairs = diagram.finite_pairs(dim)
     b, pers = pairs[:, 0], pairs[:, 1] - pairs[:, 0]
-    ax.scatter(b, pers, s=22, color=BLUE, edgecolor="black", linewidth=0.4, zorder=3)
+    # H0 diagrams run to hundreds of pairs (unlike H1's handful), so smaller,
+    # unfilled-edge, semi-transparent markers keep the scatter legible.
+    ax.scatter(b, pers, s=10, color=BLUE, alpha=0.5, linewidth=0, zorder=3)
     rect = mpatches.Rectangle((birth_range[0], pers_range[0]),
                                birth_range[1] - birth_range[0], pers_range[1] - pers_range[0],
                                fill=False, edgecolor=box_color, linewidth=2, zorder=2)
@@ -169,7 +186,7 @@ def plot_box_panel(ax, diagram, birth_range, pers_range, title, box_color, crop=
     ax.set_title(title, fontsize=10)
 
 
-def plot_pi_panel(ax, diagram, birth_range, pers_range, title, crop):
+def plot_pi_panel(ax, diagram, birth_range, pers_range, title, crop, dim=HOMOLOGY_DIM):
     """Render the full-resolution PI, then zoom the DISPLAY to the same
     physical (birth, persistence) window in both panels (the dashed box in
     the row above), using nearest-neighbor interpolation so actual pixels
@@ -179,7 +196,7 @@ def plot_pi_panel(ax, diagram, birth_range, pers_range, title, crop):
     resolution loss the text describes, made visible instead of asserted."""
     imager = PersistenceImager(birth_range=birth_range, pers_range=pers_range,
                                 resolution=RESOLUTION, sigma_pixels=2.0)
-    im = imager.transform(diagram, dim=1)
+    im = imager.transform(diagram, dim=dim)
     # transform() already flips its array so persistence increases upward
     # under imshow's default origin="upper" (row 0 = max persistence); passing
     # origin="lower" here would double-flip it and, combined with `extent`,
@@ -197,14 +214,15 @@ def plot_pi_panel(ax, diagram, birth_range, pers_range, title, crop):
 
 def main():
     diagrams, params = sample_population()
-    n_birth, n_pers = naive_bounds(diagrams, homology_dim=1)
-    q_birth, q_pers = axis_bounds(diagrams, homology_dim=1, coverage=COVERAGE, pad=PAD)
+    n_birth, n_pers = naive_bounds(diagrams, homology_dim=HOMOLOGY_DIM)
+    q_birth, q_pers = axis_bounds(diagrams, homology_dim=HOMOLOGY_DIM, coverage=COVERAGE, pad=PAD)
 
-    typ_idx = pick_typical(diagrams, homology_dim=1)
+    typ_idx = pick_typical(diagrams, homology_dim=HOMOLOGY_DIM)
     typical = diagrams[typ_idx]
 
     outlier_idx = int(np.argmax([
-        (d.finite_pairs(1)[:, 1] - d.finite_pairs(1)[:, 0]).max() if len(d.finite_pairs(1)) else 0.0
+        (d.finite_pairs(HOMOLOGY_DIM)[:, 1] - d.finite_pairs(HOMOLOGY_DIM)[:, 0]).max()
+        if len(d.finite_pairs(HOMOLOGY_DIM)) else 0.0
         for d in diagrams
     ]))
     outlier_params = params[outlier_idx]
@@ -212,7 +230,7 @@ def main():
     # Shared physical zoom window: the typical diagram's own footprint plus a
     # margin, identical in both panels below -- so the two rasters differ
     # only in how many of the fixed 64x64 grid's pixels land inside it.
-    typ_pairs = typical.finite_pairs(1)
+    typ_pairs = typical.finite_pairs(HOMOLOGY_DIM)
     tb, tp = typ_pairs[:, 0], typ_pairs[:, 1] - typ_pairs[:, 0]
     crop = ((max(0.0, tb.min() - 0.02), tb.max() + 0.03), (0.0, tp.max() + 0.03))
 
@@ -229,8 +247,8 @@ def main():
                    "PI under quantile bound, zoomed to dashed box", crop)
 
     fig.suptitle(
-        "Same $H_1$ diagram, two calibrations: the naive bound is stretched by an\n"
-        f"outlier diagram elsewhere in the population "
+        "Same $H_0$ diagram (DTM filtration), two calibrations: the naive bound is\n"
+        f"stretched by an outlier diagram elsewhere in the population "
         f"($\\mu$={outlier_params['mean_offspring']:.1f} offspring/parent, not shown), "
         "compressing this diagram's own texture",
         fontsize=10.5, y=1.02,
@@ -245,8 +263,7 @@ def main():
     print(f"Wrote {pdf_path}")
     print(f"naive birth={n_birth} pers={n_pers}")
     print(f"quantile birth={q_birth} pers={q_pers}")
-    print(f"typical diagram idx={typ_idx} own max persistence="
-          f"{(typical.finite_pairs(1)[:, 1] - typical.finite_pairs(1)[:, 0]).max():.4f}")
+    print(f"typical diagram idx={typ_idx} n_pairs={len(typ_pairs)} own max persistence={tp.max():.4f}")
 
 
 if __name__ == "__main__":

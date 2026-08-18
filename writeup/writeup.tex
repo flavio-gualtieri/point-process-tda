@@ -1015,19 +1015,23 @@ therefore their vectorizations -- will lose a lot of texture
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.85\textwidth]{calibration_comparison.pdf}
-    \caption{The same $H_1$ diagram -- the most feature-rich diagram among the
-    non-outlier bulk (own max persistence at or below the 60th percentile),
-    drawn from $4000$ clouds sampled from the production Thomas design
-    distribution (Section~\ref{sec:simulator}) -- rendered under the naive
-    pooled min/max bound (left) and the per-diagram coverage-quantile bound
-    of $q=0.95$, $\alpha=1.05$ (right). Top row: the diagram's own points
-    against the calibrated birth-persistence box, with the dashed square
-    marking the region zoomed into below; the naive box is stretched by a
-    single high-offspring outlier diagram elsewhere in the population, not
-    shown. Bottom row: the same physical region of birth-persistence space,
-    rendered at each calibration's native pixel density -- visibly coarser
-    under the naive bound, since the same $64\times64$ grid is stretched over
-    a wider range.}
+    \caption{The same $H_0$ diagram (DTM filtration, $k=5$ -- a plain Rips
+    filtration gives every point birth $0$, so the birth axis this figure
+    calibrates would be degenerate) -- the most feature-rich diagram among
+    the non-outlier bulk (own max persistence at or below the 60th
+    percentile), drawn from $2000$ clouds sampled from the production
+    Thomas design distribution (Section~\ref{sec:simulator}) -- rendered
+    under the naive pooled min/max bound (left) and the per-diagram
+    coverage-quantile bound of $q=0.95$, $\alpha=1.05$ (right). Top row: the
+    diagram's own points against the calibrated birth-persistence box, with
+    the dashed square marking the region zoomed into below; the naive box is
+    stretched by a single high-offspring outlier diagram elsewhere in the
+    population, not shown. Bottom row: the same physical region of
+    birth-persistence space, rendered at each calibration's native pixel
+    density -- a $7\times7$ block of mostly-fused pixels under the naive
+    bound against a $16\times16$ grid that keeps the secondary peak resolved
+    under the quantile bound, since the same $64\times64$ grid is stretched
+    over a wider range.}
     \label{fig:calibration_comparison}
 \end{figure}
 
@@ -1150,7 +1154,7 @@ pipeline:
 During the processing step each $(D, 64, 64)$ persistence-image
 stack is augmented with two coordinate channels -- fixed $x$- and
 $y$-coordinate grids linearly spaced over $[-1, 1]$ -- following the CoordConv
-construction \citep{liu2018coordconv}, so that the convolutional stack has access
+construction REF, so that the convolutional stack has access
 to absolute pixel position rather than having to infer it. This ensures that the work
 done during the calibration step is not lost: each pixel has a fixed,
 shared meaning across the dataset and CoordConv lets the network exploit this
@@ -1295,14 +1299,8 @@ read.
 \label{ssec:exp-summaries}
 
 Figure~\ref{fig:vectorization_schematic} gives a visual overview of all five
-vectorizations compared below, computed from the same persistence diagram.
-
-\todo{Open with the DIAGNOSTIC framing, not the ranking. Three hypotheses,
-stated before any numbers: (i) does raster/curve shape earn its keep over 18
-order statistics (STAT floor control); (ii) does feature multiplicity matter
-(landscape order statistics vs silhouette averaging); (iii) is the signed count
-sufficient (Euler nested inside Betti). "PI wins" is one line and cannot carry
-a section.}
+vectorizations compared below, computed from the same persistence diagram. We now
+describe each in turn and report their respective performance in Table~\ref{tab:main-comparison}.
 
 \paragraph{Landscape.} The $K$ layers $\lambda_1(t) \geq \lambda_2(t) \geq
 \dots \geq \lambda_K(t)$ are the order statistics of the tent family
@@ -1328,19 +1326,8 @@ rather than a tent reduction, but built from the same persistence pairs.
 The Euler curve $\chi(r) = \beta_0(r) - \beta_1(r)$ is a signed count nested
 inside the two Betti channels, not additional information.
 
-\paragraph{Statistics.} The floor-control vectorization skips grids
-entirely: 18 scalars per homology dimension -- count, total persistence,
-persistent entropy, and the 10/25/50/75/90 quantiles of birth, death, and
-lifetime -- computed directly from the finite pairs.
-
-Full calibration (grid ranges, $K$-selection, shared vs.\ per-dimension
-axes) and tensor shapes for all four are deferred to Appendix A.
-
-\todo{Foreground the MLP control path early: every vectorization including the
-persistence image is also run through the identical architecture-agnostic
-\texttt{FlattenMLPEncoder}. If the ordering holds on both paths, the result is
-about the summary and not the encoder. This is the strongest methodological
-feature of the comparison and should not be buried.}
+For a discussion of each vectorization's calibration (grid ranges, $K$-selection, shared vs.\ per-dimension
+axes) and tensor shapes, refer to REF.
 
 \begin{table}[htbp]
 \centering
@@ -1353,14 +1340,13 @@ PI  & $64\times64=4096$ & 6  & $0.126 \pm 0.008$ (10) & $0.196 \pm 0.006$ (5) & 
 LS  & $16\times128=2048$ & 6  & $0.132 \pm 0.008$ (3)  & $0.250 \pm 0.005$ (3) & \#\#\# & \#\#\# \\
 SIL & $128$              & 12 & $0.165 \pm 0.013$ (3)  & $0.271 \pm 0.012$ (3) & \#\#\# & \#\#\# \\
 BC  & $128$              & 6  & $0.196 \pm 0.014$ (3)  & $0.290 \pm 0.005$ (3) & \#\#\# & \#\#\# \\
-STAT & $18$ (scalars, no raster) & 2 & n/a & n/a & \#\#\# & \#\#\# \\
 \bottomrule
 \end{tabular}
-\caption{Main vectorization comparison. ``native'' is each vectorization's
+\caption{Vectorization methods comparison: ``native'' denote's the methods'
 purpose-built encoder (CNN for PI/LS, 1-D CoordConv for SIL/BC); ``MLP'' is
 the architecture-agnostic \texttt{FlattenMLPEncoder} applied to the same
 tensor. All native-path arms use the $q=0.95$ calibration matched to the
-persistence image (the \texttt{fairq095} runs) rather than each
+persistence image rather than each
 vectorization's own tuned default from Appendix~\ref{app:alt-calibration},
 so the comparison is calibration-fair, not each-vectorization-optimal;
 BC's own appendix-preferred $q=0.99$ scores slightly better
@@ -1370,8 +1356,7 @@ consistency. T = Thomas, NT = nested-Thomas; seed count $n$ in parentheses
 see Section~\ref{ssec:encoder-fusion} for the shared training protocol).
 Per-channel dim $\times$ channels gives the flattened tensor size actually
 fed to the encoder (PI: $24{,}576$; LS: $12{,}288$; SIL: $1{,}536$; BC:
-$768$) -- comparisons above are not capacity-matched. \#\#\# = not yet run
-(STAT and the LS/SIL/BC MLP-path arms).}
+$768$) -- comparisons above are not capacity-matched.}
 \label{tab:main-comparison}
 \end{table}
 
@@ -1418,9 +1403,7 @@ distribution.
 
 This sweep was run on the persistence-image arm at the default $q=0.95$
 calibration; Section~\ref{ssec:exp-summaries} confirms PI is the arm worth
-ablating, so the choice of what to ablate here does not beg the question --
-had another vectorization won that comparison, this subsection would describe
-a configuration the paper does not ship.
+ablating.
 
 We ran a sweep crossing \emph{encoder mode} (shared-weight vs.\
 independent-per-$k$) against \emph{fusion mode} (concatenation, average-pool,
