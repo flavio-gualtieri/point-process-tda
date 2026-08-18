@@ -1,0 +1,90 @@
+{
+  "task": "params",
+  "method": "betti_multik",
+  "test_loss": 0.41807202299435936,
+  "test_loss_per_target": {
+    "parent_intensity": 0.4239363670349121,
+    "meta_offspring": 0.7281919717788696,
+    "meta_cluster_scale": 0.39020803570747375,
+    "mean_offspring": 0.3258477449417114,
+    "cluster_scale": 0.22217606008052826
+  },
+  "seed": 9379,
+  "git_commit": "e038990f3ae0d2cdea33aca9594c4545381f3d60",
+  "git_dirty": true,
+  "timestamp": "2026-08-17T23:38:43.872531+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "betti_multik",
+    "seed": 9379,
+    "homology_dims": [
+      0,
+      1
+    ],
+    "include_euler": false,
+    "include_entropy": false,
+    "grid_size": 128,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "dropout": 0.2,
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "target_label_names": [
+      "parent_intensity",
+      "meta_offspring",
+      "meta_cluster_scale",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "log_label_names": [
+      "parent_intensity",
+      "meta_offspring",
+      "meta_cluster_scale",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      10
+    ],
+    "channels": [
+      "k10_beta0",
+      "k10_beta1"
+    ],
+    "betti_params": {
+      "10": {
+        "name": "betti_curve",
+        "homology_dims": [
+          0,
+          1
+        ],
+        "grid_size": 128,
+        "grid_range": [
+          0.0,
+          0.20892900539489614
+        ],
+        "drop_infinite": true,
+        "normalize": false,
+        "weight_by_persistence": false
+      }
+    }
+  },
+  "adversarial_loss": 0.41810072159767153,
+  "adversarial_loss_per_target": {
+    "parent_intensity": 0.41275420784950256,
+    "meta_offspring": 0.7461679577827454,
+    "meta_cluster_scale": 0.3863512873649597,
+    "mean_offspring": 0.3303520977497101,
+    "cluster_scale": 0.21487826108932495
+  },
+  "adversarial_path": "/gpfs/scratch/qp252676/globus/point-process-tda/data/nested_thomas/adversarial_clouds.pkl"
+}

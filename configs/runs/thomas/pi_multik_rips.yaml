@@ -1,0 +1,77 @@
+# python scripts/train.py configs/runs/thomas/pi_multik_rips.yaml
+#
+# pi_multik on rips alone (k_values auto-derives to a single "scale" from
+# this one-entry filtration list -- pi_multik's late-fusion-across-k
+# machinery still applies with n_k=1, it just has nothing to fuse). Unlike
+# betti_cnn's own rips config, this is expected to FAIL at featurize time:
+# build_calibrated_imager's axis_bounds rejects a degenerate H0 birth axis
+# ("H0 birth axis is degenerate; use a 1-D vectorizer"), and plain Rips
+# gives every H0 feature birth=0 -- see
+# thomas_pi_multik_k5k10k15.yaml's header for the same note. Betti curves
+# have no birth axis of their own (see vectorization/scalar_features/
+# calibrated.py's module docstring), which is exactly why betti_cnn CAN use
+# rips and pi_multik/PI-based methods can't -- this config exists to make
+# that contrast reproducible, not because it's expected to train.
+#
+# process.design is descriptive only (data/thomas/clouds.pkl already
+# exists from this process's own earlier generate.py run -- this file just
+# drives filtration:/scripts/featurize.py against those same clouds).
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: rips, params: {maxdim: 1}}
+
+features:
+  - name: persistence_image
+    params: {resolution: 64, sigma_pixels: 0.75, homology_dims: [0, 1], pd_calibration_coverage: 0.95}
+
+method:
+  name: pi_multik
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+    resolution: 64
+    sigma_pixels: 0.75
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true

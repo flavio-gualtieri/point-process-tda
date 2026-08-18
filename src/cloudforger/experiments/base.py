@@ -29,8 +29,16 @@ from cloudforger.experiments.common import (
     save_results,
 )
 
-# Matches dimensioned methods like "pi_1" / "betti_0" / "betti_cnn_1".
-_PERSIST_TOKEN = re.compile(r"^(pi|betti_cnn_weighted|betti_cnn|betti)_(\d+)$")
+# Matches dimensioned methods like "pi_1". betti_cnn_weighted_<dim>/
+# betti_cnn_<dim>/betti_<dim> used to match here too, back when betti.py/
+# betti_cnn.py were plain Experiment subclasses with dimensioned method
+# names. Both were deleted and replaced with leakage-safe MultiSourceExperiment
+# rewrites (experiments/betti_cnn.py, experiments/pi_multik/betti_multik.py)
+# -- MultiSourceExperiment subclasses are constructed via cls(cfg), no
+# hom_dim argument (see build_experiment below), so the new betti_cnn reads
+# its homology dimension from method.params.hom_dim instead of a dimensioned
+# method-name suffix; nothing needs to match here for it.
+_PERSIST_TOKEN = re.compile(r"^(pi)_(\d+)$")
 
 
 class CovariateHeadDataset(Dataset):
@@ -251,9 +259,9 @@ def persistence_entropy_head_extra(
     dtm_experiment/compute_features.py's persistence_entropy) onto n(x), one
     extra z-scored column per dim in `dims`. Must be called with every dim
     the experiment actually trains on: a single `self.hom_dim` lookup breaks
-    for tuple/None hom_dim (the "01"-fused and ph_combined methods), since
-    the entropy dict is never keyed by a tuple or None -- it would silently
-    fall back to n_x-only with no entropy feature at all."""
+    for tuple/None hom_dim (e.g. persistence_image.py's "01"-fused method),
+    since the entropy dict is never keyed by a tuple or None -- it would
+    silently fall back to n_x-only with no entropy feature at all."""
     entropy_by_dim = payload.get("persistence_entropy", {})
     entropies = [entropy_by_dim.get(d) for d in dims]
     if any(e is None for e in entropies):
@@ -305,7 +313,7 @@ def build_experiment(cfg: dict) -> "Experiment | MultiSourceExperiment":
     except KeyError:
         raise ValueError(
             f"Unknown method '{cfg['method']}'. Registered: {sorted(REGISTRY)}; "
-            "plus pi_<dim>, betti_<dim>."
+            "plus pi_<dim>."
         )
     if issubclass(cls, MultiSourceExperiment):
         return cls(cfg)

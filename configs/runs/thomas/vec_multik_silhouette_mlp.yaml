@@ -1,0 +1,66 @@
+# python scripts/train.py configs/runs/thomas/vec_multik_silhouette_mlp.yaml --seed 9371
+#
+# vectorization=silhouette, encoder_path=mlp, matched feature budget
+# (G=4096 -- same as vec_multik_silhouette_matched.yaml's native arm, so
+# the two differ only in encoder). Same p-sweep convention as the native
+# configs above.
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: dtm,  params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 15, q: 2.0, maxdim: 1}}
+
+features: []
+
+method:
+  name: vec_multik
+  params:
+    vectorization: silhouette
+    encoder_path: mlp
+    p: 1.0
+
+    G: 4096
+    homology_dims: [0, 1]
+    include_entropy: false
+    pd_calibration_coverage: 0.95
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+    mlp_hidden_dim: 512
+    mlp_dropout: 0.1
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true

@@ -1,6 +1,12 @@
 # thomas counterpart of nested_thomas/nested_thomas_vihrs.yaml -- vihrs
 # reads clouds.pkl directly and computes L(r)-r itself, no filtration/
 # features needed.
+#
+# seeds: bumped from the original 3-seed list to the standard 10-seed list
+# (matching nested_thomas_vihrs.yaml and every betti_multik/betti_cnn
+# config here) for the betti-vs-vihrs comparison sweep -- --seed on the
+# CLI already overrode this list per-task regardless, so this is
+# documentation/default-run consistency, not a behavior change.
 
 process:
   name: thomas
@@ -35,7 +41,7 @@ method:
     checkpoint_best: true
     early_stopping_patience: 30
 
-seeds: [9371, 9372, 9373]
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
 target_label_names: [parent_intensity, mean_offspring, cluster_scale]
 log_label_names: [parent_intensity, mean_offspring, cluster_scale]
 use_adversarial: true

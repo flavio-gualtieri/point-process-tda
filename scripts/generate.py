@@ -4,7 +4,7 @@
 data/<process>/{clouds.pkl, adversarial_clouds.pkl, cloud_generation_manifest.yaml}.
 
 Usage:
-    python scripts/generate.py configs/runs/thomas_dtm_k5_betti_cnn.yaml
+    python scripts/generate.py configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml
     python scripts/generate.py configs/runs/foo.yaml --set process.seed=1 --force
 """
 

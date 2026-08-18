@@ -1,0 +1,77 @@
+# python scripts/train.py configs/runs/thomas/vec_multik_pi_native.yaml --seed 9371
+#
+# Parity/sanity config for method: vec_multik: vectorization=persistence_image,
+# encoder_path=native delegates to (and is byte-identical to) method:
+# pi_multik -- see experiments/pi_multik/vectorized_multik.py's module
+# docstring and tests/test_pipeline_e2e.py's
+# test_vec_multik_persistence_image_native_matches_pi_multik. Same
+# process/filtration/seeds/method-hyperparameters as
+# thomas_pi_multik_k5k10k15.yaml (inherited unchanged, see the landscape/
+# silhouette build spec's config-surface section) -- only method.name and
+# the two new params (vectorization, encoder_path) differ. Results land
+# under vec_multik_persistence_image_native/, not pi_multik/, so this run
+# doesn't collide with (or require) that config having been run first.
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: dtm,  params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 15, q: 2.0, maxdim: 1}}
+
+features:
+  - name: persistence_image
+    params: {resolution: 64, sigma_pixels: 0.75, homology_dims: [0, 1], pd_calibration_coverage: 0.95}
+
+method:
+  name: vec_multik
+  params:
+    vectorization: persistence_image
+    encoder_path: native
+
+    homology_dims: [0, 1]
+    include_entropy: false
+    resolution: 64
+    sigma_pixels: 0.75
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true

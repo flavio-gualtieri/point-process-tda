@@ -1,0 +1,71 @@
+{
+  "task": "params",
+  "method": "betti_cnn",
+  "test_loss": 0.30933618800980706,
+  "test_loss_per_target": {
+    "parent_intensity": 0.46726933121681213,
+    "mean_offspring": 0.3434748947620392,
+    "cluster_scale": 0.11726436018943787
+  },
+  "seed": 9374,
+  "git_commit": "e038990f3ae0d2cdea33aca9594c4545381f3d60",
+  "git_dirty": true,
+  "timestamp": "2026-08-17T20:02:33.898021+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "betti_cnn",
+    "seed": 9374,
+    "hom_dim": 0,
+    "include_entropy": false,
+    "grid_size": 128,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "dropout": 0.3,
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "target_label_names": [
+      "parent_intensity",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "log_label_names": [
+      "parent_intensity",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "channels": [
+      "beta0"
+    ],
+    "betti_params": {
+      "name": "betti_curve",
+      "homology_dims": [
+        0
+      ],
+      "grid_size": 128,
+      "grid_range": [
+        0.0,
+        0.07099486902356145
+      ],
+      "drop_infinite": true,
+      "normalize": false,
+      "weight_by_persistence": false
+    }
+  },
+  "adversarial_loss": 0.26672183799743654,
+  "adversarial_loss_per_target": {
+    "parent_intensity": 0.4038841128349304,
+    "mean_offspring": 0.2922895848751068,
+    "cluster_scale": 0.1039917916059494
+  },
+  "adversarial_path": "/gpfs/scratch/qp252676/globus/point-process-tda/data/thomas/adversarial_clouds.pkl"
+}

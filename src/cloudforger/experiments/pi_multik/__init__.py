@@ -36,6 +36,28 @@ untouched other than import-path fixes.
                                multi-k branch -- a different, cross-modal
                                fusion problem, likewise not a point in that
                                space.
+  betti_multik.py           -- the Betti-curve/Euler-characteristic sibling
+                               of pi_multik.py: same k_values/seeds/splits/
+                               train_idx-fit-apply-frozen calibration
+                               discipline and late-fusion-across-k design,
+                               with EncoderBank's per-k Conv2D image encoder
+                               swapped for SequenceEncoderBank's per-k
+                               Vihrs-style Conv1D curve encoder. Reuses
+                               load_multik_split/build_extra from
+                               pi_multik.py; see its own module docstring
+                               for what it replaces (betti.py/betti_cnn.py/
+                               ph_combined.py, all deleted).
+  vectorized_multik.py       -- generalizes pi_multik.py's design across a
+                               `vectorization` axis (persistence_image /
+                               landscape / silhouette / persistence_
+                               statistics) and an `encoder_path` axis
+                               (native CNN / shared flatten-MLP), registered
+                               as method: vec_multik. vectorization=
+                               persistence_image, encoder_path=native
+                               delegates straight to PIMultiKExperiment
+                               (byte-identical to method: pi_multik) rather
+                               than reimplementing it -- see that module's
+                               own docstring.
 """
 
 from .pi_multik import (
@@ -49,6 +71,14 @@ from .pi_multik_scaleconv import PIMultiKScaleConvExperiment
 from .pi_multik_towers import PIMultiKTowersExperiment
 from .pi_multik_earlyfusion import PIMultiKEarlyFusion, PIMultiKEarlyFusionExperiment
 from .pi_multik_fusion import VihrsPIMultiKFusion, PIMultiKFusionExperiment
+from .betti_multik import BettiMultiK, BettiMultiKExperiment, build_betti_tensor
+from .vectorized_multik import (
+    VectorizedMultiK,
+    VectorizedMultiKExperiment,
+    build_landscape_tensor,
+    build_silhouette_tensor,
+    build_stats_tensor,
+)
 
 __all__ = [
     "PIMultiK",
@@ -62,4 +92,12 @@ __all__ = [
     "PIMultiKEarlyFusionExperiment",
     "VihrsPIMultiKFusion",
     "PIMultiKFusionExperiment",
+    "BettiMultiK",
+    "BettiMultiKExperiment",
+    "build_betti_tensor",
+    "VectorizedMultiK",
+    "VectorizedMultiKExperiment",
+    "build_landscape_tensor",
+    "build_silhouette_tensor",
+    "build_stats_tensor",
 ]

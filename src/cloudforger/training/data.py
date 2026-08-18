@@ -11,7 +11,6 @@ from torch.utils.data import Dataset
 
 from ..core.cloud import PointCloud
 from ..core.features import CorrelationFeatures
-from ..vectorization.scalar_features.result import BettiCurveFeature
 
 
 def _parse_dim_key(key: Any) -> int | None:
@@ -86,11 +85,6 @@ def _as_image_tensor(image: Any) -> torch.Tensor:
     return torch.from_numpy(arr)
 
 
-def _as_vector_tensor(values: Any) -> torch.Tensor:
-    arr = np.asarray(values, dtype=np.float32).reshape(-1)
-    return torch.from_numpy(arr)
-
-
 def _is_stacked_dim_mapping(source: Any, labels_len: int) -> bool:
     if not isinstance(source, Mapping):
         return False
@@ -108,23 +102,6 @@ def _is_stacked_dim_mapping(source: Any, labels_len: int) -> bool:
             return False
 
     return True
-
-
-def _extract_betti_matrix_source(source: Mapping) -> dict[int, Any]:
-    matrices: dict[int, Any] = {}
-
-    for key, value in source.items():
-        if not isinstance(key, str):
-            continue
-
-        if not key.startswith("betti") or not key.endswith("_matrix"):
-            continue
-
-        middle = key[len("betti"):-len("_matrix")]
-        if middle.isdigit():
-            matrices[int(middle)] = value
-
-    return matrices
 
 
 class PersistenceImageDataset(Dataset):
@@ -204,80 +181,6 @@ class PersistenceImageDataset(Dataset):
             first = x[f"h{self.dims[0]}"]
             return tuple(first.shape)
         return tuple(x.shape)
-
-
-class BettiCurveDataset(Dataset):
-    def __init__(
-        self,
-        curves: Any,
-        labels: np.ndarray,
-        homology_dims: list[int] | tuple[int, ...] | None = None,
-        dtype: torch.dtype = torch.float32,
-    ):
-        if isinstance(curves, Mapping) and "betti_curves" in curves:
-            curves = curves["betti_curves"]
-        elif isinstance(curves, Mapping) and "curves" in curves:
-            curves = curves["curves"]
-        elif isinstance(curves, Mapping):
-            matrix_source = _extract_betti_matrix_source(curves)
-            if matrix_source:
-                curves = matrix_source
-
-        self.curves = curves
-        self.labels = _as_label_tensor(labels, dtype)
-        self.stacked = _is_stacked_dim_mapping(curves, len(self.labels))
-
-        if self.stacked:
-            self.dims = _normalize_dims(homology_dims, curves)
-            n_curves = len(np.asarray(_lookup_dim(curves, self.dims[0])))
-        else:
-            if len(curves) == 0:
-                raise ValueError("curves cannot be empty")
-            first = self._curve_mapping(curves[0])
-            self.dims = _normalize_dims(homology_dims, first)
-            n_curves = len(curves)
-
-        if n_curves != len(self.labels):
-            raise ValueError("curves and labels must have the same length")
-
-    def __len__(self) -> int:
-        return len(self.labels)
-
-    @staticmethod
-    def _curve_mapping(item: Any) -> Mapping:
-        if isinstance(item, BettiCurveFeature):
-            return item.curves
-
-        if hasattr(item, "curves") and isinstance(item.curves, Mapping):
-            return item.curves
-
-        if isinstance(item, Mapping) and "curves" in item:
-            return item["curves"]
-
-        if isinstance(item, Mapping):
-            return item
-
-        raise TypeError(f"Cannot extract Betti curves from object of type {type(item)}")
-
-    def _item_mapping(self, idx: int) -> Mapping:
-        if self.stacked:
-            return {
-                dim: np.asarray(_lookup_dim(self.curves, dim))[idx]
-                for dim in self.dims
-            }
-
-        return self._curve_mapping(self.curves[idx])
-
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        item = self._item_mapping(idx)
-        vectors = [_as_vector_tensor(_lookup_dim(item, dim)) for dim in self.dims]
-        x = vectors[0] if len(vectors) == 1 else torch.cat(vectors, dim=0)
-        return x, self.labels[idx]
-
-    @property
-    def input_dim(self) -> int:
-        x, _ = self[0]
-        return int(x.numel())
 
 
 class PointCloudDataset(Dataset):

@@ -37,13 +37,13 @@ class BifiltrationConfig:
 
 @dataclass
 class FeatureConfig:
-    name: str  # registry key: betti_curve, persistence_image, persistence_entropy
+    name: str  # registry key: persistence_image, persistence_entropy -- see scripts/featurize.py's _FEATURE_HANDLERS
     params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class MethodConfig:
-    name: str  # registry key: betti_cnn, pi, fusion, pi_multik, pi_multik_fusion, pi_multik_scaleconv, vihrs, mincontrast, palm, ...
+    name: str  # registry key: pi, fusion, pi_multik, pi_multik_fusion, pi_multik_scaleconv, betti_multik, vihrs, mincontrast, palm, ...
     params: dict[str, Any] = field(default_factory=dict)
 
 

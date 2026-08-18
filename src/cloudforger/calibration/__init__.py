@@ -6,6 +6,7 @@ calibrated.py and scripts/featurize_sigma_sweep.py are the main callers."""
 
 from .diagram_calibration import (
     axis_bounds,
+    axis_bounds_1d,
     bifiltration_grid,
     calibrate,
     calibrate_report,
@@ -15,6 +16,7 @@ from .diagram_calibration import (
 
 __all__ = [
     "axis_bounds",
+    "axis_bounds_1d",
     "bifiltration_grid",
     "calibrate",
     "calibrate_report",

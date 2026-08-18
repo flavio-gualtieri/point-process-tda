@@ -1,20 +1,28 @@
 # src/cloudforger/experiments/fusion.py
-"""L(r)-r + TDA fusion: feeds vihrs's L(r)-r/n(x) representation and one or
-more TDA branches (persistence images, Betti curves, persistence entropy)
-into ONE model, late-fused by concatenating branch embeddings before a
-shared regression head. Absorbed from dtm_experiment/fusion_model.py.
+"""L(r)-r + TDA fusion: feeds vihrs's L(r)-r/n(x) representation and,
+optionally, a persistence-image branch into ONE model, late-fused by
+concatenating branch embeddings before a shared regression head. Absorbed
+from dtm_experiment/fusion_model.py.
 
 Not an Experiment subclass: vihrs's L(r)-r population (every cloud) and the
 DTM-filtered TDA population are different sizes and must be joined by seed
 (cloudforger.core.io.align_seeds), which Experiment.run()'s single
 dataset_path contract has no hook for -- see MultiSourceExperiment.
 
-cfg["variant"] selects which TDA arm(s) are fused in, alongside the
-always-on L(r)-r + n(x) + entropy branch:
-  full    -- L(r)-r + persistence images + Betti curves (the complete model)
-  pi      -- L(r)-r + persistence images only
-  betti   -- L(r)-r + Betti curves only
-  scalars -- L(r)-r only (n(x) + persistence entropy scalars, no image/curve branch)
+cfg["variant"] selects which TDA arm is fused in, alongside the always-on
+L(r)-r + n(x) + entropy branch:
+  pi      -- L(r)-r + persistence images
+  scalars -- L(r)-r only (n(x) + persistence entropy scalars, no image branch)
+
+This file used to have a third arm, Betti curves (variants "betti"/"full"),
+reading a precomputed betti_curve.pkl calibrated against the ENTIRE
+train_test population before any train/val/test split existed -- the same
+leakage bug pi_multik.py's module docstring documents and fixes for
+persistence images, just never fixed here. Rather than carry that leak
+forward, the Betti branch was removed outright: Betti-curve comparisons now
+go through experiments/pi_multik/betti_multik.py, which calibrates per
+seed on that seed's train rows only. This file keeps only the two arms
+that were never Betti-shaped to begin with.
 """
 
 from __future__ import annotations
@@ -32,7 +40,6 @@ from cloudforger.baselines import vihrs
 from cloudforger.core.io import align_seeds
 from cloudforger.core.splits import train_val_test_indices
 from cloudforger.encoders.persistence_image import PIEncoder
-from cloudforger.encoders.sequence_cnn import SequenceCNNEncoder
 from cloudforger.experiments.base import register
 from cloudforger.experiments.common import (
     MultiSourceExperiment,
@@ -42,7 +49,7 @@ from cloudforger.experiments.common import (
     save_results,
 )
 
-VARIANTS = ("full", "pi", "betti", "scalars")
+VARIANTS = ("pi", "scalars")
 
 
 def _load_pickle(path: Path) -> Any:
@@ -52,22 +59,15 @@ def _load_pickle(path: Path) -> Any:
 
 def load_fusion_split(
     images_path: Path,
-    betti_path: Path,
     lr_features: dict[str, np.ndarray],
     label_names: tuple[str, ...],
     tag: str,
 ) -> dict[str, np.ndarray] | None:
-    if not images_path.exists() or not betti_path.exists():
-        print(f"  [{tag}] missing {images_path if not images_path.exists() else betti_path} -- skipping split.")
+    if not images_path.exists():
+        print(f"  [{tag}] missing {images_path} -- skipping split.")
         return None
 
     images = _load_pickle(images_path)
-    betti = _load_pickle(betti_path)
-
-    assert list(images["seeds"]) == list(betti["seeds"]), (
-        f"[{tag}] images/betti seed order mismatch -- both should come from the same "
-        "featurize run and share identical 'seeds' order."
-    )
 
     # Select target columns by name rather than assuming an exact column
     # count/order: the payload's "params" can carry deterministic bookkeeping
@@ -89,8 +89,6 @@ def load_fusion_split(
     return {
         "pi0": np.asarray(images["image_tensors"][0], dtype=np.float64)[tda_idx],
         "pi1": np.asarray(images["image_tensors"][1], dtype=np.float64)[tda_idx],
-        "b0": np.asarray(betti["betti0_matrix"], dtype=np.float64)[tda_idx],
-        "b1": np.asarray(betti["betti1_matrix"], dtype=np.float64)[tda_idx],
         "entropy0": np.asarray(images["persistence_entropy"][0], dtype=np.float64)[tda_idx],
         "entropy1": np.asarray(images["persistence_entropy"][1], dtype=np.float64)[tda_idx],
         "lr_seq": lr_features["l_minus_r"][lr_idx],
@@ -103,16 +101,13 @@ class FusionCNN(nn.Module):
     def __init__(
         self,
         lr_seq_len: int,
-        betti_seq_len: int,
         embedding_dim: int,
         n_extra: int,
         n_targets: int,
         include_pi: bool = True,
-        include_betti: bool = True,
     ):
         super().__init__()
         self.include_pi = include_pi
-        self.include_betti = include_betti
 
         # L(r)-r branch -- identical architecture to VihrsCNN's conv stack.
         self.lr_conv = nn.Sequential(
@@ -128,9 +123,6 @@ class FusionCNN(nn.Module):
         if include_pi:
             self.pi_encoder = PIEncoder(in_channels=2, embedding_dim=embedding_dim)
             merge_dim += embedding_dim
-        if include_betti:
-            self.betti_encoder = SequenceCNNEncoder(input_dim=betti_seq_len, embedding_dim=embedding_dim, pool_size=5)
-            merge_dim += embedding_dim
 
         self.head = nn.Sequential(
             nn.Linear(merge_dim, 64), nn.ReLU(), nn.Dropout(0.1),
@@ -138,14 +130,10 @@ class FusionCNN(nn.Module):
             nn.Linear(32, n_targets),
         )
 
-    def forward(
-        self, lr_seq: torch.Tensor, pi_img: torch.Tensor, betti_seq: torch.Tensor, extra: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, lr_seq: torch.Tensor, pi_img: torch.Tensor, extra: torch.Tensor) -> torch.Tensor:
         parts = [self.lr_head(self.lr_conv(lr_seq.unsqueeze(1)).flatten(start_dim=1))]
         if self.include_pi:
             parts.append(self.pi_encoder(pi_img))
-        if self.include_betti:
-            parts.append(self.betti_encoder(betti_seq))
         parts.append(extra)
         return self.head(torch.cat(parts, dim=1))
 
@@ -153,10 +141,10 @@ class FusionCNN(nn.Module):
 def _train_one_epoch(model, loader, optimizer, loss_fn, device) -> float:
     model.train()
     total, count = 0.0, 0
-    for lr_seq, pi_img, betti_seq, extra, y in loader:
-        lr_seq, pi_img, betti_seq, extra, y = (t.to(device) for t in (lr_seq, pi_img, betti_seq, extra, y))
+    for lr_seq, pi_img, extra, y in loader:
+        lr_seq, pi_img, extra, y = (t.to(device) for t in (lr_seq, pi_img, extra, y))
         optimizer.zero_grad()
-        pred = model(lr_seq, pi_img, betti_seq, extra)
+        pred = model(lr_seq, pi_img, extra)
         loss = loss_fn(pred, y)
         loss.backward()
         optimizer.step()
@@ -169,9 +157,9 @@ def _train_one_epoch(model, loader, optimizer, loss_fn, device) -> float:
 def _evaluate_loss(model, loader, loss_fn, device) -> float:
     model.eval()
     total, count = 0.0, 0
-    for lr_seq, pi_img, betti_seq, extra, y in loader:
-        lr_seq, pi_img, betti_seq, extra, y = (t.to(device) for t in (lr_seq, pi_img, betti_seq, extra, y))
-        pred = model(lr_seq, pi_img, betti_seq, extra)
+    for lr_seq, pi_img, extra, y in loader:
+        lr_seq, pi_img, extra, y = (t.to(device) for t in (lr_seq, pi_img, extra, y))
+        pred = model(lr_seq, pi_img, extra)
         loss = loss_fn(pred, y)
         total += loss.item() * len(y)
         count += len(y)
@@ -182,9 +170,9 @@ def _evaluate_loss(model, loader, loss_fn, device) -> float:
 def _evaluate_per_target(model, loader, device) -> np.ndarray:
     model.eval()
     total_sq_err, count = None, 0
-    for lr_seq, pi_img, betti_seq, extra, y in loader:
-        lr_seq, pi_img, betti_seq, extra, y = (t.to(device) for t in (lr_seq, pi_img, betti_seq, extra, y))
-        pred = model(lr_seq, pi_img, betti_seq, extra)
+    for lr_seq, pi_img, extra, y in loader:
+        lr_seq, pi_img, extra, y = (t.to(device) for t in (lr_seq, pi_img, extra, y))
+        pred = model(lr_seq, pi_img, extra)
         sq_err = (pred - y).pow(2).sum(dim=0)
         total_sq_err = sq_err if total_sq_err is None else total_sq_err + sq_err
         count += len(y)
@@ -200,20 +188,19 @@ def _build_extra(split: dict[str, np.ndarray], n_norm: dict, entropy0_norm: dict
 
 @register("fusion")
 class FusionExperiment(MultiSourceExperiment):
-    file_keys = ("clouds", "images", "betti")
+    file_keys = ("clouds", "images")
 
     def __init__(self, cfg: dict):
         super().__init__(cfg)
-        variant = cfg.get("variant", "full")
+        variant = cfg.get("variant", "pi")
         if variant not in VARIANTS:
             raise ValueError(f"Unknown fusion variant {variant!r}; expected one of {VARIANTS}")
         self.variant = variant
-        self.include_pi = variant in ("full", "pi")
-        self.include_betti = variant in ("full", "betti")
+        self.include_pi = variant == "pi"
 
     @property
     def subdir(self) -> str:
-        return "fusion" if self.variant == "full" else f"fusion_{self.variant}"
+        return "fusion" if self.variant == "pi" else f"fusion_{self.variant}"
 
     def run(
         self,
@@ -222,7 +209,8 @@ class FusionExperiment(MultiSourceExperiment):
         adversarial_paths: dict[str, Any] | None = None,
     ) -> dict:
         # None (no target_label_names in the YAML) lets prepare_data adapt
-        # to every label this process's clouds actually carry.
+        # to every label this process's clouds actually carry, instead of
+        # assuming the original paper's fixed 3-parameter Thomas set.
         target_label_names = self.cfg.get("target_label_names")
         label_names = tuple(target_label_names) if target_label_names else None
         seed = self.cfg["seed"]
@@ -235,17 +223,15 @@ class FusionExperiment(MultiSourceExperiment):
         )
         label_names = tuple(lr_data["label_names"])
         train_split = load_fusion_split(
-            Path(dataset_paths["images"]), Path(dataset_paths["betti"]),
-            lr_data["train_features"], label_names, tag="train_test",
+            Path(dataset_paths["images"]), lr_data["train_features"], label_names, tag="train_test",
         )
         if train_split is None:
-            raise FileNotFoundError(f"{dataset_paths['images']} / {dataset_paths['betti']} missing.")
+            raise FileNotFoundError(f"{dataset_paths['images']} missing.")
 
         adv_split = None
         if adversarial_paths is not None and lr_data["adversarial_features"] is not None:
             adv_split = load_fusion_split(
-                Path(adversarial_paths["images"]), Path(adversarial_paths["betti"]),
-                lr_data["adversarial_features"], label_names, tag="adversarial",
+                Path(adversarial_paths["images"]), lr_data["adversarial_features"], label_names, tag="adversarial",
             )
 
         n = len(train_split["targets"])
@@ -257,7 +243,6 @@ class FusionExperiment(MultiSourceExperiment):
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         lr_seq = train_split["lr_seq"].astype(np.float32)
         pi_img = np.stack([train_split["pi0"], train_split["pi1"]], axis=1).astype(np.float32)
-        betti_seq = np.concatenate([train_split["b0"], train_split["b1"]], axis=1).astype(np.float32)
         extra = _build_extra(train_split, n_norm, entropy0_norm, entropy1_norm)
 
         # One shared dataset over the whole split, sliced lazily via Subset --
@@ -265,8 +250,7 @@ class FusionExperiment(MultiSourceExperiment):
         # tensor's memory footprint.
         full_dataset = TensorDataset(
             torch.from_numpy(lr_seq), torch.from_numpy(pi_img),
-            torch.from_numpy(betti_seq), torch.from_numpy(extra),
-            torch.from_numpy(targets_std),
+            torch.from_numpy(extra), torch.from_numpy(targets_std),
         )
         train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
 
@@ -276,9 +260,9 @@ class FusionExperiment(MultiSourceExperiment):
         train_loader, val_loader, test_loader = _loader(train_idx, True), _loader(val_idx, False), _loader(test_idx, False)
 
         model = FusionCNN(
-            lr_seq_len=lr_seq.shape[1], betti_seq_len=betti_seq.shape[1],
+            lr_seq_len=lr_seq.shape[1],
             embedding_dim=self.cfg["embedding_dim"], n_extra=extra.shape[1], n_targets=len(label_names),
-            include_pi=self.include_pi, include_betti=self.include_betti,
+            include_pi=self.include_pi,
         ).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg["lr"], weight_decay=1e-4)
         loss_fn = nn.MSELoss()
@@ -309,12 +293,10 @@ class FusionExperiment(MultiSourceExperiment):
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_lr_seq = adv_split["lr_seq"].astype(np.float32)
             adv_pi_img = np.stack([adv_split["pi0"], adv_split["pi1"]], axis=1).astype(np.float32)
-            adv_betti_seq = np.concatenate([adv_split["b0"], adv_split["b1"]], axis=1).astype(np.float32)
             adv_extra = _build_extra(adv_split, n_norm, entropy0_norm, entropy1_norm)
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_lr_seq), torch.from_numpy(adv_pi_img),
-                torch.from_numpy(adv_betti_seq), torch.from_numpy(adv_extra),
-                torch.from_numpy(adv_targets_std),
+                torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
             )
             adv_loader = DataLoader(adv_ds, batch_size=self.cfg["batch_size"], shuffle=False)
             adversarial_loss = _evaluate_loss(model, adv_loader, loss_fn, device)
@@ -329,7 +311,6 @@ class FusionExperiment(MultiSourceExperiment):
             "channels": (
                 ["l_minus_r", "n_points", "entropy_0", "entropy_1"]
                 + (["pi_0", "pi_1"] if self.include_pi else [])
-                + (["betti_0", "betti_1"] if self.include_betti else [])
             ),
         }
         save_results(

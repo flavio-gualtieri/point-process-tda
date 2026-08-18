@@ -9,7 +9,6 @@ package absorbed nn/data.py, nn/splits.py, nn/train.py verbatim)."""
 
 from .data import (
     PersistenceImageDataset,
-    BettiCurveDataset,
     PointCloudDataset,
     CorrelationFeatureDataset,
 )
@@ -18,7 +17,6 @@ from .train import train_one_epoch, evaluate, evaluate_per_target
 
 __all__ = [
     "PersistenceImageDataset",
-    "BettiCurveDataset",
     "PointCloudDataset",
     "CorrelationFeatureDataset",
     "train_val_test_split",

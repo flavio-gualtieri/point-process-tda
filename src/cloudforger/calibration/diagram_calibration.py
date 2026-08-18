@@ -116,6 +116,69 @@ def axis_bounds(diagrams, homology_dim, coverage: float = 0.99, pad: float = 1.0
         raise ValueError(f"H{homology_dim} birth axis is degenerate; use a 1-D vectorizer")
     return (birth_lo, birth_hi), (0.0, pers_hi)
 
+def _resolve_pad_factor(pad_factor: float, pad: float | None) -> float:
+    """axis_bounds_1d's pad_factor kwarg, with `pad` accepted as an alias --
+    landscape/silhouette calibration (build_landscape_silhouette.py's
+    build_calibrated_landscape/build_calibrated_silhouette) is brand new, so
+    there's no legacy artifact actually named `pad` for *this* function, but
+    the sibling 2-D calibrator (axis_bounds above) has called this same
+    quantity `pad` since before this function existed, and build_calibrated_
+    betti calls it `range_pad` -- `pad` is accepted here so a caller porting
+    either convention doesn't silently get the default instead of what it
+    passed. Passing both raises rather than picking one silently."""
+    if pad is not None:
+        if pad_factor != 1.05:  # the function default -- both explicitly set
+            raise ValueError("axis_bounds_1d: pass either pad_factor or pad, not both.")
+        return float(pad)
+    return float(pad_factor)
+
+
+def axis_bounds_1d(
+    diagrams: list[PersistenceDiagram],
+    homology_dim: int,
+    q: float = 0.99,
+    pad_factor: float = 1.05,
+    pad: float | None = None,
+) -> tuple[float, float]:
+    """1-D grid range [t_min, T] calibrator for landscape/silhouette
+    vectorizers -- the sibling of axis_bounds' 2-D birth x persistence box,
+    for vectorizations with no birth axis of their own (see
+    vectorization/scalar_features/calibrated.py's module docstring for the
+    same "no birth axis" reasoning on the Betti-curve side).
+
+    One statistic per diagram, same rationale as axis_bounds/diagram_stats:
+    t_min_i = min birth, t_max_i = max death (both over finite pairs only),
+    then t_min/T are the coverage-q quantiles of those per-diagram
+    extrema pooled over TRAINING diagrams only (see callers for the
+    train_idx discipline). H0 births are nonzero under DTM, so t_min is fit
+    here, never assumed to be 0 -- unlike build_calibrated_betti's grid,
+    which starts at 0.0 because a Betti curve counts features that are
+    already alive at t=0. No clipping branch and no degenerate-axis
+    fallback (there is no birth axis to be degenerate): a grid tail beyond
+    [t_min, T] is simply never evaluated, not clamped."""
+    t_mins: list[float] = []
+    t_maxs: list[float] = []
+    for d in diagrams:
+        pairs = d.finite_pairs(homology_dim)
+        if len(pairs) == 0:
+            continue
+        t_mins.append(float(pairs[:, 0].min()))
+        t_maxs.append(float(pairs[:, 1].max()))
+
+    if not t_mins:
+        return 0.0, 1.0
+
+    resolved_pad_factor = _resolve_pad_factor(pad_factor, pad)
+    qq = 100.0 * q
+    t_min = float(np.percentile(np.asarray(t_mins), 100.0 - qq))
+    T = float(resolved_pad_factor * np.percentile(np.asarray(t_maxs), qq))
+    if not (T > t_min):
+        raise ValueError(
+            f"H{homology_dim} 1-D grid is degenerate: t_min={t_min} >= T={T}."
+        )
+    return t_min, T
+
+
 def bifiltration_grid(
     clouds,
     bifiltration,

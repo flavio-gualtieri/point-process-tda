@@ -1,0 +1,90 @@
+{
+  "task": "params",
+  "method": "vec_multik",
+  "test_loss": 0.16207859558110913,
+  "test_loss_per_target": {
+    "parent_intensity": 0.2450963407754898,
+    "mean_offspring": 0.1661306917667389,
+    "cluster_scale": 0.07500874251127243
+  },
+  "seed": 9374,
+  "git_commit": "e038990f3ae0d2cdea33aca9594c4545381f3d60",
+  "git_dirty": true,
+  "timestamp": "2026-08-18T03:36:40.694047+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "vec_multik",
+    "seed": 9374,
+    "vectorization": "landscape",
+    "encoder_path": "native",
+    "G": 128,
+    "homology_dims": [
+      0,
+      1
+    ],
+    "include_entropy": false,
+    "pd_calibration_coverage": 0.95,
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "target_label_names": [
+      "parent_intensity",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "log_label_names": [
+      "parent_intensity",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      10
+    ],
+    "p": null,
+    "feature_dim": 2048,
+    "channels": [
+      "k10_h0",
+      "k10_h1"
+    ],
+    "vectorizer_params": [
+      {
+        "0": {
+          "t_min": 0.010280350235508386,
+          "T": 0.6394887404090692,
+          "G": 128,
+          "K": 16
+        },
+        "1": {
+          "t_min": 0.01842709003790539,
+          "T": 0.6214843127893345,
+          "G": 128,
+          "K": 16
+        }
+      }
+    ]
+  },
+  "adversarial_loss": 0.16357300728559493,
+  "adversarial_loss_per_target": {
+    "parent_intensity": 0.24907256662845612,
+    "mean_offspring": 0.16405852138996124,
+    "cluster_scale": 0.07758797705173492
+  },
+  "adversarial_path": "/gpfs/scratch/qp252676/globus/point-process-tda/data/thomas/adversarial_clouds.pkl"
+}

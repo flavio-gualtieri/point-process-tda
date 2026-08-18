@@ -28,7 +28,7 @@ fit on that seed's TRAIN split) scale trained methods use -- not raw units,
 which would make "test_loss" numbers incomparable across methods.
 
 Usage:
-    python scripts/train.py configs/runs/thomas_dtm_k5_betti_cnn.yaml
+    python scripts/train.py configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml
     python scripts/train.py configs/runs/foo.yaml --seed 9371   # single seed, for SLURM array jobs
     python scripts/train.py configs/runs/foo.yaml --force        # retrain even if results.pt exists
     python scripts/train.py configs/runs/foo.yaml --run-tag candidate_b  # keep results.pt at a labeled path
@@ -57,9 +57,12 @@ from cloudforger.experiments.base import build_experiment
 from cloudforger.experiments.common import MultiSourceExperiment, save_results
 from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths, ExplicitTag, ResultsPaths, is_done
 
-MULTI_K_METHODS = {"pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers", "pi_multik_earlyfusion"}
+MULTI_K_METHODS = {
+    "pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers", "pi_multik_earlyfusion",
+    "betti_multik", "vec_multik",
+}
 CLASSICAL_BASELINE_NAMES = {"mincontrast", "palm"}
-FILE_KEY_TO_FEATURE_NAME = {"betti": "betti_curve", "pi": "persistence_image", "images": "persistence_image"}
+FILE_KEY_TO_FEATURE_NAME = {"pi": "persistence_image", "images": "persistence_image"}
 # file_keys with no filtration dependency -- their results always live under
 # the "raw" tag (paths.RAW_TAG), regardless of what's configured under
 # `filtration:`, so a raw_pc run never misleadingly looks like it used
@@ -142,8 +145,13 @@ def _multi_source_dataset_paths(
             paths["images"] = [data_paths.diagrams([f], adversarial=adversarial) for f in filtrations]
         else:
             paths["images"] = data_paths.feature(filtrations, image_feature_name, adversarial=adversarial)
-    if "betti" in exp.file_keys:
-        paths["betti"] = data_paths.feature(filtrations, "betti_curve", adversarial=adversarial)
+    if "diagrams" in exp.file_keys:
+        # Single-filtration methods (betti_cnn) that compute their own
+        # calibration on the fly from diagrams.pkl, same reasoning as the
+        # multi_k "images" branch above -- filtrations here is a single-
+        # entry list (one config, one filtration), so this resolves to one
+        # path, not a per-k list.
+        paths["diagrams"] = data_paths.diagrams(filtrations, adversarial=adversarial)
     return paths
 
 

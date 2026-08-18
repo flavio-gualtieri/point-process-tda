@@ -2,14 +2,23 @@
 # scripts/featurize.py
 """Compute persistence diagrams (for each configured filtration -- a list
 for a multi-k sweep) and features/vectorizers from already-generated
-clouds. Betti-curve and persistence-image outputs also carry a bundled
+clouds. Persistence-image output also carries a bundled
 "persistence_entropy" column (cheap to compute in the same diagram pass,
 and every multi-source method in this repo expects it alongside whichever
 structural feature it's paired with) -- matching
 dtm_experiment/compute_features.py's original convention.
 
+Betti curves are deliberately NOT a `features:` entry computed here: their
+calibration is a population-level fit (build_calibrated_betti), so
+precomputing them here -- before scripts/train.py's train/val/test split
+exists -- would bake in the same leakage bug pi_multik.py's module
+docstring documents and fixes for persistence images. The betti_multik
+method (experiments/pi_multik/betti_multik.py) computes them on the fly
+instead, per seed, from the diagrams.pkl this script always writes,
+calibrated on that seed's train rows only.
+
 Usage:
-    python scripts/featurize.py configs/runs/thomas_dtm_k5_betti_cnn.yaml
+    python scripts/featurize.py configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml
     python scripts/featurize.py configs/runs/foo.yaml --set filtration.0.params.k=10 --force
 """
 
@@ -142,33 +151,6 @@ def _entropy_by_dim(diagrams: list, homology_dims: tuple[int, ...]) -> dict[int,
     return {dim: np.array([pd[dim] for pd in per_diagram]) for dim in homology_dims}
 
 
-def _compute_betti_curve(
-    train_diagrams: list, train_bundle: dict, adv_diagrams: list | None, adv_bundle: dict | None,
-    feat_cfg: FeatureConfig, out_path: Path, adv_out_path: Path,
-) -> None:
-    from cloudforger.vectorization.scalar_features.calibrated import build_calibrated_betti_curves
-
-    homology_dims = tuple(feat_cfg.params.get("homology_dims", (0, 1)))
-    grid_size = int(feat_cfg.params.get("grid_size", 512))
-    weighted = bool(feat_cfg.params.get("weight_by_persistence", False))
-
-    betti_by_dim = build_calibrated_betti_curves(train_diagrams, homology_dims, grid_size, weighted)
-
-    def _payload(diagrams: list, bundle: dict) -> dict:
-        matrices = {dim: np.stack([betti_by_dim[dim].compute(d).curves[dim] for d in diagrams]) for dim in homology_dims}
-        entropies = _entropy_by_dim(diagrams, homology_dims)
-        payload = {**bundle, "betti_params": {dim: b.params for dim, b in betti_by_dim.items()}, "persistence_entropy": entropies}
-        for dim in homology_dims:
-            payload[f"betti{dim}_matrix"] = matrices[dim]
-        return payload
-
-    dump_pickle(out_path, _payload(train_diagrams, train_bundle))
-    print(f"  saved betti_curve -> {out_path}")
-    if adv_diagrams is not None:
-        dump_pickle(adv_out_path, _payload(adv_diagrams, adv_bundle))
-        print(f"  saved adversarial betti_curve -> {adv_out_path}")
-
-
 def _compute_persistence_image(
     train_diagrams: list, train_bundle: dict, adv_diagrams: list | None, adv_bundle: dict | None,
     feat_cfg: FeatureConfig, out_path: Path, adv_out_path: Path,
@@ -215,7 +197,6 @@ def _compute_persistence_entropy_standalone(
 
 
 _FEATURE_HANDLERS = {
-    "betti_curve": _compute_betti_curve,
     "persistence_image": _compute_persistence_image,
     "persistence_entropy": _compute_persistence_entropy_standalone,
 }

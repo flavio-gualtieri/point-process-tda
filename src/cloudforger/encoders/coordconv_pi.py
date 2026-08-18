@@ -40,14 +40,25 @@ class CoordConvPIEncoder(Encoder):
         return "persistence_image_coordconv"
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        coords = self._coord_channels(x.shape[0], x.shape[-1], x.device, x.dtype)
+        coords = self._coord_channels(x.shape[0], x.shape[-2], x.shape[-1], x.device, x.dtype)
         x = torch.cat([x, coords], dim=1)
         h = self.conv(x).flatten(1)
         return self.fc(h)
 
     @staticmethod
-    def _coord_channels(batch_size: int, resolution: int, device, dtype) -> torch.Tensor:
-        coords = torch.linspace(-1, 1, resolution, device=device, dtype=dtype)
-        y, x = torch.meshgrid(coords, coords, indexing="ij")
+    def _coord_channels(batch_size: int, height: int, width: int, device, dtype) -> torch.Tensor:
+        # Independent per-axis ramps -- NOT torch.linspace(..., x.shape[-1])
+        # reused for both axes, which silently assumed a square raster
+        # (true for persistence images, resolution x resolution, but false
+        # for persistence landscapes: (K, G) with K (layers, capped at 16)
+        # almost never equal to G (grid resolution) -- crashed
+        # torch.cat below with a shape mismatch the moment K != G, e.g.
+        # "Expected size 16 but got size 128"). For height == width this is
+        # numerically identical to the old single-linspace version (same
+        # ramp reused on both axes), so persistence-image callers
+        # (pi_multik.py, vec_multik's persistence_image arm) are unaffected.
+        y_coords = torch.linspace(-1, 1, height, device=device, dtype=dtype)
+        x_coords = torch.linspace(-1, 1, width, device=device, dtype=dtype)
+        y, x = torch.meshgrid(y_coords, x_coords, indexing="ij")
         grid = torch.stack([x, y], dim=0)
         return grid.unsqueeze(0).expand(batch_size, -1, -1, -1)

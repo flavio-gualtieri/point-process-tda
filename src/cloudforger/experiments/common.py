@@ -213,15 +213,16 @@ def save_results(
 
 class MultiSourceExperiment(ABC):
     """Sibling to Experiment for methods that need several dataset files
-    joined by seed (fusion: vihrs + images + betti; pi_multik: images at
-    several DTM k; pi_multik_fusion: vihrs + pi_multik) -- Experiment.run()'s
-    single dataset_path: Path contract has no hook for that join. Same
-    registry (register under the same name via nn.experiments.base.register),
-    same output schema (via save_results above); different run() shape.
+    joined by seed (fusion: vihrs + images; pi_multik/betti_multik: images
+    (diagrams) at several DTM k; pi_multik_fusion: vihrs + pi_multik) --
+    Experiment.run()'s single dataset_path: Path contract has no hook for
+    that join. Same registry (register under the same name via
+    nn.experiments.base.register), same output schema (via save_results
+    above); different run() shape.
 
-    dataset_paths values are Path or list[Path] (list for pi_multik's
-    per-k image files), keyed from a small fixed vocabulary the concrete
-    subclass documents (e.g. "clouds", "images", "betti")."""
+    dataset_paths values are Path or list[Path] (list for pi_multik's/
+    betti_multik's per-k diagram files), keyed from a small fixed
+    vocabulary the concrete subclass documents (e.g. "clouds", "images")."""
 
     file_keys: tuple[str, ...]  # declares which dataset_paths keys this method needs, for CLI/config wiring
 

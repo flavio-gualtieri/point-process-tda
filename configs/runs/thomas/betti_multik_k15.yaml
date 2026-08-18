@@ -1,0 +1,78 @@
+# python scripts/train.py configs/runs/thomas/betti_multik_k15.yaml
+#
+# Single-scale reference point: same process/design/method as
+# configs/runs/thomas/thomas_betti_multik_k5k10k15.yaml (shared-weight
+# encoder + flat concat -- the defaults, no encoder_mode/fusion_mode/
+# fusion_pool overrides needed), but with filtration: trimmed to just dtm
+# k=15 instead of the k=5,10,15 fusion -- k_values auto-derives to [15]
+# from this single-entry filtration list. Sibling of betti_multik_k5.yaml/
+# betti_multik_k10.yaml, and the betti_multik counterpart of
+# pi_multik_k15.yaml; results land under
+# results/thomas/dtm_k15/betti_multik/ (separate from both the k5,10,15
+# fused run and pi_multik_k15.yaml's own results/thomas/dtm_k15/pi_multik/,
+# no run-tag needed).
+#
+# process.design is descriptive only (data/thomas/clouds.pkl already exists
+# -- this file just drives filtration:/scripts/featurize.py against those
+# same clouds).
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  # rips deliberately excluded -- see thomas_pi_multik_k5k10k15.yaml's
+  # header.
+  - {name: dtm,  params: {k: 15, q: 2.0, maxdim: 1}}
+
+# Deliberately empty -- see thomas_betti_multik_k5k10k15.yaml's header.
+features: []
+
+method:
+  name: betti_multik
+  params:
+    homology_dims: [0, 1]
+    # include_euler: false -- H0+H1 stacked, no derived chi = beta_0 -
+    # beta_1 channel (see thomas_betti_multik_k5k10k15.yaml's header for
+    # the same choice on the multi-scale sibling).
+    include_euler: false
+    include_entropy: false
+    grid_size: 128
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    dropout: 0.2
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true
