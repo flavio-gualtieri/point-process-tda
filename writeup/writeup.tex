@@ -938,7 +938,9 @@ are density parameters, we expect this to matter, and Section
 REF reports the results that informed this decision.
 Furthermore, the parameter $k$ allows us to compute summaries at various scales,
 which may be combined to provide the model with a more complete picture that includes
-both fine and coarse summaries.
+both fine and coarse summaries. Unless a sweep varies it explicitly, every
+experiment in this paper fuses $k \in \{5, 10, 15\}$; the encoder architecture
+that consumes the fused scales is described in Section~\ref{ssec:encoder-fusion}.
 
 Four alternative vectorizations -- landscapes, silhouettes, Betti/Euler curves, and
 a persistence-statistics floor control -- are defined and compared in Section 
@@ -984,17 +986,19 @@ therefore their vectorizations -- will lose a lot of texture
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.85\textwidth]{calibration_comparison.pdf}
-    \caption{The same $H_1$ diagram -- the population median by own max
-    persistence, drawn from $1500$ clouds sampled from the production Thomas
-    design distribution (Section~\ref{sec:simulator}) -- rendered under the
-    naive pooled min/max bound (left) and the per-diagram coverage-quantile
-    bound of $q=0.99$, $\alpha=1.05$ (right). Top row: the diagram's own
-    points against the calibrated birth-persistence box; the naive box is
-    stretched by a single high-offspring outlier diagram elsewhere in the
-    population, not shown. Bottom row: the resulting persistence images --
-    the same diagram occupies more of the frame, and its two close blobs
-    stay resolved as separate texture, once the outlier is prevented from
-    setting the shared axis range.}
+    \caption{The same $H_1$ diagram -- the most feature-rich diagram among the
+    non-outlier bulk (own max persistence at or below the 60th percentile),
+    drawn from $4000$ clouds sampled from the production Thomas design
+    distribution (Section~\ref{sec:simulator}) -- rendered under the naive
+    pooled min/max bound (left) and the per-diagram coverage-quantile bound
+    of $q=0.95$, $\alpha=1.05$ (right). Top row: the diagram's own points
+    against the calibrated birth-persistence box, with the dashed square
+    marking the region zoomed into below; the naive box is stretched by a
+    single high-offspring outlier diagram elsewhere in the population, not
+    shown. Bottom row: the same physical region of birth-persistence space,
+    rendered at each calibration's native pixel density -- visibly coarser
+    under the naive bound, since the same $64\times64$ grid is stretched over
+    a wider range.}
     \label{fig:calibration_comparison}
 \end{figure}
 
@@ -1018,7 +1022,7 @@ training set:
     Q_{q}\big(\{p_i^{\max}\}_{i=1}^{N_{train}}\big)\,\big],
 \end{equation}
 where $Q_q(\cdot)$ denotes the empirical $q$-quantile. In practice we take
-$q = 0.99$ and $\alpha = 1.05$, which were determined via grid-search. These two
+$q = 0.95$ and $\alpha = 1.05$, which were determined via grid-search. These two
 ranges are shared by every diagram of homology dimension $h$, for every point
 cloud in the dataset (train, validation, test, and adversarial alike), so that a
 given pixel of the resulting persistence image always refers to the same region
@@ -1108,9 +1112,10 @@ construction rather than by an explicit sharing mechanism.
 In the encoder stage, the coordinate-augmented tensor is then passed through a small
 convolutional stack: three $3\times3$ convolution blocks with channel widths
 $(32, 64, 128)$, each followed by a ReLU and $2\times2$ max-pooling with
-spatial dropout between blocks (except the last one). The resulting
+spatial dropout ($p=0.2$) between blocks (except the last one). The resulting
 feature map is reduced by adaptive average pooling to a single spatial location
-and projected by a linear layer to the embedding dimension $E$ to pruce a $(B, n_k, E)$ tensor.
+and projected by a linear layer to the embedding dimension $E$ (default $E=64$)
+to produce a $(B, n_k, E)$ tensor.
 
 The final step fuses the scales into a single feature vector of dimension $3\cdot E + 1$
 by concatenating the $n_k$ embeddings along the feature axis and appending $\log N(\pc)$,
@@ -1124,6 +1129,14 @@ such as averaging or max-pooling the embeddings across scales.
 We find that a shared encoder with concatenation is the best option (and also the simplest), and justify
 this choice in Section REF by ablation studies.
 
+\paragraph{Training.} Unless a sweep varies it explicitly, every experiment in
+this paper uses the same optimizer and schedule: AdamW ($\text{lr}=10^{-3}$,
+weight decay $3\times10^{-4}$), batch size $32$, up to $500$ epochs with
+early-stopping patience $50$ on the validation loss, over three seeds
+($9371$, $9372$, $9373$). The FCNN head is the one defined in
+Section~\ref{sec:method}: two hidden layers of width $64$ and $32$ with
+dropout $p=0.1$.
+
 
 % #############################################################################
 % 7. EXPERIMENTS
@@ -1132,13 +1145,11 @@ this choice in Section REF by ablation studies.
 \section{Experiments}
 \label{sec:experiments}
 
-Before comparing vectorizations or architectures, we first quantify the effect
-of the calibration parameters introduced in Section~\ref{ssec:calibration} --
+Before comparing vectorizations or architectures, we quantify the effect
+of the calibration parameters introduced in Section~\ref{ssec:calibration}:
 coverage $q$, padding $\alpha$, kernel width $\sigma_{\text{pixels}}$, and
-raster resolution $G$ -- so that the vectorization comparison of
-Section~\ref{ssec:exp-summaries} runs at a calibration that is itself
-justified rather than assumed. Table~\ref{tab:calibration-sweep} reports the
-one-at-a-time sweep, each arm varying a single parameter around the default
+raster resolution $G$. Table~\ref{tab:calibration-sweep} reports the
+sweep, each arm varying a single parameter around the default
 calibration while holding architecture and the remaining three parameters
 fixed.
 
@@ -1171,40 +1182,32 @@ Resolution $G$
   & 128             & $0.635 \pm 0.352^\dagger$ & $0.684 \pm 0.339^\dagger$ \\
 \bottomrule
 \end{tabular}
+% Channel bookkeeping (not restated in the caption -- see the (B,n_k,D,G,G)
+% shape in Section~\ref{ssec:encoder-fusion}): n_k=3 DTM scales x D=2 homology
+% dimensions (H0+H1) = 6 PI channels total, each G x G.
 \caption{Calibration sweep for the persistence-image (PI) vectorization,
 one-at-a-time around the default calibration ($q=0.95$, $\alpha=1.05$,
-$\sigma_{\text{pixels}}=0.75$, $G=64$), on the \emph{params} task for both
-the Thomas and nested-Thomas design distributions (Section~\ref{sec:simulator}).
-The $\sigma_{\text{pixels}}$ arm sweeps $\{0.5,1.0,2.0\}$, which brackets
-but does not include the $0.75$ default, so no row in that group is marked
-``default''. Diagrams are computed under the DTM filtration fused across
-$k \in \{5,10,15\}$ and homology dimensions $H_0{+}H_1$ (six PI channels
-total, $G \times G$ each), fed to a shared-weight CNN encoder (embedding
-dim $64$, conv channels $32$, $64$, $128$, average pooling, dropout $0.2$)
-with a two-layer MLP head (hidden dims $64$, $32$, dropout $0.1$),
-concatenation fusion across $k$, trained with AdamW ($\text{lr}=10^{-3}$,
-weight decay $3\times10^{-4}$, batch size $32$, up to $500$ epochs with
-early-stopping patience $50$). Cells report $\mathcal{L}$
-(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds: 9371, 9372,
-9373). $^\dagger$ marks configurations that diverge on at least one of the
+$\sigma_{\text{pixels}}=0.75$, $G=64$; Section~\ref{ssec:calibration}), for
+both the Thomas and nested-Thomas design distributions
+(Section~\ref{sec:simulator}). Diagrams use the default $DTM_{\{5,10,15\}}$,
+$H_0{+}H_1$ pipeline and shared-weight architecture of
+Section~\ref{ssec:encoder-fusion}. Cells report $\mathcal{L}$
+(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds).
+$^\dagger$ marks configurations that diverge on at least one of the
 three seeds (per-seed $\mathcal{L} \approx 0.9$--$1.0$, i.e.\ no better than
 predicting the design-distribution mean); their mean is dominated by the
-diverged seed(s) and should not be read as a stable estimate. Excluding the
-$^\dagger$ rows, resolution $G=128$ is the only arm that is unambiguously
-bad -- $G\in\{32,64\}$, $\alpha$, and $\sigma_{\text{pixels}}$ all vary
-within one seed-standard-deviation of the default across both datasets.
-Coverage $q$ is the one parameter with a genuine, dataset-dependent
-disagreement: the Thomas optimum moves toward the naive endpoint $q=1.00$
-($0.120$ vs.\ $0.126$ at the default), while nested-Thomas prefers tighter
-coverage at $q=0.90$ ($0.195$) and gets markedly worse as $q\to1$; we
-therefore keep the shared default $q=0.95$ rather than fit $q$ per dataset.}
+diverged seed(s) and should not be read as a stable estimate.}
 \label{tab:calibration-sweep}
 \end{table}
 
-Performing a grid search over all hyperparameters and architectures simultaneously is computationally infeasible, so
-we adopt a greedy selection procedure. We begin by selecting the best architecture at a fixed default calibration,
-then sweep the calibration parameters at the best architecture. Finally, we sweep vectorization-specific parameters 
-with the best architecture and calibration fixed.
+Excluding the $^\dagger$ rows, resolution $G=128$ is the only arm that is
+unambiguously bad -- $G\in\{32,64\}$, $\alpha$, and $\sigma_{\text{pixels}}$
+all vary within one seed-standard-deviation of the default across both
+datasets. Coverage $q$ is the one parameter with a genuine, dataset-dependent
+disagreement: the Thomas optimum moves toward the naive endpoint $q=1.00$
+($0.120$ vs.\ $0.126$ at the default), while nested-Thomas prefers tighter
+coverage at $q=0.90$ ($0.195$) and gets markedly worse as $q\to1$; we
+therefore keep the shared default $q=0.95$ rather than fit $q$ per dataset.
 
 \subsection{Vectorization Comparisons}
 \label{ssec:exp-summaries}
@@ -1452,7 +1455,7 @@ for likelihood-based methods}
 \section{Calibration of Alternative Vectorizations}
 \label{app:alt-calibration}
 
-Section~\ref{ssec:calibration} calibrates the persistence image's birth/persistence
+Section~\ref{ssec:calibration} discusses the calibration for the persistence image's birth/persistence
 axes by per-diagram coverage quantiles fit on the training split alone. The same
 $(q, \alpha)$ scheme -- coverage $q$ and padding $\alpha$ over per-diagram
 $b^{\min}, b^{\max}, p^{\max}$ -- carries over unchanged to the 1-D grid
@@ -1461,10 +1464,10 @@ all three are built from the same tent family $\{\Lambda_i(t)\}_i$
 (Definition~\ref{def:tent}) rather than the 2-D birth-persistence surface. This
 appendix reports, per vectorization, the calibration sweeps run at the shared
 multi-scale architecture of Section~\ref{ssec:encoder-fusion}: a CoordConv-augmented
-CNN encoder with weights tied across the DTM scales $k \in \{5,10,15\}$ (folded
-into the batch dimension for a single forward pass), concatenation fusion, and a
-two-layer MLP head, exactly as used for the persistence-image sweep of
-Table~\ref{tab:calibration-sweep}.
+CNN encoder with shared weights across DTM scales $k \in \{5,10,15\}$ followed
+by concatenation fusion, and a
+two-layer MLP head (exactly as used for the persistence-image sweep of
+Table~\ref{tab:calibration-sweep}).
 
 \subsection{Persistence Landscapes}
 \label{app:calib-landscape}
@@ -1517,37 +1520,35 @@ Fixed $K$ (vs.\ data-derived)
 \caption{Calibration sweep for the persistence-landscape (LS) vectorization,
 one-at-a-time around the native-budget default ($G=128$, $\tau=0.01$, $K$
 data-derived), on the \emph{params} task for both the Thomas and nested-Thomas
-design distributions (Section~\ref{sec:simulator}). Diagrams are computed under
-the DTM filtration fused across $k \in \{5,10,15\}$ and homology dimensions
-$H_0{+}H_1$ (two landscape channels per scale, six total), fed to the same
-CoordConv-augmented CNN encoder used for the persistence-image sweep of
-Table~\ref{tab:calibration-sweep} (shared weights across $k$, embedding dim
-$64$, conv channels $32$, $64$, $128$, average pooling, dropout $0.2$) with a
-two-layer MLP head (hidden dims $64$, $32$, dropout $0.1$), concatenation
-fusion across $k$, trained with AdamW ($\text{lr}=10^{-3}$, weight decay
-$3\times10^{-4}$, batch size $32$, up to $500$ epochs with early-stopping
-patience $50$). The diagram-grid coverage $q = 0.95$ (Section~\ref{ssec:calibration})
-is fixed across every arm; $K$-selection uses coverage $c=0.99$ and cap
-$K_{\max}=16$, both fixed except in the third group. Cells report $\mathcal{L}$
-(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds: 9371, 9372,
-9373). $^\ddagger$ the $G=512$, $K=8$ arm has a $4096$-d feature per $(h,k)$,
-matching the $64\times64$ persistence-image budget exactly; the other three
-rows of that group hold $G=128$ fixed and vary only $K$, so this row is not
-raster-size-matched to them. \textbf{The coverage rule resolved to $K=16$ --
-the cap -- on every arm and seed underlying the first two groups}, so the $G$
-and $\tau$ sweeps report robustness at a $K$ already pinned by $K_{\max}$, not
-by $\tau$ itself; their near-flat $\mathcal{L}$ (differences mostly within one
-seed-sd) is consistent with sweeping a quantity ($G$, $\tau$) that is not
-presently the binding constraint on $K$. The fixed-$K$ group is the
-informative one for this rule: the ``data-derived'' row lands within seed
-noise of the explicit $K=16$ row on both datasets, exactly as expected since
-both resolve to the identical ($G=128$, $K=16$) configuration, while $K=4$ and
-$K=8$ are both markedly and monotonically worse. Within the range tested, more
-landscape layers help and $K_{\max}$ -- not $\tau$ -- is the binding
-constraint; distinguishing the rule's own threshold from its cap would require
-re-running with a larger $K_{\max}$.}
+design distributions (Section~\ref{sec:simulator}). Diagrams use the default
+$DTM_{\{5,10,15\}}$, $H_0{+}H_1$ pipeline and shared-weight architecture of
+Section~\ref{ssec:encoder-fusion} -- the same one used for the
+persistence-image sweep of Table~\ref{tab:calibration-sweep} -- with two
+landscape channels per scale (six total). The diagram-grid coverage $q =
+0.95$ (Section~\ref{ssec:calibration}) is fixed across every arm;
+$K$-selection uses coverage $c=0.99$ and cap $K_{\max}=16$, both fixed except
+in the third group. Cells report $\mathcal{L}$
+(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds). $^\ddagger$
+the $G=512$, $K=8$ arm matches the $4096$-d persistence-image budget of
+Table~\ref{tab:calibration-sweep} exactly; the other three rows of that group
+hold $G=128$ fixed and vary only $K$, so this row is not raster-size-matched
+to them.}
 \label{tab:calibration-sweep-landscape}
 \end{table}
+
+\textbf{The coverage rule resolved to $K=16$ -- the cap -- on every arm and
+seed underlying the first two groups}, so the $G$ and $\tau$ sweeps report
+robustness at a $K$ already pinned by $K_{\max}$, not by $\tau$ itself; their
+near-flat $\mathcal{L}$ (differences mostly within one seed-sd) is consistent
+with sweeping a quantity ($G$, $\tau$) that is not presently the binding
+constraint on $K$. The fixed-$K$ group is the informative one for this rule:
+the ``data-derived'' row lands within seed noise of the explicit $K=16$ row
+on both datasets, exactly as expected since both resolve to the identical
+($G=128$, $K=16$) configuration, while $K=4$ and $K=8$ are both markedly and
+monotonically worse. Within the range tested, more landscape layers help and
+$K_{\max}$ -- not $\tau$ -- is the binding constraint; distinguishing the
+rule's own threshold from its cap would require re-running with a larger
+$K_{\max}$.
 
 \subsection{Silhouettes}
 \label{app:calib-silhouette}
@@ -1560,14 +1561,5 @@ format as Table~\ref{tab:calibration-sweep-landscape}.}
 \todo{Betti/Euler curve calibration sweep: grid resolution $G$ only (no
 $K$-analogue, since Betti curves have no layer-count axis).}
 
-% #############################################################################
-% BIBLIOGRAPHY
-% #############################################################################
-\todo{set up references.bib -- currently only \texttt{anai2020dtm},
-\texttt{adams2017persistence}, and \texttt{liu2018coordconv} are cited, and the
-Diggle / Tanaka references in Section 1 are inline text rather than citations}
-
-\bibliographystyle{plainnat}
-\bibliography{references}
 
 \end{document}

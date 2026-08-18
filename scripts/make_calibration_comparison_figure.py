@@ -6,7 +6,7 @@ requested by the \\fig{} TODO in writeup/writeup.tex Section 6.2
 schemes, side by side, to make the "loss of texture" argument -- currently
 carried entirely by prose -- visual.
 
-Population: 1500 clouds drawn from the SAME reparametrized design
+Population: 4000 clouds drawn from the SAME reparametrized design
 distribution used in production (K=kappa, EN=kappa*mu, c=nu, log-uniform
 over the exact ranges/derived-fields/constraint of
 configs/runs/thomas/thomas_pi_multik.yaml), not a hand-picked pair of
@@ -16,7 +16,7 @@ realistic sample of that population, rather than asserted. The naive
 min/max bound and axis_bounds() (the real per-diagram coverage-quantile
 calibrator, src/cloudforger/calibration) are both computed on this same
 population; PersistenceImager (also production code) renders the one
-"typical" (median max-persistence) diagram under each resulting bound. No
+most-textured non-outlier ("typical") diagram under each resulting bound. No
 TDA math is reimplemented here.
 
 Usage:
@@ -74,9 +74,9 @@ DERIVED = {
 }
 CONSTRAINTS = ["mean_offspring >= 2.5"]
 
-N_POPULATION = 1500
+N_POPULATION = 4000
 SEED = 20260818
-COVERAGE, PAD = 0.99, 1.05  # the production defaults quoted in the text (q=0.99, alpha=1.05)
+COVERAGE, PAD = 0.95, 1.05  # the production defaults quoted in the text (q=0.95, alpha=1.05)
 RESOLUTION = 64  # matches Definition per_image / production configs
 
 BLUE = "#2a78d6"
@@ -128,20 +128,26 @@ def naive_bounds(diagrams, homology_dim=1):
     return (float(births.min()), float(births.max())), (0.0, float(perss.max()))
 
 
-def pick_typical(diagrams, homology_dim=1):
-    """The diagram whose own max persistence is closest to the population
-    median -- representative of the bulk the calibration is meant to serve,
-    as opposed to whichever single diagram is driving the naive bound."""
+def pick_typical(diagrams, homology_dim=1, bulk_percentile=60.0):
+    """Among the non-outlier bulk of the population (own max persistence at
+    or below `bulk_percentile` -- i.e. NOT the diagram setting the naive
+    bound), pick the one with the most H1 features. A sparse bulk diagram
+    would show the axis-compression effect too, but with only 1-2 blobs to
+    begin with there is little "texture" left to visibly lose; the
+    richest-textured ordinary diagram makes the naive/quantile contrast
+    legible at a glance rather than merely present in the numbers."""
     max_pers = np.array([
         (d.finite_pairs(homology_dim)[:, 1] - d.finite_pairs(homology_dim)[:, 0]).max()
         if len(d.finite_pairs(homology_dim)) else 0.0
         for d in diagrams
     ])
-    order = np.argsort(max_pers)
-    return order[len(order) // 2]
+    n_pairs = np.array([len(d.finite_pairs(homology_dim)) for d in diagrams])
+    cutoff = np.percentile(max_pers, bulk_percentile)
+    eligible = np.where(max_pers <= cutoff)[0]
+    return int(eligible[np.argmax(n_pairs[eligible])])
 
 
-def plot_box_panel(ax, diagram, birth_range, pers_range, title, box_color):
+def plot_box_panel(ax, diagram, birth_range, pers_range, title, box_color, crop=None):
     pairs = diagram.finite_pairs(1)
     b, pers = pairs[:, 0], pairs[:, 1] - pairs[:, 0]
     ax.scatter(b, pers, s=22, color=BLUE, edgecolor="black", linewidth=0.4, zorder=3)
@@ -149,6 +155,11 @@ def plot_box_panel(ax, diagram, birth_range, pers_range, title, box_color):
                                birth_range[1] - birth_range[0], pers_range[1] - pers_range[0],
                                fill=False, edgecolor=box_color, linewidth=2, zorder=2)
     ax.add_patch(rect)
+    if crop is not None:
+        (cb_lo, cb_hi), (cp_lo, cp_hi) = crop
+        zoom = mpatches.Rectangle((cb_lo, cp_lo), cb_hi - cb_lo, cp_hi - cp_lo,
+                                   fill=False, edgecolor=GRAY, linewidth=1.2, linestyle="--", zorder=4)
+        ax.add_patch(zoom)
     pad_x = 0.05 * (birth_range[1] - birth_range[0])
     pad_y = 0.05 * (pers_range[1] - pers_range[0])
     ax.set_xlim(birth_range[0] - pad_x, birth_range[1] + pad_x)
@@ -158,14 +169,30 @@ def plot_box_panel(ax, diagram, birth_range, pers_range, title, box_color):
     ax.set_title(title, fontsize=10)
 
 
-def plot_pi_panel(ax, diagram, birth_range, pers_range, title):
+def plot_pi_panel(ax, diagram, birth_range, pers_range, title, crop):
+    """Render the full-resolution PI, then zoom the DISPLAY to the same
+    physical (birth, persistence) window in both panels (the dashed box in
+    the row above), using nearest-neighbor interpolation so actual pixels
+    are shown, not smoothed further. Because the naive bound spans a wider
+    physical range on the same 64x64 grid, this shared physical crop covers
+    fewer, larger pixels there than in the quantile-calibrated image -- the
+    resolution loss the text describes, made visible instead of asserted."""
     imager = PersistenceImager(birth_range=birth_range, pers_range=pers_range,
                                 resolution=RESOLUTION, sigma_pixels=2.0)
     im = imager.transform(diagram, dim=1)
-    ax.imshow(im, cmap="magma", origin="lower", aspect="auto")
+    # transform() already flips its array so persistence increases upward
+    # under imshow's default origin="upper" (row 0 = max persistence); passing
+    # origin="lower" here would double-flip it and, combined with `extent`,
+    # point the crop window at the wrong physical region of the image.
+    ax.imshow(im, cmap="magma", origin="upper", aspect="auto", interpolation="nearest",
+              extent=[birth_range[0], birth_range[1], pers_range[0], pers_range[1]])
+    (cb_lo, cb_hi), (cp_lo, cp_hi) = crop
+    ax.set_xlim(cb_lo, cb_hi)
+    ax.set_ylim(cp_lo, cp_hi)
+    n_px_shown = (cb_hi - cb_lo) / (birth_range[1] - birth_range[0]) * RESOLUTION
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title(title, fontsize=10)
+    ax.set_title(f"{title}\n(~{n_px_shown:.0f} px across the crop below)", fontsize=10)
 
 
 def main():
@@ -182,15 +209,24 @@ def main():
     ]))
     outlier_params = params[outlier_idx]
 
-    fig, axes = plt.subplots(2, 2, figsize=(8.4, 8.0))
+    # Shared physical zoom window: the typical diagram's own footprint plus a
+    # margin, identical in both panels below -- so the two rasters differ
+    # only in how many of the fixed 64x64 grid's pixels land inside it.
+    typ_pairs = typical.finite_pairs(1)
+    tb, tp = typ_pairs[:, 0], typ_pairs[:, 1] - typ_pairs[:, 0]
+    crop = ((max(0.0, tb.min() - 0.02), tb.max() + 0.03), (0.0, tp.max() + 0.03))
+
+    fig, axes = plt.subplots(2, 2, figsize=(8.4, 8.4))
 
     plot_box_panel(axes[0, 0], typical, n_birth, n_pers,
-                    "Naive min/max\n(pooled over all points, all diagrams)", ORANGE)
+                    "Naive min/max\n(pooled over all points, all diagrams)", ORANGE, crop=crop)
     plot_box_panel(axes[0, 1], typical, q_birth, q_pers,
                     f"Coverage-quantile ($q$={COVERAGE}, $\\alpha$={PAD})\n"
-                    "(per-diagram statistic, quantiled over diagrams)", BLUE)
-    plot_pi_panel(axes[1, 0], typical, n_birth, n_pers, "Persistence image under naive bound")
-    plot_pi_panel(axes[1, 1], typical, q_birth, q_pers, "Persistence image under quantile bound")
+                    "(per-diagram statistic, quantiled over diagrams)", BLUE, crop=crop)
+    plot_pi_panel(axes[1, 0], typical, n_birth, n_pers,
+                   "PI under naive bound, zoomed to dashed box", crop)
+    plot_pi_panel(axes[1, 1], typical, q_birth, q_pers,
+                   "PI under quantile bound, zoomed to dashed box", crop)
 
     fig.suptitle(
         "Same $H_1$ diagram, two calibrations: the naive bound is stretched by an\n"
