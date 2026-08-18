@@ -92,6 +92,7 @@ def build_betti_tensor(
     coverage: float,
     range_pad: float = 1.1,
     include_euler: bool = True,
+    euler_only: bool = False,
     train_idx: np.ndarray | None = None,
     betti_features: list[BettiCurve] | None = None,
 ) -> tuple[np.ndarray, list[BettiCurve]]:
@@ -99,7 +100,13 @@ def build_betti_tensor(
     len(homology_dims) Betti channels plus one Euler-characteristic channel
     if include_euler (else just the len(homology_dims) Betti channels) --
     channel order [beta_{d} for d in homology_dims] + ([euler] if
-    include_euler else []) per k (see module docstring). The PI counterpart's
+    include_euler else []) per k (see module docstring). euler_only=True
+    overrides all of that: beta_d curves are still computed per dim in
+    homology_dims (needed to form chi correctly) but only chi itself
+    reaches the model, C=1 -- the "is the signed count alone sufficient"
+    EC arm, isolated from the raw Betti channels it's nested inside
+    (include_euler is ignored in this case; chi is always included). The
+    PI counterpart's
     per-channel pixel z-score
     (build_pi_tensor) has no analogue here: a Betti curve's values are
     already bounded, small counts (0..a few dozen simultaneously-alive
@@ -139,9 +146,12 @@ def build_betti_tensor(
 
         per_diagram_curves = [betti.compute(d).curves for d in diagrams_k]  # list[{dim: (grid_size,)}]
         stacked = {dim: np.stack([c[dim] for c in per_diagram_curves]) for dim in homology_dims}  # {dim: (N, grid_size)}
-        channel_list = [stacked[dim] for dim in homology_dims]
-        if include_euler:
-            channel_list.append(euler_characteristic_curve(stacked))  # (N, grid_size)
+        if euler_only:
+            channel_list = [euler_characteristic_curve(stacked)]  # (N, grid_size) -- chi alone
+        else:
+            channel_list = [stacked[dim] for dim in homology_dims]
+            if include_euler:
+                channel_list.append(euler_characteristic_curve(stacked))  # (N, grid_size)
         channels = np.stack(channel_list, axis=1)  # (N, C, grid_size)
         per_k.append(channels)
 
@@ -233,6 +243,11 @@ class BettiMultiKExperiment(MultiSourceExperiment):
         # results) if they all landed in "betti_multik/" too, so they get
         # their own results subdir instead.
         dims = tuple(self.cfg.get("homology_dims", (0, 1)))
+        if bool(self.cfg.get("euler_only", False)):
+            # EC arm (chi alone, C=1) -- its own subdir regardless of dims,
+            # so it never collides with the H0/H1/both-dims Betti-channel
+            # results above.
+            return "betti_multik_euler_only"
         if dims == (0,):
             return "betti_multik_h0"
         if dims == (1,):
@@ -254,6 +269,9 @@ class BettiMultiKExperiment(MultiSourceExperiment):
         # betti_multik config predates this flag and relied on it always
         # being there); set method.params.include_euler: false to drop it.
         include_euler = bool(self.cfg.get("include_euler", True))
+        # EC arm: chi (signed beta_0 - beta_1) alone, C=1 -- see
+        # build_betti_tensor's euler_only docstring.
+        euler_only = bool(self.cfg.get("euler_only", False))
         grid_size = int(self.cfg.get("grid_size", 128))
         coverage = float(self.cfg.get("pd_calibration_coverage", 0.99))
         range_pad = float(self.cfg.get("range_pad", 1.1))
@@ -284,7 +302,8 @@ class BettiMultiKExperiment(MultiSourceExperiment):
         targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         betti_seq, betti_features = build_betti_tensor(
             train_split, k_values, homology_dims=homology_dims, grid_size=grid_size,
-            coverage=coverage, range_pad=range_pad, include_euler=include_euler, train_idx=train_idx,
+            coverage=coverage, range_pad=range_pad, include_euler=include_euler, euler_only=euler_only,
+            train_idx=train_idx,
         )
         extra, n_norm, entropy_norms = pi_multik.build_extra(train_split, train_idx, include_entropy=include_entropy)
 
@@ -301,7 +320,7 @@ class BettiMultiKExperiment(MultiSourceExperiment):
         # cloudforger.training.train's (inputs, covariates, labels) 3-tuple
         # batch convention, so the shared train loop applies as-is.
         model = BettiMultiK(
-            in_channels=len(homology_dims) + (1 if include_euler else 0),  # betas [+ euler characteristic]
+            in_channels=1 if euler_only else len(homology_dims) + (1 if include_euler else 0),  # betas [+ euler characteristic], or chi alone
             grid_size=grid_size,
             embedding_dim=self.cfg["embedding_dim"],
             n_k=len(k_values),
@@ -359,7 +378,8 @@ class BettiMultiKExperiment(MultiSourceExperiment):
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_betti_seq, _ = build_betti_tensor(
                 adv_split, k_values, homology_dims=homology_dims, grid_size=grid_size,
-                coverage=coverage, range_pad=range_pad, include_euler=include_euler, betti_features=betti_features,
+                coverage=coverage, range_pad=range_pad, include_euler=include_euler, euler_only=euler_only,
+                betti_features=betti_features,
             )
             adv_extra, _, _ = pi_multik.build_extra(
                 adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
@@ -379,7 +399,8 @@ class BettiMultiKExperiment(MultiSourceExperiment):
             "channels": [
                 f"k{k}_{name}"
                 for k in k_values
-                for name in [f"beta{d}" for d in homology_dims] + (["euler"] if include_euler else [])
+                for name in (["euler"] if euler_only else
+                             [f"beta{d}" for d in homology_dims] + (["euler"] if include_euler else []))
             ],
             # Per-k calibrated grid_range (and the rest of BettiCurve.params),
             # so a seed's exact calibration is recoverable from results.json

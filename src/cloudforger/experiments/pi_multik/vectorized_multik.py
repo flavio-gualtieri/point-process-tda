@@ -66,13 +66,21 @@ from cloudforger.encoders.scaleconv_pi import ConvFusion
 from cloudforger.encoders.silhouette_conv import SilhouetteConv1DEncoder
 from cloudforger.experiments.base import register
 from cloudforger.experiments.common import MultiSourceExperiment, prepare_device, save_results
-from cloudforger.experiments.pi_multik import pi_multik
+from cloudforger.experiments.pi_multik import pi_multik, betti_multik
 from cloudforger.models.heads.paramest import ParameterEstimator
 from cloudforger.training.train import evaluate, evaluate_per_target, train_one_epoch
 from cloudforger.vectorization.landscapes.calibrated import build_calibrated_landscape, build_calibrated_silhouette
 from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
 
-VECTORIZATIONS = ("persistence_image", "landscape", "silhouette", "persistence_statistics")
+# "betti" is mlp-only here (see _build_bank's native branch) -- its native
+# path is method: betti_multik directly (BettiMultiK's own SequenceEncoder-
+# Bank/Conv1D-over-curves encoder), not reimplemented under vec_multik;
+# only the architecture-agnostic MLP control needed a vec_multik entry
+# point at all. euler_only (betti_multik.build_betti_tensor's flag) selects
+# the EC arm (chi alone, C=1) vs BC (raw beta_d channels, no euler) within
+# this same "betti" vectorization -- see _channel_names/subdir below for
+# how the two stay in separate results dirs.
+VECTORIZATIONS = ("persistence_image", "landscape", "silhouette", "persistence_statistics", "betti")
 ENCODER_PATHS = ("native", "mlp")
 
 
@@ -135,16 +143,20 @@ def build_silhouette_tensor(
     p: float,
     q: float,
     pad_factor: float,
+    include_unnormalized: bool = True,
     train_idx: np.ndarray | None = None,
     fitted: list | None = None,
 ) -> tuple[np.ndarray, list]:
-    """(N, n_k, 2*C, G) float32 -- for each dim in homology_dims, TWO
-    channels: the normalized silhouette phi^(p) and its unnormalized
+    """(N, n_k, 2*C, G) float32 by default -- for each dim in homology_dims,
+    TWO channels: the normalized silhouette phi^(p) and its unnormalized
     numerator (see tent.silhouette_from_tents' docstring for why both are
     kept -- the denominator discards feature count, which likely matters
     for parameter recovery). Channel order per k: [dim0_norm, dim0_unnorm,
-    dim1_norm, dim1_unnorm, ...]. No per-diagram amplitude normalization,
-    same reasoning as build_landscape_tensor."""
+    dim1_norm, dim1_unnorm, ...]. include_unnormalized=False drops every
+    "unnorm" channel, giving (N, n_k, C, G) -- the channel-count-matched
+    ablation testing that "likely matters" claim against everyone else's
+    plain C channels. No per-diagram amplitude normalization, same
+    reasoning as build_landscape_tensor."""
     fit = fitted is None
     if fit:
         if train_idx is None:
@@ -166,10 +178,11 @@ def build_silhouette_tensor(
         channel_list = []
         for dim in homology_dims:
             channel_list.append(np.stack([pd[dim]["silhouette"] for pd in per_diagram]))               # (N, G)
-            channel_list.append(np.stack([pd[dim]["silhouette_unnormalized"] for pd in per_diagram]))   # (N, G)
-        per_k.append(np.stack(channel_list, axis=1))  # (N, 2*C, G)
+            if include_unnormalized:
+                channel_list.append(np.stack([pd[dim]["silhouette_unnormalized"] for pd in per_diagram]))  # (N, G)
+        per_k.append(np.stack(channel_list, axis=1))  # (N, C or 2*C, G)
 
-    return np.stack(per_k, axis=1).astype(np.float32), fitted  # (N, n_k, 2*C, G)
+    return np.stack(per_k, axis=1).astype(np.float32), fitted  # (N, n_k, C or 2*C, G)
 
 
 def _fit_col_zscore(values: np.ndarray) -> dict[str, np.ndarray]:
@@ -251,6 +264,7 @@ def _build_tensor(
         return build_silhouette_tensor(
             split, k_values, homology_dims,
             G=int(cfg.get("G", 128)), p=float(cfg.get("p", 1.0)), q=q, pad_factor=pad_factor,
+            include_unnormalized=bool(cfg.get("include_unnormalized", True)),
             train_idx=train_idx, fitted=fitted,
         )
     if vectorization == "persistence_statistics":
@@ -262,6 +276,24 @@ def _build_tensor(
             split, k_values, homology_dims=homology_dims,
             resolution=int(cfg.get("resolution", 64)), sigma_pixels=float(cfg.get("sigma_pixels", 0.5)),
             coverage=q, train_idx=train_idx, imagers=fitted,
+        )
+    if vectorization == "betti":
+        # mlp-only (see VECTORIZATIONS' comment above) -- reuses
+        # betti_multik.build_betti_tensor verbatim, same fit(train_idx)/
+        # apply(fitted) convention as every other builder here, just under
+        # that function's own param name (betti_features, not fitted).
+        # range_pad deliberately does NOT fall back to pad_factor's 1.05
+        # default (PI/landscape/silhouette's shared convention) -- absent
+        # an explicit override, it matches betti_multik.py's own 1.1
+        # default, so a BC/EC arm run through vec_multik+mlp calibrates
+        # identically to the same arm run through method: betti_multik
+        # directly (native).
+        return betti_multik.build_betti_tensor(
+            split, k_values, homology_dims=homology_dims,
+            grid_size=int(cfg.get("grid_size", 128)), coverage=q,
+            range_pad=float(cfg.get("range_pad", cfg.get("pad_factor", cfg.get("pad", 1.1)))),
+            include_euler=bool(cfg.get("include_euler", True)), euler_only=bool(cfg.get("euler_only", False)),
+            train_idx=train_idx, betti_features=fitted,
         )
     raise ValueError(f"vec_multik: unknown vectorization {vectorization!r}. Choices: {VECTORIZATIONS}")
 
@@ -311,9 +343,22 @@ def _build_bank(cfg: dict[str, Any], vectorization: str, encoder_path: str, n_k:
     raise ValueError(f"vec_multik: vectorization={vectorization!r} has no native encoder path.")
 
 
-def _channel_names(vectorization: str, k_values: list[int], homology_dims: tuple[int, ...]) -> list[str]:
+def _channel_names(
+    vectorization: str, k_values: list[int], homology_dims: tuple[int, ...], cfg: dict[str, Any] | None = None,
+) -> list[str]:
+    cfg = cfg or {}
     if vectorization == "silhouette":
+        if not bool(cfg.get("include_unnormalized", True)):
+            return [f"k{k}_h{d}_norm" for k in k_values for d in homology_dims]
         return [f"k{k}_h{d}_{variant}" for k in k_values for d in homology_dims for variant in ("norm", "unnorm")]
+    if vectorization == "betti":
+        if bool(cfg.get("euler_only", False)):
+            return [f"k{k}_euler" for k in k_values]
+        # Matches build_betti_tensor's per-k channel order: [beta_d for d
+        # in homology_dims] + ([euler] if include_euler), repeated per k --
+        # interleaved per k, not every beta then every euler at the end.
+        per_k_names = [f"beta{d}" for d in homology_dims] + (["euler"] if bool(cfg.get("include_euler", True)) else [])
+        return [f"k{k}_{name}" for k in k_values for name in per_k_names]
     return [f"k{k}_h{d}" for k in k_values for d in homology_dims]
 
 
@@ -404,6 +449,12 @@ class VectorizedMultiKExperiment(MultiSourceExperiment):
         tag = f"vec_multik_{vectorization}_{encoder_path}"
         if vectorization == "silhouette":
             tag += f"_p{float(self.cfg.get('p', 1.0)):g}"
+            if not bool(self.cfg.get("include_unnormalized", True)):
+                tag += "_normonly"
+        if vectorization == "betti" and bool(self.cfg.get("euler_only", False)):
+            # EC arm -- own subdir so it never collides with BC's (chi
+            # excluded) results at vec_multik_betti_mlp.
+            tag += "_euleronly"
         return tag
 
     def run(
@@ -553,7 +604,7 @@ class VectorizedMultiKExperiment(MultiSourceExperiment):
             "encoder_path": encoder_path,
             "p": float(self.cfg.get("p", 1.0)) if vectorization == "silhouette" else None,
             "feature_dim": feature_dim,
-            "channels": _channel_names(vectorization, k_values, homology_dims),
+            "channels": _channel_names(vectorization, k_values, homology_dims, self.cfg),
             "vectorizer_params": _serialize_fitted(vectorization, fitted),
         }
         save_results(

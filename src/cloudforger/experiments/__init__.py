@@ -22,6 +22,7 @@ from .pi_multik import (
 # subpackage is already fully initialized rather than importing it early,
 # mid-way through this file's own execution.
 from .betti_cnn import BettiCNNExperiment
+from .logn_only import LogNOnlyExperiment
 
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "BettiMultiKExperiment",
     "BettiCNNExperiment",
     "VectorizedMultiKExperiment",
+    "LogNOnlyExperiment",
 ]

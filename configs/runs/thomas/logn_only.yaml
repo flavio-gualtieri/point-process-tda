@@ -1,0 +1,56 @@
+# python scripts/train.py configs/runs/thomas/logn_only.yaml --seed 9371
+#
+# [none (log N only)] control -- see
+# src/cloudforger/experiments/logn_only.py's module docstring. Predicts
+# targets from log N(x) alone, no topology, no filtration at all
+# (deliberately no `filtration:`/`features:` block -- RunConfig.from_dict
+# defaults both to [], and an empty filtration list resolves to the "raw"
+# path tag, so results land under results/thomas/raw/logn_only/seed_<seed>/,
+# not nested under dtm_k5+10+15/). The cheapest possible baseline: together
+# with pi_multik's include_log_n=false arm (same k_values/calibration as the
+# headline run, just with method.params.include_log_n=false), this is the
+# matched pair needed to attribute any of pi_multik's performance to the
+# persistence images rather than to counting points.
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+method:
+  name: logn_only
+  params:
+    # Small on purpose -- the model's entire input is one scalar
+    # (log N(x), z-scored), so a [64, 32] head would be pure overkill.
+    head_hidden_dims: [16, 8]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true

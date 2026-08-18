@@ -9,6 +9,12 @@ from .base import Encoder
 
 
 class CoordConvPIEncoder(Encoder):
+    """use_coords=False drops the two coordinate channels appended in
+    forward() (in_channels stays un-padded), giving a plain conv encoder
+    over the raw persistence image -- the CoordConv-ablation arm referenced
+    in the writeup's calibration<->CoordConv discussion. Default True
+    reproduces every existing caller's behavior unchanged."""
+
     def __init__(
         self,
         in_channels: int = 2,
@@ -16,10 +22,12 @@ class CoordConvPIEncoder(Encoder):
         conv_channels: tuple[int, ...] = (32, 64, 128),
         dropout: float = 0.2,
         pool_type: str = "max",
+        use_coords: bool = True,
     ):
         super().__init__(embedding_dim=embedding_dim)
+        self._use_coords = use_coords
         layers: list[nn.Module] = []
-        prev = in_channels + 2  # +2 for the coordinate channels appended in forward()
+        prev = in_channels + (2 if use_coords else 0)  # +2 for the coordinate channels appended in forward()
         if pool_type == "max":
             pooler = nn.MaxPool2d(2)
         elif pool_type == "avg":
@@ -40,8 +48,9 @@ class CoordConvPIEncoder(Encoder):
         return "persistence_image_coordconv"
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        coords = self._coord_channels(x.shape[0], x.shape[-2], x.shape[-1], x.device, x.dtype)
-        x = torch.cat([x, coords], dim=1)
+        if self._use_coords:
+            coords = self._coord_channels(x.shape[0], x.shape[-2], x.shape[-1], x.device, x.dtype)
+            x = torch.cat([x, coords], dim=1)
         h = self.conv(x).flatten(1)
         return self.fc(h)
 

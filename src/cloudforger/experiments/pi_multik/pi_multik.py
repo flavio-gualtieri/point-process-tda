@@ -158,12 +158,18 @@ def build_extra(
     n_norm: dict | None = None,
     entropy_norms: dict[str, dict[str, float]] | None = None,
     include_entropy: bool = False,
+    include_log_n: bool = True,
 ) -> tuple[np.ndarray, dict, dict[str, dict[str, float]]]:
-    """(N, 1 + (n_entropy_cols if include_entropy else 0)) side-vector,
-    concatenated onto the per-k embeddings before the fusion head: [log N]
-    always, plus one plain z-scored column per split["entropy_cols"] entry
-    (persistence entropy per (homology dim, k), loaded by load_multik_split)
-    when include_entropy is set.
+    """(N, include_log_n + (n_entropy_cols if include_entropy else 0))
+    side-vector, concatenated onto the per-k embeddings before the fusion
+    head: [log N] by default, plus one plain z-scored column per
+    split["entropy_cols"] entry (persistence entropy per (homology dim, k),
+    loaded by load_multik_split) when include_entropy is set.
+    include_log_n=False drops the log N(x) column entirely -- the
+    logN-ablation arm needed to attribute performance to topology rather
+    than point count (see the writeup's Estimation-performance section); if
+    that leaves no columns at all (include_entropy also False), returns an
+    (N, 0) array, a no-op under torch.cat.
 
     Fit-once/apply-frozen (see module docstring): pass train_idx (n_norm and
     entropy_norms left None) to fit n(x)/entropy stats on
@@ -173,12 +179,15 @@ def build_extra(
     population instead (train_idx unused, pass None) -- the adversarial
     call."""
     fit = n_norm is None
-    if fit:
-        if train_idx is None:
-            raise ValueError("build_extra: train_idx is required when fitting (n_norm=None).")
-        n_norm = vihrs.fit_log_zscore(split["n_points"][train_idx])
-    n_std = vihrs.apply_log_zscore(split["n_points"], n_norm).astype(np.float32)
-    cols = [n_std]
+    if include_log_n:
+        if fit:
+            if train_idx is None:
+                raise ValueError("build_extra: train_idx is required when fitting (n_norm=None).")
+            n_norm = vihrs.fit_log_zscore(split["n_points"][train_idx])
+        n_std = vihrs.apply_log_zscore(split["n_points"], n_norm).astype(np.float32)
+        cols = [n_std]
+    else:
+        cols = []
     if fit:
         entropy_norms = {}
     if include_entropy:
@@ -190,6 +199,8 @@ def build_extra(
             else:
                 norm = entropy_norms[name]
             cols.append(apply_zscore(raw, norm).astype(np.float32))
+    if not cols:
+        return np.zeros((len(split["n_points"]), 0), dtype=np.float32), n_norm, entropy_norms
     return np.stack(cols, axis=1), n_norm, entropy_norms
 
 
@@ -233,13 +244,14 @@ class PIMultiK(nn.Module):
         scale_fusion_kernel_size: int = 3,
         scale_fusion_dropout: float = 0.0,
         pool_type: str = "max",
+        use_coords: bool = True,
     ):
         super().__init__()
         self.n_k = n_k
         self.fusion_mode = fusion_mode
         self.bank = EncoderBank(
             mode=encoder_mode, n_k=n_k, in_channels=in_channels, embedding_dim=embedding_dim,
-            conv_channels=conv_channels, dropout=dropout, pool_type=pool_type,
+            conv_channels=conv_channels, dropout=dropout, pool_type=pool_type, use_coords=use_coords,
         )
         if fusion_mode == "concat":
             self.fusion = None
@@ -323,6 +335,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         k_values = list(self.cfg["k_values"])
         homology_dims = tuple(self.cfg.get("homology_dims", (0, 1)))
         include_entropy = bool(self.cfg.get("include_entropy", False))
+        include_log_n = bool(self.cfg.get("include_log_n", True))
         resolution = int(self.cfg.get("resolution", 64))
         sigma_pixels = float(self.cfg.get("sigma_pixels", 0.5))
         coverage = float(self.cfg.get("pd_calibration_coverage", 0.95))
@@ -337,6 +350,22 @@ class PIMultiKExperiment(MultiSourceExperiment):
         )
         if train_split is None:
             raise FileNotFoundError(f"diagrams missing for some k in {k_values} under {dataset_paths['images']}.")
+
+        if self.cfg.get("shuffle_labels", False):
+            # Leakage/sanity check: permute targets against every other
+            # per-cloud field (diagrams, n_points, ...) BEFORE the
+            # train/val/test split, so each split stays internally
+            # consistent (every row still has some target row from the
+            # same population) but the true (input, target) correspondence
+            # is destroyed everywhere. Seeded off this run's own seed so
+            # different seeds get different (but each reproducible)
+            # permutations, matching every other seed-dependent choice in
+            # this method. Expected result: no exploitable signal survives,
+            # so test_loss collapses to ~1.0 -- the "predicts nothing beyond
+            # the design-distribution mean" reference point (see the
+            # writeup's loss-definition section).
+            perm = np.random.default_rng(seed).permutation(len(train_split["targets"]))
+            train_split["targets"] = train_split["targets"][perm]
 
         adv_split = None
         if adversarial_paths is not None:
@@ -354,7 +383,9 @@ class PIMultiKExperiment(MultiSourceExperiment):
             train_split, k_values, homology_dims=homology_dims, resolution=resolution,
             sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, train_idx=train_idx,
         )
-        extra, n_norm, entropy_norms = build_extra(train_split, train_idx, include_entropy=include_entropy)
+        extra, n_norm, entropy_norms = build_extra(
+            train_split, train_idx, include_entropy=include_entropy, include_log_n=include_log_n,
+        )
 
         full_dataset = TensorDataset(
             torch.from_numpy(pi_img), torch.from_numpy(extra), torch.from_numpy(targets_std),
@@ -384,6 +415,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
             scale_fusion_dropout=self.cfg.get("scale_fusion_dropout", 0.0),
             fusion_dropout=self.cfg.get("fusion_dropout", 0.0),
             pool_type=str(self.cfg.get("pool_type", "max")),
+            use_coords=bool(self.cfg.get("coordconv", True)),
             **_resolve_fusion_kwargs(self.cfg),
         ).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
@@ -428,6 +460,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
             )
             adv_extra, _, _ = build_extra(
                 adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
+                include_log_n=include_log_n,
             )
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_pi_img), torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),

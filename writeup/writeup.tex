@@ -855,8 +855,37 @@ $\mathcal{L}$ as defined here, and not the un-averaged training loss}
 \section{Method: ParamNet}
 \label{sec:method}
 
-\expt{[none (log N only) | -- | -- | 5] and [PI | H0+H1 | DTM\{5,10,15\} | 5 |
-log N removed]. Without these two the topological contribution is unquantified.}
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Full model (PI, $H_0{+}H_1$, DTM$\{5,10,15\}$) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+$\log N$ removed                                & $0.305 \pm 0.392^\dagger$ & $0.200 \pm 0.006$ \\
+Topology removed ($\log N$ only)                & $0.891 \pm 0.017$ & $0.946 \pm 0.018$ \\
+\bottomrule
+\end{tabular}
+\caption{Bracketing the topological contribution: the full model against a
+model stripped of the $\log N(\pc)$ feature (Section~\ref{ssec:encoder-fusion})
+and against a model with the topology removed entirely, keeping only $\log
+N(\pc)$ fed straight to the FCNN head. Both design distributions, $n=5$ seeds
+per arm. $^\dagger$ one of five Thomas seeds diverged to the design-distribution-mean
+floor ($\mathcal{L}\approx1.0$, cf.\ Table~\ref{tab:calibration-sweep}); the
+other four land at $0.123$--$0.133$, in line with the full model.}
+\label{tab:logn-ablation}
+\end{table}
+
+Topology removed to $\log N$ alone collapses to the same
+$\mathcal{L}\approx0.9$--$1.0$ floor as the label-shuffle control of
+Section~\ref{ssec:exp-summaries} on both datasets, so the point count carries
+almost none of the recoverable signal on its own. Removing $\log N$ from the
+full model, conversely, costs little on nested-Thomas ($0.196\to0.200$) and is
+merely noisy on Thomas rather than clearly harmful (four of five seeds are
+indistinguishable from the full model; the fifth diverges). Together the two
+arms show the persistence images -- not the point count -- are carrying the
+signal, with $\log N$ a minor, possibly non-essential addition.
 
 Let $\pc$ denote a point cloud, $v$ its vectorized persistence summary, and
 $e \in \R^{128}$ the resulting feature vector. ParamNet follows the pipeline
@@ -1077,10 +1106,33 @@ a degenerate range would make an entire column of pixels convey no information.
 \label{ssec:encoder-fusion}
 % -----------------------------------------------------------------------------
 
-\expt{[PI | H0+H1 | DTM\{5,10,15\} | 5 | CoordConv removed]. Ideally crossed with
-the calibration scheme -- the claim predicts CoordConv helps MORE under
-calibrated axes than under naive ones, which would weld the two contributions
-together.}
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Full model (CoordConv on)  & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+CoordConv removed          & $0.126 \pm 0.005$ & $0.194 \pm 0.002$ \\
+\bottomrule
+\end{tabular}
+\caption{CoordConv ablation: the shared-weight encoder of
+Section~\ref{ssec:encoder-fusion} with and without the two coordinate
+channels, at the default $q=0.95$ calibration, $n=5$ seeds per arm on both
+design distributions.}
+\label{tab:coordconv-ablation}
+\end{table}
+
+CoordConv removal is within seed noise of the full model on both datasets --
+if anything marginally better on Thomas and on nested-Thomas. This does not
+support the claim that CoordConv is necessary to exploit the calibrated pixel
+grid; at the current calibration ($q=0.95$, Section~\ref{ssec:calibration})
+the convolutional stack appears to recover comparable information without
+explicit coordinate channels. \todo{Still worth the calibrated-vs-naive
+cross suggested above -- the claim that CoordConv helps more under calibrated
+axes than uncalibrated ones has not been tested, only CoordConv on/off at the
+calibrated default.}
 
 \expt{Multi-$k$ is the reason this subsection exists but is never justified:
 [PI | H0+H1 | DTM\{5\} | 5], [PI | H0+H1 | DTM\{10\} | 5],
@@ -1209,6 +1261,36 @@ disagreement: the Thomas optimum moves toward the naive endpoint $q=1.00$
 coverage at $q=0.90$ ($0.195$) and gets markedly worse as $q\to1$; we
 therefore keep the shared default $q=0.95$ rather than fit $q$ per dataset.
 
+\paragraph{Sanity check: label shuffling.} The $^\dagger$ divergence in
+Table~\ref{tab:calibration-sweep} is described as ``no better than predicting
+the design-distribution mean,'' but that floor was never independently
+measured. We do so directly: retraining the default PI model with training
+labels randomly permuted (inputs unchanged), so the only learnable target is
+each parameter's marginal distribution.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Full model (correct labels) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+Shuffled labels             & $1.011 \pm 0.024$ & $0.997 \pm 0.018$ \\
+\bottomrule
+\end{tabular}
+\caption{Label-shuffle control, $n=5$ seeds, both design distributions. Same
+architecture and calibration as the full model; only the training-label
+assignment is permuted.}
+\label{tab:label-shuffle}
+\end{table}
+
+Both datasets land at $\mathcal{L}\approx1.0$, confirming the $^\dagger$ rows
+of Table~\ref{tab:calibration-sweep} are genuinely collapsing to
+chance-level prediction and not to some other failure mode, and giving an
+empirical floor against which every other result in this section can be
+read.
+
 \subsection{Vectorization Comparisons}
 \label{ssec:exp-summaries}
 
@@ -1260,14 +1342,38 @@ persistence image is also run through the identical architecture-agnostic
 about the summary and not the encoder. This is the strongest methodological
 feature of the comparison and should not be buried.}
 
-\expt{C1 native path, 8 arms $\times$ 5 seeds; C2 MLP path, 9 arms (incl.\ STAT)
-$\times$ 5 seeds.}
-
-\tab{MAIN COMPARISON. Rows = vectorization; columns = $\mathcal{L}$ (native),
-$\mathcal{L}$ (MLP), per-parameter breakdown, vectorization dimension,
-parameter count, failed seeds. The dimension column matters: PI at
-$64\times64$ per (dim,scale) is 4096-d against a Betti curve's 128-d, and a
-reader will otherwise assume the comparison was capacity-matched.}
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcccccc}
+\toprule
+Vec. & per-channel dim & channels & $\mathcal{L}$ native (T) & $\mathcal{L}$ native (NT) & $\mathcal{L}$ MLP (T) & $\mathcal{L}$ MLP (NT) \\
+\midrule
+PI  & $64\times64=4096$ & 6  & $0.126 \pm 0.008$ (10) & $0.196 \pm 0.006$ (5) & $0.154 \pm 0.012$ (5) & $0.261 \pm 0.011$ (5) \\
+LS  & $16\times128=2048$ & 6  & $0.132 \pm 0.008$ (3)  & $0.250 \pm 0.005$ (3) & \#\#\# & \#\#\# \\
+SIL & $128$              & 12 & $0.165 \pm 0.013$ (3)  & $0.271 \pm 0.012$ (3) & \#\#\# & \#\#\# \\
+BC  & $128$              & 6  & $0.196 \pm 0.014$ (3)  & $0.290 \pm 0.005$ (3) & \#\#\# & \#\#\# \\
+STAT & $18$ (scalars, no raster) & 2 & n/a & n/a & \#\#\# & \#\#\# \\
+\bottomrule
+\end{tabular}
+\caption{Main vectorization comparison. ``native'' is each vectorization's
+purpose-built encoder (CNN for PI/LS, 1-D CoordConv for SIL/BC); ``MLP'' is
+the architecture-agnostic \texttt{FlattenMLPEncoder} applied to the same
+tensor. All native-path arms use the $q=0.95$ calibration matched to the
+persistence image (the \texttt{fairq095} runs) rather than each
+vectorization's own tuned default from Appendix~\ref{app:alt-calibration},
+so the comparison is calibration-fair, not each-vectorization-optimal;
+BC's own appendix-preferred $q=0.99$ scores slightly better
+($0.179\pm0.012$ T / $0.284\pm0.011$ NT) but is not used here for
+consistency. T = Thomas, NT = nested-Thomas; seed count $n$ in parentheses
+(PI native/T uses the 10-seed default run, all other cells use 3--5 seeds --
+see Section~\ref{ssec:encoder-fusion} for the shared training protocol).
+Per-channel dim $\times$ channels gives the flattened tensor size actually
+fed to the encoder (PI: $24{,}576$; LS: $12{,}288$; SIL: $1{,}536$; BC:
+$768$) -- comparisons above are not capacity-matched. \#\#\# = not yet run
+(STAT and the LS/SIL/BC MLP-path arms).}
+\label{tab:main-comparison}
+\end{table}
 
 \fig{Per-parameter error by vectorization, grouped bars, $\kappa/\mu/\sigma$.
 This is the figure that carries the diagnostic claim -- the scalar table only
@@ -1276,69 +1382,121 @@ carries the ranking.}
 \fig{Native vs MLP path scatter, one point per vectorization. Points near the
 diagonal = the summary is doing the work; large vertical spread = the encoder is.}
 
-\tab{Homology-dimension ablation (C3): PI, LS, BC $\times$ \{H0, H1, H0+H1\}.}
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+Vectorization & Homology dims & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+PI & $H_0$ only     & $0.126 \pm 0.006$ & $0.194 \pm 0.006$ \\
+PI & $H_1$ only     & $0.895 \pm 0.019$ & $0.911 \pm 0.013$ \\
+PI & $H_0{+}H_1$ (default) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+\addlinespace
+LS & $H_0$ only / $H_1$ only & \#\#\# & \#\#\# \\
+BC & $H_0$ only / $H_1$ only & \#\#\# & \#\#\# \\
+\bottomrule
+\end{tabular}
+\caption{Homology-dimension ablation (C3), $n=5$ seeds per arm, both design
+distributions. Only the PI arm has been run so far; LS and BC rows are
+pending. \#\#\# = not yet run.}
+\label{tab:homology-ablation}
+\end{table}
+
+$H_1$ alone lands within noise of the label-shuffle floor
+(Section~\ref{ssec:exp-summaries}) on both datasets, while $H_0$ alone is
+statistically indistinguishable from the fused $H_0{+}H_1$ default. For the
+persistence image, essentially all the recoverable signal is in $H_0$
+(connected-component birth/death, i.e.\ local density) and $H_1$ (loop
+structure) contributes nothing measurable beyond it on either design
+distribution.
 
 % -----------------------------------------------------------------------------
 \subsection{Architecture ablations}
 \label{ssec:exp-ablations}
 % -----------------------------------------------------------------------------
 
-\todo{Add one sentence stating this sweep was run on the persistence-image arm
-at the default calibration, and that Section \ref{ssec:exp-summaries} confirms
-persistence images are the arm worth ablating. Sequencing matters: had another
-vectorization won, this subsection would describe a configuration the paper
-does not ship.}
+This sweep was run on the persistence-image arm at the default $q=0.95$
+calibration; Section~\ref{ssec:exp-summaries} confirms PI is the arm worth
+ablating, so the choice of what to ablate here does not beg the question --
+had another vectorization won that comparison, this subsection would describe
+a configuration the paper does not ship.
 
-\tab{Full six-way encoder\_mode $\times$ fusion\_mode, promoted from the current
-\texttt{center} environment to a proper table with caption and label.}
+We ran a sweep crossing \emph{encoder mode} (shared-weight vs.\
+independent-per-$k$) against \emph{fusion mode} (concatenation, average-pool,
+or a small convolutional-flatten fusion head), five seeds per combination, on
+Thomas.
 
-\fig{Per-seed loss scatter across the six configurations. The instability
-finding is the interesting part and a table of means hides it.}
-
-Experiments suggested that a shared encoder works just as well as the independent
-option: we ran a sweep crossing \emph{encoder mode} (shared-weight vs.
-independent-per-$k$) against \emph{fusion mode}, five seeds per combination, on
-the same $DTM_{5,10,15}$ nested-Thomas setup used throughout. Restricting to the
-simplest fusion strategy (flat concatenation), the shared-weight encoder matched
-the independent one to within seed noise:
-
-\begin{center}
-\begin{tabular}{lccc}
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{llcc}
 \toprule
-encoder mode & fusion & test loss (mean $\pm$ sd) & failed seeds \\
+Encoder mode & Fusion & $\mathcal{L}$ (mean $\pm$ sd) & Failed seeds \\
 \midrule
-shared      & concat & $0.200 \pm 0.009$ & $0/5$ \\
-independent & concat & $0.217 \pm 0.028$ & $0/5$ \\
+shared      & concat        & $0.122 \pm 0.007$ & $0/5$ \\
+shared      & conv-avg      & $0.431 \pm 0.425^\dagger$ & $2/5$ \\
+shared      & conv-flatten  & $0.589 \pm 0.425^\dagger$ & $3/5$ \\
+independent & concat        & $0.129 \pm 0.006$ & $0/5$ \\
+independent & conv-avg      & $0.133 \pm 0.015$ & $0/5$ \\
+independent & conv-flatten  & $0.141 \pm 0.016$ & $0/5$ \\
 \bottomrule
 \end{tabular}
-\end{center}
-\todo{promote to a proper \texttt{table} environment with a caption and label;
-report the full six-configuration cross, not just the two concat rows}
+\caption{Full encoder-mode $\times$ fusion-mode cross, $n=5$ seeds per
+combination, on Thomas at the default PI calibration. ``Failed'' seeds are
+those that collapse to the $\mathcal{L}\approx0.9$ design-distribution-mean
+floor of Table~\ref{tab:label-shuffle} rather than converging.
+$^\dagger$ mean is dominated by the failed seeds and is not a stable estimate
+of the arm's typical performance; see per-seed values in the text.}
+\label{tab:encoder-fusion-sweep}
+\end{table}
 
-with a ten-seed run of the shared-weight configuration ($0.205 \pm 0.012$)
-confirming the same order of magnitude. Since tying weights across scales also
-cuts the parameter count roughly $K$-fold and removes one design axis, we adopt
-the shared encoder going forward.
+\fig{Per-seed loss scatter across the six configurations -- the collapse
+pattern below is the interesting part and this table's means alone
+understate it.}
 
-% [MOVED FROM: old Section 3.3 -- fusion sweep]
-We determined once again that the simplest option was the most effective, and we
-concatenate the per-$k$ outputs. The full sweep, crossing both encoder mode and
-fusion strategy (six combinations, five seeds each), showed that the two
-convolutional-fusion variants are not simply worse on average but
-\emph{unstable}: individual seeds collapse to a test loss of $\sim\!0.9$--$1.0$,
-while other seeds of the very same configuration land right on the concatenation
-baseline ($\sim\!0.20$).
+Restricted to concatenation, shared and independent encoders match to within
+seed noise ($0.122\pm0.007$ vs.\ $0.129\pm0.006$); since tying weights across
+scales also cuts the parameter count roughly $K$-fold and removes one design
+axis, we adopt the shared encoder going forward. Both convolutional-fusion
+variants are unstable, but \emph{only when paired with the shared encoder}:
+shared/conv-avg and shared/conv-flatten each collapse to the
+$\mathcal{L}\approx0.9$ floor on 2/5 and 3/5 seeds respectively (individual
+per-seed losses: $\{0.128, 0.120, 0.902, 0.115, 0.892\}$ and $\{0.903, 0.118,
+0.903, 0.130, 0.892\}$), while the identical fusion heads under an
+independent-per-$k$ encoder converge cleanly on all five seeds every time
+($0.133\pm0.015$, $0.141\pm0.016$) without matching plain concatenation.
+Flat concatenation is therefore preferred not only for its simplicity but
+because, together with its shared-encoder counterpart, it is the only
+combination that both trains reliably and reaches the best loss; the
+convolutional-fusion instability is specifically an interaction with weight
+sharing, not a property of convolutional fusion on its own.
 
-Only the independent-encoder, flatten-pooled combination converged cleanly on all
-five seeds, but even so it did not outperform plain concatenation
-($0.212 \pm 0.005$ vs.\ $0.200 \pm 0.009$). Flat concatenation was therefore
-preferred not only for its simplicity, but because it was the only strategy --
-together with its shared/independent-encoder counterpart -- that trained reliably
-across seeds without any sign of the collapse observed for the
-convolutional-fusion alternatives.
+The same two concatenation arms (shared and independent encoder) were
+re-run on nested-Thomas to check the choice transfers across design
+distributions:
 
-\todo{FIGURE: per-seed test loss scatter across the six configurations. The
-instability finding is the interesting part and a table of means hides it.}
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Encoder mode & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+shared, concat      & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+independent, concat & $0.133 \pm 0.005$ & $0.228 \pm 0.029$ \\
+\bottomrule
+\end{tabular}
+\caption{Cross-dataset confirmation of the shared-vs-independent encoder
+choice, $n=5$ seeds per arm.}
+\label{tab:encoder-confirm}
+\end{table}
+
+On nested-Thomas the shared encoder's advantage over the independent one is
+larger than on Thomas and the independent arm is noisier
+($\pm0.029$ vs.\ $\pm0.005$), so the shared-encoder choice, if anything,
+matters more on the harder five-parameter design distribution -- reinforcing
+rather than undercutting the choice made above.
 
 % -----------------------------------------------------------------------------
 \subsection{Estimation performance}
@@ -1446,9 +1604,11 @@ for likelihood-based methods}
 % NOTE -- PURPOSE: the "Appendix A" forward-referenced from
 % Section~\ref{ssec:calibration} (twice) and Section~\ref{ssec:exp-summaries}
 % -- full calibration detail for every vectorization OTHER than the
-% persistence image, one subsection per vectorization. Only Persistence
-% Landscapes is populated so far; Silhouettes, Betti/Euler curves, and the
-% persistence-statistics floor control are still \todo.
+% persistence image, one subsection per vectorization. Persistence
+% Landscapes, Silhouettes, and Betti/Euler curves are now populated; the
+% persistence-statistics floor control (calibration-free -- see
+% ssec:exp-summaries -- so there may be nothing to sweep here beyond a
+% sanity-check subsection) is still \todo.
 % #############################################################################
 \appendix
 
@@ -1552,14 +1712,116 @@ $K_{\max}$.
 
 \subsection{Silhouettes}
 \label{app:calib-silhouette}
-\todo{silhouette calibration sweep: grid resolution $G$ and the amplitude
-exponent $p \in \{0,1,2,3\}$ (Section~\ref{ssec:exp-summaries}), same table
-format as Table~\ref{tab:calibration-sweep-landscape}.}
+
+The silhouette collapses the same tent family $\{\Lambda_i(t)\}_i$ into the
+single persistence-weighted curve $\phi^{(p)}(t)$ of
+Section~\ref{ssec:exp-summaries}, sampled on the same coverage-quantile
+grid $[t_{\min}, T]$ (Section~\ref{ssec:calibration}) at resolution $G$; both
+the normalized curve and its unnormalized numerator are kept as separate
+channels (the denominator discards the feature count, which the numerator
+preserves), giving $2 \times 2 \times 3 = 12$ 1-D channels ($H_0{+}H_1$,
+DTM $k \in \{5,10,15\}$) fed to a per-scale 1-D CoordConv-style encoder under
+the same shared-weight, concat-fusion architecture as
+Table~\ref{tab:calibration-sweep}. Unlike $K$ for landscapes, the amplitude
+exponent $p$ has no data-derived rule to calibrate: Section~\ref{ssec:exp-summaries}
+treats it as an experimental arm compared against $\{0,2,3\}$ elsewhere, not a
+calibration choice, so this appendix fixes $p=1$ (the SIL-1 arm) and reports
+only the grid-resolution sweep, holding $q=0.95$ and $\alpha=1.05$
+(Section~\ref{ssec:calibration}) fixed at the values selected for the
+persistence image.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+Swept parameter & Value & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Grid resolution $G$
+  & 64             & $0.169 \pm 0.008$ & $0.268 \pm 0.006$ \\
+  & 128 (default)  & $0.165 \pm 0.011$ & $0.271 \pm 0.009$ \\
+  & 256            & $0.170 \pm 0.013$ & $0.273 \pm 0.012$ \\
+\bottomrule
+\end{tabular}
+\caption{Grid-resolution calibration sweep for the silhouette (SIL-1, $p=1$)
+vectorization, on the \emph{params} task for both the Thomas and
+nested-Thomas design distributions (Section~\ref{sec:simulator}). Diagrams
+use the default $DTM_{\{5,10,15\}}$, $H_0{+}H_1$ pipeline and shared-weight
+architecture of Section~\ref{ssec:encoder-fusion} -- the same one used for
+the persistence-image sweep of Table~\ref{tab:calibration-sweep}. The
+diagram-grid coverage $q=0.95$ and padding $\alpha=1.05$
+(Section~\ref{ssec:calibration}) are fixed across every arm at the values
+selected for the persistence image. Cells report $\mathcal{L}$
+(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds).}
+\label{tab:calibration-sweep-silhouette}
+\end{table}
+
+Resolution has little effect in either direction: every arm is within
+roughly one seed-sd of every other on both design distributions, and no
+configuration shows the divergence behavior marked $^\dagger$ in
+Table~\ref{tab:calibration-sweep}. $G=64$ is a reasonable default going
+forward -- it costs a quarter of $G=256$'s raster and is not measurably worse
+on either dataset.
 
 \subsection{Betti and Euler Curves}
 \label{app:calib-betti}
-\todo{Betti/Euler curve calibration sweep: grid resolution $G$ only (no
-$K$-analogue, since Betti curves have no layer-count axis).}
+
+The Betti curve $\beta_k(r)$ and Euler curve $\chi(r) = \beta_0(r) -
+\beta_1(r)$ of Section~\ref{ssec:exp-summaries} are sampled on the same
+coverage-quantile grid as the other 1-D vectorizations, giving a
+$(\text{grid\_size},)$ curve per homology dimension and DTM scale. The runs
+below use $\chi$ disabled (two Betti channels stacked, $H_0{+}H_1$, no
+derived Euler channel), so the channel count matches SIL-1 and the landscape
+sweep -- 2 dims $\times$ 3 scales = 6 channels -- rather than the
+$H_0{+}H_1{+}\chi$ default used elsewhere in the paper. A Betti curve has no
+layer-count axis, so there is no $K$-analogue to calibrate here, and its
+values are already bounded (small alive-feature counts, not raw pixel
+magnitudes), so grid resolution $G$ and calibration coverage $q$ are the two
+axes swept, one at a time, at the shared multi-scale architecture of
+Table~\ref{tab:calibration-sweep}.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+Swept parameter & Value & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Grid resolution $G$
+  & 64             & $0.183 \pm 0.009$ & $0.284 \pm 0.006$ \\
+  & 128 (default)  & $0.200 \pm 0.004$ & $0.289 \pm 0.002$ \\
+  & 256            & $0.196 \pm 0.012$ & $0.293 \pm 0.008$ \\
+\addlinespace
+Coverage $q$
+  & 0.95 (default) & $0.190 \pm 0.008$ & $0.291 \pm 0.003$ \\
+  & 0.99           & $0.178 \pm 0.009$ & $0.285 \pm 0.007$ \\
+  & 1.00 (naive)   & $0.187 \pm 0.009$ & $0.344 \pm 0.002$ \\
+\bottomrule
+\end{tabular}
+\caption{Calibration sweep for the Betti-curve (BC) vectorization, one-at-a-time
+around the native-budget default (grid\_size $=128$, $q=0.95$), on the
+\emph{params} task for both the Thomas and nested-Thomas design distributions
+(Section~\ref{sec:simulator}). Diagrams use the default $DTM_{\{5,10,15\}}$,
+$H_0{+}H_1$ pipeline (Euler channel disabled, see text) and shared-weight
+architecture of Section~\ref{ssec:encoder-fusion}. Padding is fixed at
+$\alpha=1.05$ throughout -- the value selected for the persistence image --
+rather than this vectorization's own code default of $\alpha=1.1$. Cells
+report $\mathcal{L}$ (Section~\ref{ssec:exp-performance}, mean $\pm$ sd over
+3 seeds).}
+\label{tab:calibration-sweep-betti}
+\end{table}
+
+$G=64$ is again at least as good as $G=128$ on both design distributions --
+the same pattern as SIL-1 above, consistent with a curve-shaped vectorization
+having little to gain from a finer grid once the underlying feature count is
+small. Coverage behaves differently than it does for the persistence image:
+$q=0.99$ is the best arm on both datasets, and $q=1.00$ (the naive,
+uncalibrated range) is clearly worse on nested-Thomas -- a $\sim$21\% increase
+in $\mathcal{L}$ over $q=0.99$, with a seed-sd tight enough ($\pm0.002$) that
+this is a real effect and not a diverged seed. Unlike the $^\dagger$ rows of
+Table~\ref{tab:calibration-sweep}, no arm here shows per-seed divergence to
+the design-distribution mean; $q=1.00$ is simply a worse calibrated range, not
+a failure mode.
 
 
 \end{document}

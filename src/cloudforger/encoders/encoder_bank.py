@@ -33,9 +33,11 @@ class EncoderBank(Encoder):
     verbatim for non-image per-k tensors (see encoder_factory below).
 
     Per-k encoder: CoordConvPIEncoder(in_channels, embedding_dim,
-    conv_channels, dropout, pool_type) by default -- exactly what every
-    existing caller (pi_multik.py) already got, so omitting encoder_factory
-    reproduces prior behavior identically. encoder_factory (added for
+    conv_channels, dropout, pool_type, use_coords) by default -- exactly
+    what every existing caller (pi_multik.py) already got, so omitting
+    encoder_factory reproduces prior behavior identically (use_coords
+    defaults True; False drops the coordinate channels, for the CoordConv-
+    ablation arm). encoder_factory (added for
     cloudforger.experiments.pi_multik.vectorized_multik, which reuses this
     bank's shared/independent batch-folding for landscapes, silhouettes,
     and the flatten-MLP encoder path -- none of them a CoordConvPIEncoder,
@@ -52,6 +54,7 @@ class EncoderBank(Encoder):
         conv_channels: tuple[int, ...] = (32, 64, 128),
         dropout: float = 0.2,
         pool_type: str = "max",
+        use_coords: bool = True,
         encoder_factory: Callable[[], Encoder] | None = None,
     ):
         super().__init__(embedding_dim=embedding_dim)
@@ -66,6 +69,7 @@ class EncoderBank(Encoder):
             return CoordConvPIEncoder(
                 in_channels=in_channels, embedding_dim=embedding_dim,
                 conv_channels=conv_channels, dropout=dropout, pool_type=pool_type,
+                use_coords=use_coords,
             )
 
         if mode == "shared":
