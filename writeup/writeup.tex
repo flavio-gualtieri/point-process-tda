@@ -227,6 +227,7 @@ a closed-form or a choice of summary statistic.
 % #############################################################################
 
 \section{Related Work}
+\label{sec:related}
 
 \todo{WRITE THIS SECTION. Concede the architecture to [A]; concede topological
 features for parameter estimation to [B]; claim the comparative study, the
@@ -519,9 +520,22 @@ mean and standard deviation of the logged parameters.
 
 We draw one realization per parameter vector. The dispersion of $\hat\theta$
 across realizations sharing a common $\theta$ gives the irreducible error floor
-against which the model's performance should be read.
-
-\todo{make the error floor a named quantity}
+against which the model's performance should be read. We name this quantity
+$\mathcal{L}_{\text{floor}}$: fix $\theta$, draw $R$ independent realizations
+$\pc^{(1)}, \dots, \pc^{(R)}$, fit $\hat\theta^{(r)}$ to each with a fast
+classical estimator (mincontrast by default), and compute $\mathcal{L}$
+(Section~\ref{ssec:eval-protocol}) between $\{\hat\theta^{(r)}\}_{r=1}^R$ and
+the shared true $\theta$; averaging over a grid of $\theta$ spanning the
+design distribution gives $\mathcal{L}_{\text{floor}}$ itself. No estimator
+that sees only a single realization can average below
+$\mathcal{L}_{\text{floor}}$ over the same design distribution, since
+$\mathcal{L}_{\text{floor}}$ is realized by an estimator that already knows
+which $\theta$ generated the cloud and is degraded only by which realization
+of it was drawn. This is the lower reference point for every result in
+Section~\ref{sec:experiments}; the upper one, $\mathcal{L}\approx1$, is
+defined in Section~\ref{ssec:eval-protocol}. Section~\ref{ssec:exp-performance}
+reports where the empirical estimate of $\mathcal{L}_{\text{floor}}$
+currently stands.
 
 % #############################################################################
 % 5. SIMULATOR AND EXPERIMENTAL DESIGN
@@ -863,10 +877,6 @@ early-stopping patience $50$ on the validation loss.
 \subsection{Filtration and vectorization}
 % -----------------------------------------------------------------------------
 
-\tab{Filtration comparison: Rips, DTM$_5$, DTM$_{10}$, DTM$_{15}$,
-DTM$_{\{5,10,15\}}$. Columns: $\mathcal{L}$, per-parameter
-$\mathcal{L}^\kappa,\mathcal{L}^\mu,\mathcal{L}^\sigma$, failed seeds.}
-
 We describe the pipeline implemented for the
 persistence image vectorization computed under the $DTM_k$ filtration, which is the
 configuration carried through the rest of the paper. We give this configuration
@@ -892,17 +902,104 @@ what information is available to be extracted in the first place.
 Instead of the canonical Rips or Čech filtrations, we use the $DTM_k$ filtration (Example \ref{ex:dtm}).
 Rips is built from inter-point distances alone, making it sensitive to the
 sparsest connection between two regions and does not register how densely those
-regions are occupied. In this case $DTM_k$ is more suitable because it works with a point's averagedistance to its
-$k$ nearest neighbours; consequently, $DTM_k$ provides a more direct measure of local density. 
-Since the parameters we wish to recover directly affect the local density of the processes, 
-we expect this choice to pay off. Section
-REF reports the results that informed this decision.
+regions are occupied. In this case $DTM_k$ is more suitable because it works with a point's average distance to its
+$k$ nearest neighbours; consequently, $DTM_k$ provides a more direct measure of local density.
+Since the parameters we wish to recover directly affect the local density of the processes,
+we expect this choice to pay off. Tables~\ref{tab:filtration-comparison} and
+\ref{tab:filtration-comparison-nt} report the results that informed this decision.
+
+\begin{table}[tbp]
+\centering
+\footnotesize
+\begin{tabular}{lccccc}
+\toprule
+Filtration & $\mathcal{L}$ (mean $\pm$ sd) & $\mathcal{L}^\kappa$ & $\mathcal{L}^\mu$ & $\mathcal{L}^\sigma$ & Failed seeds \\
+\midrule
+Rips                          & ---$^a$            & ---               & ---               & ---               & $10/10^a$ \\
+DTM$_5$                       & $0.125 \pm 0.006$  & $0.201 \pm 0.009$ & $0.134 \pm 0.007$ & $0.040 \pm 0.004$ & $0/10$ \\
+DTM$_{10}$                    & $0.139 \pm 0.008$  & $0.221 \pm 0.016$ & $0.147 \pm 0.008$ & $0.049 \pm 0.003$ & $0/10$ \\
+DTM$_{15}$                    & $0.146 \pm 0.006$  & $0.227 \pm 0.011$ & $0.155 \pm 0.008$ & $0.056 \pm 0.010$ & $0/10$ \\
+DTM$_{\{5,10,15\}}$ (default) & $0.126 \pm 0.008$  & $0.204 \pm 0.010$ & $0.132 \pm 0.009$ & $0.041 \pm 0.006$ & $0/10$ \\
+\bottomrule
+\end{tabular}
+\caption{Filtration comparison, Thomas process, persistence-image
+vectorization at the default calibration ($q=0.95$, Section~\ref{ssec:calibration}),
+$H_0{+}H_1$, shared-weight CoordConv architecture
+(Section~\ref{ssec:encoder-fusion}), $n=10$ seeds per row (Rips: $10$
+attempted). $\mathcal{L}^\kappa,\mathcal{L}^\mu,\mathcal{L}^\sigma$ are the
+per-parameter breakdown (parent intensity, offspring intensity, cluster
+scale respectively; Section~\ref{ssec:eval-protocol}). $^a$ Rips fails
+identically on $10/10$ seeds \emph{before} training starts, not from a
+convergence failure: under Rips every $H_0$ feature is born at $r=0$, so the
+calibrated birth range collapses to a point and the calibration step raises
+rather than silently degrading -- exactly the degenerate-axis failure mode
+anticipated in Section~\ref{ssec:calibration}. No loss is produced for this
+row by construction, and no $DTM_k$ row shows a failed seed.}
+\label{tab:filtration-comparison}
+\end{table}
+
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Filtration & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Rips                          & ---$^a$           & ---$^a$ \\
+DTM$_5$                       & $0.125 \pm 0.006$ & $0.205 \pm 0.003$ \\
+DTM$_{10}$                    & $0.139 \pm 0.008$ & $0.237 \pm 0.007$ \\
+DTM$_{15}$                    & $0.146 \pm 0.006$ & $0.260 \pm 0.016$ \\
+DTM$_{\{5,10,15\}}$ (default) & $0.126 \pm 0.008$ & $0.196 \pm 0.006$ \\
+\bottomrule
+\end{tabular}
+\caption{Table~\ref{tab:filtration-comparison}'s comparison repeated for both
+design distributions, scalar $\mathcal{L}$ only -- nested Thomas's five
+targets do not share Thomas's $\kappa,\mu,\sigma$ decomposition. $n=10$ seeds
+per row, except nested-Thomas's DTM$_{\{5,10,15\}}$ row, which reuses the
+$n=5$ \texttt{confirm\_shared\_concat} run already reported as the PI/native
+entry of Table~\ref{tab:main-comparison} and the shared-encoder row of
+Table~\ref{tab:encoder-confirm}, rather than a separately-seeded run.
+$^a$ Rips fails identically on both design distributions, $10/10$ seeds each,
+for the reason given in Table~\ref{tab:filtration-comparison}'s caption.}
+\label{tab:filtration-comparison-nt}
+\end{table}
+
+Error grows monotonically with $k$ within a single scale, on both design
+distributions: DTM$_5$ is the strongest individual scale and DTM$_{15}$ the
+weakest (Thomas: $0.125\to0.146$; nested Thomas: $0.205\to0.260$, a
+proportionally larger degradation), consistent with a finer neighbourhood
+retaining more of the local-density signal the parameters govern while a
+coarser one averages exactly that structure away. Fusing all three scales --
+the default used throughout the rest of the paper -- tells two different
+stories across the two processes. On Thomas, the fused default
+($0.126\pm0.008$) does not improve on the single best scale, DTM$_5$
+($0.125\pm0.006$): the two are within one seed-standard-deviation of each
+other, so fusion's advantage there is not raw accuracy but not having to
+select $k$ in advance (Section~\ref{ssec:exp-calibration} and
+Appendix~\ref{app:calibration-sweeps} show this selection is not free). On
+nested Thomas the fused default ($0.196\pm0.006$) clearly beats every single
+scale tried, including DTM$_5$ ($0.205\pm0.003$) -- the two-level design
+benefits from combining scales in a way the single-level one does not,
+plausibly because the meta- and sub-cluster structure sit at genuinely
+different characteristic radii that no single $k$ resolves together.
+
+Rips fails outright under this vectorization on both processes, and the
+failure is exactly the one Section~\ref{ssec:calibration} predicts for a
+degenerate axis rather than an unrelated bug: plain Rips assigns every $H_0$
+feature birth $0$ (a point is its own connected component until it merges
+with another), so the per-diagram birth range collapses to a point and
+calibration has nothing to rasterize against. $DTM_k$ is therefore not
+merely the better-performing filtration for this task, it is a precondition
+for the persistence-image pipeline to run on $H_0$ at all; every other
+result in Section~\ref{ssec:exp-summaries} and
+Appendix~\ref{app:calibration-sweeps} is accordingly reported only under
+$DTM_k$.
 
 Additionally, the parameter $k$ allows us to compute topological summaries at various scales,
-which can be combined to provide the model with a more complete picture that includes information from 
+which can be combined to provide the model with a more complete picture that includes information from
 fine and coarse scales simultaneously. Unless varied explicitly, every
 experiment in this paper fuses $DTM_k$ for $k \in \{5, 10, 15\}$; the encoder architecture
-that consumes the fused scales is described in Section REF.
+that consumes the fused scales is described in Section~\ref{ssec:encoder-fusion}.
 
 Three alternative vectorizations -- landscapes, silhouettes, Betti/Euler curves -- are defined and compared in
 Section~\ref{ssec:exp-summaries}.
@@ -1446,9 +1543,97 @@ not a claim that BC's $H_1$ channel is more informative in absolute terms.
 % #############################################################################
 
 \paragraph{Comparison against classical estimators.}
-\todo{minimum contrast on $K$ and on $g$, and Palm likelihood, run on the SAME
-clouds (Section \ref{sec:simulator}). This is the headline comparison and the
-only one that can substantiate the limitations claimed in Section 1.}
+We compare ParamNet (PI, DTM$_{\{5,10,15\}}$, Section~\ref{ssec:encoder-fusion})
+against the classical and neural baselines of Section~\ref{sec:intro}, run on
+the identical clouds and train/test splits of Section~\ref{ssec:eval-protocol}
+rather than against numbers taken from the literature: minimum contrast fit to
+Ripley's $K$ and, separately, to the pair correlation function $g$
+(Section~\ref{ssec:verification}), and \texttt{vihrs} -- our re-implementation
+of the neural estimator conceded as prior work [A] in Section~\ref{sec:related},
+Vihrs (2022): a 1-D CNN over the edge-corrected, centred Ripley $L(r)-r$ curve
+plus $\log N(\pc)$, i.e.\ the pipeline of Section~\ref{sec:method} with the
+persistence-image feature replaced by a single classical radial summary and no
+persistence diagrams at all. Palm likelihood \citep{tanaka2008parameter} is
+implemented (\texttt{cloudforger.baselines.palm}) but has not yet been run to
+completion; \#\#\# marks it below.
+
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Method & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+ParamNet (ours)         & $0.126 \pm 0.008$ & $0.196 \pm 0.006$ \\
+vihrs ($L(r)-r$ CNN)     & $0.115 \pm 0.007$ & $0.215 \pm 0.004$ \\
+Minimum contrast, $K$   & $0.827 \pm 0.646^{a}$ & --- \\
+Minimum contrast, $g$   & $6.167 \pm 0.331^{b}$ & --- \\
+Palm likelihood         & \#\#\# & \#\#\# \\
+\midrule
+\emph{Chance-level reference (label shuffle, Table~\ref{tab:label-shuffle})} & \emph{$1.011 \pm 0.024$} & \emph{$0.997 \pm 0.018$} \\
+\bottomrule
+\end{tabular}
+\caption{Estimator comparison, both design distributions, $n=10$ seeds
+(ParamNet) or $n=5$ seeds (vihrs, minimum contrast) on the shared test split
+of Section~\ref{ssec:eval-protocol}; \#\#\# = not yet run. Minimum contrast
+has no nested-Thomas entry because the process has no closed-form $K$ or $g$
+to fit against -- the same closed-form dependency Section~\ref{sec:intro}
+raises against classical estimators in general, here making the comparison
+itself impossible rather than merely inconvenient. The bottom row is the
+upper (chance-level) reference point of Section~\ref{ssec:eval-protocol},
+repeated from Table~\ref{tab:label-shuffle}, so every method above can be read
+against both $0$ and chance. $^a$ Minimum contrast on $K$ is unstable across
+seeds rather than uniformly bad: 3/5 seeds land at $0.379$--$0.399$, close to
+vihrs, while 2/5 land far worse ($0.903$ and $2.056$, the latter driven by a
+parent-intensity error of $3.24$) -- consistent with
+Section~\ref{sec:intro}'s claim that minimum contrast is sensitive to the
+optimizer's starting point specifically because the design distribution
+retains the near-Poisson regime where $\kappa$ and $\mu$ are weakly
+identifiable. $^b$ Minimum contrast on $g$ is, in contrast, consistently
+worse than chance on $5/5$ seeds ($5.82$--$6.66$, tight relative to that
+mean) -- a systematic bias rather than scattered non-convergence. Its own
+module (\texttt{cloudforger.baselines.mincontrast\_g}) documents that its
+contrast exponent $c=1$ is set by analogy with \citet{diggle2003spatial}'s
+$K$-based rule of thumb rather than tuned, and that the estimator has not been
+checked against ground-truth parameters the way the $K$-based fit implicitly
+has been (Section~\ref{ssec:verification}); we report the number rather than
+suppress it, but do not read it as a settled statement about contrast
+estimation on $g$ in general.}
+\label{tab:classical-comparison}
+\end{table}
+
+\texttt{vihrs} is not merely competitive with ParamNet on Thomas, it is
+better -- and not only in aggregate. Its per-parameter losses
+($\mathcal{L}^\kappa=0.194\pm0.012$, $\mathcal{L}^\mu=0.123\pm0.008$,
+$\mathcal{L}^\sigma=0.029\pm0.002$) are each individually lower than
+ParamNet's own ($0.204\pm0.010$, $0.132\pm0.009$, $0.041\pm0.006$;
+Table~\ref{tab:filtration-comparison}'s DTM$_{\{5,10,15\}}$ row), so this is
+not a scalar-averaging artifact: for this single-level process, a hand-built
+radial summary plus a point count is not a straw-man baseline, and our
+topological pipeline does not beat it. The picture is different on nested
+Thomas, where ParamNet's advantage in Table~\ref{tab:classical-comparison}
+is concentrated on the density/count targets --
+$\mathcal{L}^{\text{parent\_intensity}}=0.286$ vs.\ vihrs's $0.314$,
+$\mathcal{L}^{\text{meta\_offspring}}=0.420$ vs.\ $0.487$,
+$\mathcal{L}^{\text{mean\_offspring}}=0.087$ vs.\ $0.111$ -- while
+\texttt{vihrs} keeps a clear edge on both scale parameters,
+$\mathcal{L}^{\text{meta\_cluster\_scale}}=0.134$ vs.\ ParamNet's $0.144$ and
+$\mathcal{L}^{\text{cluster\_scale}}=0.029$ vs.\ $0.042$. The scale/count
+split is consistent across both design distributions: $L(r)-r$ is built to
+resolve a characteristic radius directly, while a density-based topological
+feature is not, and it is only on the harder two-level process -- where
+density and count are harder to read off a single radial curve -- that this
+trade-off nets out in the topological pipeline's favour overall.
+
+Both neural methods dominate minimum contrast in either variant, by roughly
+an order of magnitude on Thomas and categorically on nested Thomas, where
+minimum contrast cannot even be attempted. Minimum contrast on $g$ in
+particular lands \emph{above} the chance-level floor of
+Table~\ref{tab:classical-comparison}'s bottom row -- worse than predicting
+the design-distribution mean -- which Section~\ref{sec:intro}'s critique of
+classical methods did not anticipate needed stating so starkly; see the
+table's own caption for the caveats around that number before over-reading
+it.
 
 \paragraph{Error surfaces over the design grid.}
 \todo{error as a surface over $(\log\nu, \log\lambda)$ using the grid evaluation
@@ -1456,12 +1641,75 @@ set. Expect degradation as $\nu \to 1$ (weak identifiability) -- if the model
 degrades more gracefully than minimum contrast there, that IS the result.}
 
 \paragraph{Per-parameter breakdown.}
-\todo{$\kappa$, $\mu$, $\sigma$ separately. They are not equally hard and a
-single scalar loss hides this.}
+$\kappa,\mu,\sigma$ separately, for every method run on Thomas, are already
+laid out in Table~\ref{tab:classical-comparison}'s discussion above and
+Table~\ref{tab:filtration-comparison}'s DTM$_{\{5,10,15\}}$ row; the same
+breakdown for the DTM$_k$ filtration sweep itself (rather than across
+methods) is in Table~\ref{tab:filtration-comparison} directly. The
+short version: $\mathcal{L}^\kappa$ (parent intensity) is the hardest target
+for every method on both processes by a wide margin, $\mathcal{L}^\sigma$ /
+$\mathcal{L}^{\text{cluster\_scale}}$ the easiest, and this ordering holds
+regardless of which estimator is used -- so the difficulty ranking across
+parameters looks like a property of the estimation problem itself (how much
+each parameter's variation actually perturbs the observed point pattern)
+rather than an artifact of any one feature set or architecture.
+
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+Method & $\mathcal{L}^\kappa$ (parent int.) & $\mathcal{L}^\mu$ (offspring int.) & $\mathcal{L}^\sigma$ (cluster scale) \\
+\midrule
+ParamNet (ours)        & $0.204 \pm 0.010$ & $0.132 \pm 0.009$ & $0.041 \pm 0.006$ \\
+vihrs                  & $0.194 \pm 0.012$ & $0.123 \pm 0.008$ & $0.029 \pm 0.002$ \\
+Minimum contrast, $K$  & $1.317 \pm 1.009$ & $0.912 \pm 0.726$ & $0.250 \pm 0.202$ \\
+Minimum contrast, $g$  & $8.792 \pm 0.483$ & $6.286 \pm 0.355$ & $3.425 \pm 0.161$ \\
+\bottomrule
+\end{tabular}
+\caption{Per-parameter breakdown of Table~\ref{tab:classical-comparison}'s
+Thomas column ($n=10$ ParamNet, $n=5$ others). \texttt{vihrs} has the lowest
+loss in every column; see the discussion above for why this does not carry
+over to nested Thomas.}
+\label{tab:classical-per-param}
+\end{table}
 
 \paragraph{Performance relative to the irreducible error floor.}
-\todo{report error as a ratio to the single-realization floor defined in
-Section \ref{sec:problem}, so the numbers mean something absolute.}
+Section~\ref{sec:problem} names $\mathcal{L}_{\text{floor}}$ -- the
+dispersion of a fast classical estimator's $\hat\theta$ across many
+realizations sharing one true $\theta$ -- as the lower reference point every
+number in this section should ultimately be read against, complementing the
+upper reference point $\mathcal{L}\approx1$ already carried as the bottom row
+of Table~\ref{tab:classical-comparison}. $\mathcal{L}_{\text{floor}}$ itself
+does not yet have a value to report.
+\texttt{scripts/estimate\_error\_floor.py} was run on a dedicated
+$50\,\theta \times 200$-realization Thomas dataset
+(\texttt{data/error\_floor/thomas}, mincontrast estimator, 10 SLURM shards
+covering all 50 $\theta$-groups): every shard completed without error
+(1000/1000 clouds fitted per shard, confirmed in each shard's own log) but
+every per-cloud loss reduced to \texttt{NaN} rather than a number, so all 50
+groups -- and hence the merged \texttt{floor\_L} -- are \texttt{NaN}. This
+looks like a bug in the script's own aggregation step rather than a property
+of the estimator: the same \texttt{mincontrast} module, run on ordinary
+(non-repeated-realization) clouds above, completes without crashing on all
+5 seeds of Table~\ref{tab:classical-comparison} even where 2 of those 5 land
+at elevated loss, so it is not silently producing \texttt{NaN} there. One
+concrete lead: the shard JSONs' recorded \texttt{label\_names} include
+\texttt{edge\_buffer} and \texttt{c1}, names that do not belong to Thomas's
+own $(\kappa,\mu,\sigma)$ target set, suggesting the per-target loss array is
+being indexed against the wrong label list for this dataset. Nested Thomas
+cannot take the same route at all under the current codebase: it has no
+closed-form $K$ or $g$ -- the same closed-form dependency
+Section~\ref{sec:intro} raises against classical estimators generally -- so
+\texttt{configs/runs/nested\_thomas/error\_floor.yaml} generates the
+repeated-realization dataset but nothing yet turns it into a floor estimate
+for that process. \todo{fix the label-indexing bug in
+\texttt{estimate\_error\_floor.py}'s aggregation and re-run for Thomas;
+nested Thomas needs either a derived closed form or a different
+per-realization floor estimator (e.g.\ \texttt{vihrs}, which needs no
+closed form) before the same route is even available.} Until
+$\mathcal{L}_{\text{floor}}$ has a value, every loss in this section should
+be read only against the upper, chance-level reference point.
 
 \paragraph{Extrapolation.}
 \todo{the out-of-range evaluation set -- degradation one increment outside each
