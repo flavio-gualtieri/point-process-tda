@@ -1,19 +1,34 @@
 % =============================================================================
-% Deep Learning for Parameter Estimation in Spatial Point Processes
-% RESTRUCTURING PASS -- no prose has been rewritten, only moved.
+% Topological Feature Learning for Parameter Estimation in Neyman-Scott Processes
+%
+% STRUCTURING PASS 2 -- sections reordered, results tables moved out of the
+% Method section, calibration sweeps consolidated into the appendix.
+% No paper prose has been rewritten; text is sliced verbatim and re-placed.
 %
 % HOW TO READ THIS FILE
-%   * Every section opens with a % NOTE block stating its PURPOSE and its TODOs.
-%   * \todo{...} marks inline gaps (renders red while \drafttrue).
-%   * Text carried over from the old draft is tagged % [MOVED FROM: ...].
-%   * Sections 2, 7.1, 7.3, 8, 9 are currently empty skeletons -- these are the
-%     writing targets. Sections 5 and 6 are largely done.
+%   * Every section opens with a % NOTE block: PURPOSE, and what is outstanding.
+%   * \todo -- prose to write            (red)
+%     \fix  -- proposed replacement text (blue)
+%     \tab  -- TABLE required here       (teal)
+%     \fig  -- FIGURE required here      (magenta)
+%     \expt -- EXPERIMENT required to support the claim above (orange)
+%   * Blocks relocated in this pass are tagged % [MOVED FROM: ...].
+%   * TODOs added in this pass are tagged % <NEW>.
+%
+% WHAT MOVED IN THIS PASS
+%   * logN ablation + label-shuffle control    Sec 6 / 7 -> Sec 7.1 (controls)
+%   * PI calibration sweep table               Sec 7     -> Appendix A.1
+%   * CoordConv ablation                       Sec 6.3   -> Sec 7.3
+%   * vectorization schematic figure           Sec 3.2   -> Sec 7.4
+%   * Experiments resubsectioned: 7.1 controls, 7.2 calibration,
+%     7.3 architecture, 7.4 vectorizations, 7.5 estimation performance.
 % =============================================================================
 
 \documentclass[11pt,letterpaper]{article}
 
 \usepackage[margin=1in]{geometry}
 \usepackage{mathpazo}
+\usepackage{microtype}
 
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -25,6 +40,15 @@
 \graphicspath{{../figs/}}
 \usepackage{booktabs}
 \usepackage{enumitem}
+
+% ----------------------------------------------------------------------------
+% Float and caption handling
+%   Captions in this draft are long and doubled as running commentary; small
+%   type keeps them from dominating the page.
+% ----------------------------------------------------------------------------
+\usepackage[font=small,labelfont=bf,skip=6pt]{caption}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.08}
 
 \usepackage{natbib}
 \usepackage{xcolor}
@@ -86,9 +110,7 @@
 
 % ----------------------------------------------------------------------------
 \title{Topological Feature Learning for Parameter Estimation\\
-       in Neyman--Scott Processes
-       \thanks{\todo{title is a placeholder -- it should name the topological
-       angle and the family class, not just ``deep learning''}}}
+       in Neyman--Scott Processes}
 \author{Flavio Gualtieri}
 \date{\today}
 
@@ -99,13 +121,7 @@
 % #############################################################################
 % ABSTRACT
 % #############################################################################
-% NOTE -- PURPOSE: sell the paper in 6 sentences.
-% The current version is an inventory of components (pipeline, encoder, FCNN).
-% It should instead be: problem -> limitation of classical estimators ->
-% topological features as the answer -> TWO threads (which summary is best /
-% how good is the best model) -> multi-family coverage -> headline number.
-% REWRITE LAST, once Sections 1 and 7 are settled.
-% #############################################################################
+
 \begin{abstract}
 The parameters of spatial point processes are interpretable scientific
 quantities, but the methods available to estimate them rely on closed-form
@@ -132,18 +148,9 @@ spatial randomness]}
 % #############################################################################
 % 1. INTRODUCTION
 % #############################################################################
-% NOTE -- PURPOSE: motivate, position, and promise. Four moves in this order:
-%   (i)   parameters are the interpretable scientific object
-%   (ii)  classical estimators depend on a CHOSEN summary statistic with a
-%         closed form -- state each limitation as a claim, not a noun
-%   (iii) topological summaries: rich, family-agnostic, no closed form needed
-%   (iv)  explicit contributions + roadmap
-%
-% BIGGEST PROBLEM: the word "topology" does not currently appear anywhere in
-% this section. The reader hits Section 3.2 with no idea why simplicial
-% complexes are being introduced. Fix (iii) first.
-% #############################################################################
+
 \section{Introduction}
+\label{sec:intro}
 
 % --- (i) motivation ----------------------------------------------------------
 % [MOVED FROM: old Section 1]
@@ -218,30 +225,7 @@ a closed-form or a choice of summary statistic.
 % #############################################################################
 % 2. RELATED WORK
 % #############################################################################
-% NOTE -- PURPOSE: locate the work honestly. Target ~half a page. ENTIRELY NEW.
-%
-% This section exists because the "novel architecture" framing is dead. Two
-% works occupy the neighbourhood:
-%   [A] "Using neural networks to estimate parameters in spatial point process
-%       models" -- essentially this architecture, but with the L function as
-%       the feature.
-%   [B] "Learning from topology: cosmological parameter estimation from the
-%       large-scale structure" -- topological features, but for cosmological
-%       parameters.
-%
-% STRUCTURE: position on two axes -- (what the feature is) x (what is being
-% estimated). [A] establishes the architecture pattern. [B] establishes
-% topological features for parameter inference. Concede both plainly and early;
-% the paper is stronger for it.
-%
-% THEN state the gap precisely. Candidates, in descending order of defensibility:
-%   - neither systematically COMPARES topological summaries against each other
-%     as estimator features (this is the thread to own)
-%   - neither addresses calibration across a heterogeneous diagram population
-%   - neither covers multiple Neyman--Scott families under one reparameterization
-%   - [B] is cosmology-specific; the SPP-estimation setting has a known error
-%     floor and classical baselines to measure against
-% #############################################################################
+
 \section{Related Work}
 
 \todo{WRITE THIS SECTION. Concede the architecture to [A]; concede topological
@@ -330,9 +314,6 @@ Section \ref{sec:method}.
         scale, respectively.
     \end{definition}
 
-\todo{add the Mat\'ern cluster and nested Thomas definitions here -- both are
-used in Section 5 but never defined}
-
 % -----------------------------------------------------------------------------
 \subsection{Persistent homology}
 \label{ssec:persistence}
@@ -350,9 +331,8 @@ summary. Under a filtration such as Vietoris-Rips, the $H_0$ persistence summary
 the order and scales at which clusters merge. The $H_1$ counterpart marks voids and gaps
 in the pattern as they persist across scales, allowing one to capture the clustering-induced
 emptiness or repulsion that a process may exhibit, which a radial-average cannot see as clearly.
-For each $d \in \N$, the $d$-dimensional persistence summary requires no closed form expression
+For each $h \in \N$, the $h$-dimensional persistence summary requires no closed form expression
 and no assumption about which process family generated it.
-\todo{Notation clash with 'd'}
 
 Let $X$ be a point process on $R^d$ and $W \subseteq \R^d$ a bounded window with
 $|X \cap W| = n$ . Enumerate the points of $X \cap W$ to construct a point cloud
@@ -418,17 +398,17 @@ simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$
     \end{definition}
 
     \begin{definition}[Betti number]
-        Fix $k \in \N$ and a simplicial complex $\Sigma$. Taking homology
-        with coefficients in a field (we use $\Z_2$), $H_k(\simpcom)$ is a
-        vector space of dimension $\beta_k = \dim H_k(\simpcom)$, the $k$-th
+        Fix $h \in \N$ and a simplicial complex $\Sigma$. Taking homology
+        with coefficients in a field (we use $\Z_2$), $H_h(\simpcom)$ is a
+        vector space of dimension $\beta_h = \dim H_h(\simpcom)$, the $h$-th
         \emph{Betti number}. $\beta_0, \beta_1, \beta_2, \dots$ count connected
         components, loops, and cavities, respectively.
     \end{definition}
 
     \begin{definition}[Persistence pair \& lifetime]
-        For a filtration $(\filt_r)_{r \geq 0}$, a $k$-dimensional homology
+        For a filtration $(\filt_r)_{r \geq 0}$, a $h$-dimensional homology
         class is \emph{born} at the smallest scale $b \geq 0$ at which it
-        appears in $H_k(\simpcom_b)$, and \emph{dies} at the scale $d > b$ at
+        appears in $H_h(\simpcom_b)$, and \emph{dies} at the scale $d > b$ at
         which it merges into an older class or becomes a boundary. The pair
         $(b,d)$ is a \emph{persistence pair}, and $d - b$ its \emph{lifetime}.
     \end{definition}
@@ -440,13 +420,13 @@ simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$
     \end{example}
 
     \begin{definition}[Persistence diagram]
-        A persistence diagram $D_k = \{(b_i, d_i)\}_i$ is the multiset of
-        dimension-$k$ persistence pairs, plotted with birth on the $x$-axis and
+        A persistence diagram $D_h = \{(b_i, d_i)\}_i$ is the multiset of
+        dimension-$h$ persistence pairs, plotted with birth on the $x$-axis and
         death on the $y$-axis.
     \end{definition}
 
     \begin{remark}
-        Every point of $D_k$ lies above the diagonal $b=d$ because it must die
+        Every point of $D_h$ lies above the diagonal $b=d$ because it must die
         after it is born. Distance from the diagonal is lifetime, so short-lived
         points near the diagonal are often treated as noise.
     \end{remark}
@@ -467,7 +447,7 @@ simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$
 
     \begin{definition}[Persistence image]
     \label{def:per_image}
-        The persistence image of $D_k$ is constructed by:
+        The persistence image of $D_h$ is constructed by:
             \begin{enumerate}
                 \item Mapping to birth-persistence coordinates:
                       $(b,d) \mapsto (b, d-b)$.
@@ -482,33 +462,21 @@ simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$
             \end{enumerate}
     \end{definition}
 
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=\textwidth]{vectorization_schematic.pdf}
-    \caption{One point cloud $\rightarrow$ its $H_0/H_1$ persistence diagrams
-    $\rightarrow$ the five vectorizations compared in
-    Section~\ref{ssec:exp-summaries}: persistence-image raster, landscape
-    stack, silhouette curve, Betti curve, and persistence-statistics summary.
-    Top row: the tight-cluster design ($\kappa=50$, $\mu=4$, $\sigma=0.01$);
-    bottom row: the near-Poisson design ($\kappa=4$, $\mu=5$, $\sigma=0.5$),
-    the same two extremes of Table~\ref{tab:sim-validation}. Statistics-panel
-    bars are min-max normalized per statistic, with raw values printed above
-    each bar, since count, total persistence, and entropy live on
-    incomparable scales.}
-    \label{fig:vectorization_schematic}
-\end{figure}
+% <NEW> the five-vectorization schematic previously sat here, but four of the
+% five objects it displays are not defined until Section 7.4. It has been moved
+% to the opening of that subsection.
 
 % -----------------------------------------------------------------------------
 \subsection{Background reading}
 % -----------------------------------------------------------------------------
-\todo{WRITE LAST. Reading clusters to cover:
+\todo{Reading to cover: \newline
  (a) classical SPP estimation -- Diggle, minimum contrast, Palm likelihood,
-     composite likelihood;
- (b) TDA foundations -- persistence, stability, DTM filtrations;
+     composite likelihood; \newline
+ (b) TDA foundations -- persistence, stability, DTM filtrations; \newline
  (c) vectorization of persistence -- persistence images, landscapes, Betti
-     curves, kernel methods;
- (d) neural/simulation-based inference -- amortized inference, neural
-     estimators, the two related works of Section 2;
+     curves, kernel methods; \newline
+ (d) neural/simulation-based inference -- amortized in ference, neural
+     estimators, the two related works of Section 2; \newline
  (e) TDA applied to point processes and to cosmology.}
 
 
@@ -553,9 +521,7 @@ We draw one realization per parameter vector. The dispersion of $\hat\theta$
 across realizations sharing a common $\theta$ gives the irreducible error floor
 against which the model's performance should be read.
 
-\todo{make the error floor a named quantity here and reference it from
-Section 7.3 -- it is the yardstick for every reported number}
-
+\todo{make the error floor a named quantity}
 
 % #############################################################################
 % 5. SIMULATOR AND EXPERIMENTAL DESIGN
@@ -659,7 +625,6 @@ Thomas the buffers of the two levels add, giving $b = 4\sigma_1 + 4\sigma_2$,
 which over-covers the tight bound $4\sqrt{\sigma_1^2 + \sigma_2^2}$ and is
 therefore conservative. Points are never clipped to the boundary; the only
 boundary operation is the containment filter at step 5.
-
 % -----------------------------------------------------------------------------
 \subsection{Validation}
 \label{ssec:verification}
@@ -746,7 +711,7 @@ $\kappa\mu(1+\mu)$, confirming the two agree in the appropriate limit. The gap
 between them reaches $175\%$ at $\nu = 1$ (Figure~\ref{fig:variance_identity}),
 so \eqref{eq:varN} is used as the comparison target.
 
-\begin{figure}[h]
+\begin{figure}[tbp]
     \centering
     \includegraphics[width=0.72\textwidth]{variance_identity.pdf}
     \caption{The canonical identity $\mathrm{Var}[N(W)]=\kappa\mu(1+\mu)$
@@ -762,12 +727,13 @@ so \eqref{eq:varN} is used as the comparison target.
     \label{fig:variance_identity}
 \end{figure}
 
-\begin{table}[h]
+\begin{table}[tbp]
 \centering
 \begin{tabular}{lccccc}
 \toprule
-Case & $\nu$ & $\mathbb{E}[N]$ theory & empirical
-     & $\mathrm{Var}[N]$ theory & empirical \\
+ & & \multicolumn{2}{c}{$\mathbb{E}[N(W)]$} & \multicolumn{2}{c}{$\mathrm{Var}[N(W)]$} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Case & $\nu$ & theory & empirical & theory & empirical \\
 \midrule
 A & 0.07 & 200.0 & $200.4 \pm 0.6$ & 982.0 & $972.5 \pm 25.1$ \\
 B & 0.22 & 100.0 & $100.2 \pm 0.4$ & 545.2 & $544.8 \pm 14.1$ \\
@@ -795,9 +761,9 @@ carry a negative bias that grows with $\mathbb{E}[N^2]$ and is therefore larger
 for clustered patterns than for a matched-intensity Poisson control; we account
 for this when reading residual deviations rather than attributing them to the
 sampler.
-
 % -----------------------------------------------------------------------------
 \subsection{Splits and evaluation protocol}
+\label{ssec:eval-protocol}
 % -----------------------------------------------------------------------------
 
 Data are split by parameter vector, never by realization, so that no parameter
@@ -807,9 +773,10 @@ error to be reported as a surface over $(\log\nu, \log\lambda)$ rather than as a
 single scalar; and a set drawn one increment outside each range, characterizing
 degradation under extrapolation.
 
-The classical baselines introduced in Section REF are run on the same clouds,
+The classical baselines introduced in Section~\ref{sec:intro} are run on the same clouds,
 under the same train/test/grid/extrapolation splits rather than on separate data
-or numbers taken from the literature. Section REF is therefore a comparison
+or numbers taken from the literature. Section~\ref{ssec:exp-performance}
+is therefore a comparison
 against a shared  test set.
 
 Throughout Section \ref{sec:experiments} we report error in the log-normalized
@@ -844,8 +811,6 @@ of Section \ref{sec:problem}.
 We additionally report error in the original parameter units where a physical
 reading is wanted, noting that these are not comparable across parameters and
 are not the quantity being optimized.
-\todo{confirm the reported figures in Section \ref{ssec:exp-ablations} are
-$\mathcal{L}$ as defined here, and not the un-averaged training loss}
 
 
 % #############################################################################
@@ -854,40 +819,8 @@ $\mathcal{L}$ as defined here, and not the un-averaged training loss}
 \section{Method: ParamNet}
 \label{sec:method}
 
-\begin{table}[htbp]
-\centering
-\small
-\begin{tabular}{lcc}
-\toprule
-Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
-\midrule
-Full model (PI, $H_0{+}H_1$, DTM$\{5,10,15\}$) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
-$\log N$ removed                                & $0.305 \pm 0.392^\dagger$ & $0.200 \pm 0.006$ \\
-Topology removed ($\log N$ only)                & $0.891 \pm 0.017$ & $0.946 \pm 0.018$ \\
-\bottomrule
-\end{tabular}
-\caption{Bracketing the topological contribution: the full model against a
-model stripped of the $\log N(\pc)$ feature (Section~\ref{ssec:encoder-fusion})
-and against a model with the topology removed entirely, keeping only $\log
-N(\pc)$ fed straight to the FCNN head. Both design distributions, $n=5$ seeds
-per arm. $^\dagger$ one of five Thomas seeds diverged to the design-distribution-mean
-floor ($\mathcal{L}\approx1.0$, cf.\ Table~\ref{tab:calibration-sweep}); the
-other four land at $0.123$--$0.133$, in line with the full model.}
-\label{tab:logn-ablation}
-\end{table}
-
-Topology removed to $\log N$ alone collapses to the same
-$\mathcal{L}\approx0.9$--$1.0$ floor as the label-shuffle control of
-Section~\ref{ssec:exp-summaries} on both datasets, so the point count carries
-almost none of the recoverable signal on its own. Removing $\log N$ from the
-full model, conversely, costs little on nested-Thomas ($0.196\to0.200$) and is
-merely noisy on Thomas rather than clearly harmful (four of five seeds are
-indistinguishable from the full model; the fifth diverges). Together the two
-arms show the persistence images -- not the point count -- are carrying the
-signal, with $\log N$ a minor, possibly non-essential addition.
-
 Let $\pc$ denote a point cloud, $v$ its vectorized persistence summary, and
-$e \in \R^{128}$ the resulting feature vector. ParamNet follows the pipeline
+$e \in \R^{n_k E + 1}$ the resulting feature vector. ParamNet follows the pipeline
     \begin{equation}
     \label{eq:pipeline}
     \pc \xrightarrow{\;\text{Vectorization}\;} v
@@ -909,28 +842,27 @@ topological summary is vectorized and made usable for machine learning.
 A substantial body of work has developed vectorizations of persistence 
 diagrams —- persistence images, Betti curves, landscapes, kernel methods -- 
 that trade off stability, resolution, and information loss in different ways, 
-but there is little consensus on which is preferable for recovering 
-generating parameters from a single observed point cloud. We implement and 
-compare several such vectorizations against this task directly, rather than 
-picking one on prior grounds; the comparison, and what it reveals about the 
+but there has been no firmalized discussion on which is preferable in this setting. 
+We implement and compare several such vectorizations against this parameter
+estimation task; the comparison, and what it reveals about the 
 structure each vectorization does and does not preserve, is the subject of 
 Section~\ref{ssec:exp-summaries}.
 
 The vectorized summary $v$ is passed through an encoder to obtain the
-feature vector $e \in \R^{128}$, which is then given to the FCNN
-$NN_\phi: \R^{128} \to \R^{n_params}$ to produce the estimate
+feature vector $e \in \R^{n_k E + 1}$, which is then given to the FCNN
+$NN_\phi: \R^{n_k E + 1} \to \R^{n_{params}}$ to produce the estimate
 $\hat\theta = (\hat\kappa, \hat\mu, \hat\sigma)$. $NN_\phi$ is a small feed-forward network: two hidden layers of width 64 and 
 32, each followed by a ReLU nonlinearity and dropout ($p=0.1$), then a final 
 linear layer mapping to the $n_{params}=3$ outputs $(\hat\kappa, \hat\mu, \hat\sigma)$.
+
+Every experiment in this paper uses the same optimizer and schedule: AdamW ($\text{lr}=10^{-3}$,
+weight decay $3\times10^{-4}$), batch size $32$, up to $500$ epochs with
+early-stopping patience $50$ on the validation loss.
 
 % -----------------------------------------------------------------------------
 \subsection{Filtration and vectorization}
 % -----------------------------------------------------------------------------
 
-\expt{Rips vs DTM claim still unsupported: [PI | H0+H1 | Rips | 5] against
-[PI | H0+H1 | DTM\{5,10,15\} | 5]. Check the deficit concentrates in
-$\kappa,\mu$ rather than $\sigma$ -- if it does not, the mechanism stated in
-this subsection is wrong.}
 \tab{Filtration comparison: Rips, DTM$_5$, DTM$_{10}$, DTM$_{15}$,
 DTM$_{\{5,10,15\}}$. Columns: $\mathcal{L}$, per-parameter
 $\mathcal{L}^\kappa,\mathcal{L}^\mu,\mathcal{L}^\sigma$, failed seeds.}
@@ -938,7 +870,7 @@ $\mathcal{L}^\kappa,\mathcal{L}^\mu,\mathcal{L}^\sigma$, failed seeds.}
 We describe the pipeline implemented for the
 persistence image vectorization computed under the $DTM_k$ filtration, which is the
 configuration carried through the rest of the paper. We give this configuration
-in full because it is the most the one that raises design questions the alternatives do
+in full because it is the most effective, and also because it raises design questions the alternatives do
 not: the birth and persistence axes must be calibrated to a common frame before
 the diagrams can be rasterized, and computing summaries at several values of $k$
 leaves open how the resulting images are to be encoded and combined.
@@ -953,48 +885,35 @@ The pipeline is as follows;
         fixed-size raster using those ranges (see Definition
         \ref{def:per_image}).
     \end{enumerate}
-The key design choices that follow are the filtration function, the calibration
-procedure, and the image resolution. The latter two can be optimized with a
-grid-search, but the choice of filtration function plays a fundamental role in
-what information is available to be extracted at all. We use the $DTM_k$
-filtration (see Example \ref{ex:dtm}) rather than the canonical Rips filtration.
-Rips is built from inter-point distances alone, so it is sensitive to the
-sparsest connection between two regions and does not register how densely those
-regions are occupied, whereas $DTM_k$ averages over $k$ nearest neighbours and
-so responds to local density directly. Since the parameters we wish to recover
-are density parameters, we expect this to matter, and Section
-REF reports the results that informed this decision.
-Furthermore, the parameter $k$ allows us to compute summaries at various scales,
-which may be combined to provide the model with a more complete picture that includes
-both fine and coarse summaries. Unless a sweep varies it explicitly, every
-experiment in this paper fuses $k \in \{5, 10, 15\}$; the encoder architecture
-that consumes the fused scales is described in Section~\ref{ssec:encoder-fusion}.
+The key design choices that follow naturally from this pipeline are (1) the filtration function,
+(2) the calibration procedure, and (3) the image resolution. In particular, the choice of filtration function plays a fundamental role in
+what information is available to be extracted in the first place. 
 
-Four alternative vectorizations -- landscapes, silhouettes, Betti/Euler curves, and
-a persistence-statistics floor control -- are defined and compared in Section 
-REF.
+Instead of the canonical Rips or Čech filtrations, we use the $DTM_k$ filtration (Example \ref{ex:dtm}).
+Rips is built from inter-point distances alone, making it sensitive to the
+sparsest connection between two regions and does not register how densely those
+regions are occupied. In this case $DTM_k$ is more suitable because it works with a point's averagedistance to its
+$k$ nearest neighbours; consequently, $DTM_k$ provides a more direct measure of local density. 
+Since the parameters we wish to recover directly affect the local density of the processes, 
+we expect this choice to pay off. Section
+REF reports the results that informed this decision.
+
+Additionally, the parameter $k$ allows us to compute topological summaries at various scales,
+which can be combined to provide the model with a more complete picture that includes information from 
+fine and coarse scales simultaneously. Unless varied explicitly, every
+experiment in this paper fuses $DTM_k$ for $k \in \{5, 10, 15\}$; the encoder architecture
+that consumes the fused scales is described in Section REF.
+
+Three alternative vectorizations -- landscapes, silhouettes, Betti/Euler curves -- are defined and compared in
+Section~\ref{ssec:exp-summaries}.
 
 % -----------------------------------------------------------------------------
 \subsection{Calibration}
 \label{ssec:calibration}
 % -----------------------------------------------------------------------------
 
-\todo{Add one sentence: the coverage-quantile rule transfers unchanged to the
-1-D grid calibration used by landscapes, silhouettes and Betti curves (Appendix
-A). This is what makes the scheme a methodological contribution rather than a
-persistence-image implementation detail.}
-
-\expt{The [PI | H0+H1 | DTM\{5,10,15\} | 3 | q $\in$ \{0.90,0.95,0.99,1.00\}]
-arm ($q\to1$ recovering naive min/max) is now run, alongside pad, kernel
-width, and resolution -- see Table~\ref{tab:calibration-sweep} in
-Section~\ref{sec:experiments}. Still missing: the train-only vs
-full-population leakage arm.}
-
 \fig{$\mathcal{L}$ against $q$ with $q=1.00$ marked as the naive endpoint.
 One-parameter family, so this is a line plot, not a table.}
-\fig{Naive vs coverage-quantile calibration applied to the same diagram, side
-by side. The "loss of texture" argument is visual and is currently carried
-entirely by prose.}
 
 Consider the synthetic training clouds $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$
 and fix the homology dimension $h \in \{0,1\}$ for some choice of filtration. We
@@ -1002,35 +921,28 @@ obtain $N_{train}$ persistence diagrams $\{D^{(h)}_i\}_{i=1}^{N_{train}}$. Each
 diagram will have a different distribution of points, some of which may have
 extreme outliers with respect to the full set of diagrams.
 
-In order to ensure that in the resulting persistence images each pixel bears the
+To ensure that in the resulting persistence images each pixel bears the
 same meaning, we calibrate the diagrams to have the same axis ranges. The
 naive approach of calibrating to the maximum deaths and births (thus including all
 points) is inadequate due to the resulting relative positioning of the
-bulk of points: if we have a diagram with very strong outliers, the remaining diagrams
-will be rescaled in a way that places the majority of their points near the origin. The diagrams -- and
-therefore their vectorizations -- will lose a lot of texture
+bulk of points: if a diagram in the training set has strong outliers, the remaining diagrams
+will be rescaled in a way that places the majority of their points near the origin
 (Figure~\ref{fig:calibration_comparison}).
 
-\begin{figure}[htbp]
+\begin{figure}[tbp]
     \centering
     \includegraphics[width=0.85\textwidth]{calibration_comparison.pdf}
-    \caption{The same $H_0$ diagram (DTM filtration, $k=5$ -- a plain Rips
-    filtration gives every point birth $0$, so the birth axis this figure
-    calibrates would be degenerate) -- the most feature-rich diagram among
-    the non-outlier bulk (own max persistence at or below the 60th
-    percentile), drawn from $2000$ clouds sampled from the production
-    Thomas design distribution (Section~\ref{sec:simulator}) -- rendered
-    under the naive pooled min/max bound (left) and the per-diagram
-    coverage-quantile bound of $q=0.95$, $\alpha=1.05$ (right). Top row: the
-    diagram's own points against the calibrated birth-persistence box, with
-    the dashed square marking the region zoomed into below; the naive box is
-    stretched by a single high-offspring outlier diagram elsewhere in the
-    population, not shown. Bottom row: the same physical region of
-    birth-persistence space, rendered at each calibration's native pixel
-    density -- a $7\times7$ block of mostly-fused pixels under the naive
-    bound against a $16\times16$ grid that keeps the secondary peak resolved
-    under the quantile bound, since the same $64\times64$ grid is stretched
-    over a wider range.}
+    \caption{Naive pooled min/max calibration (left) versus per-diagram
+    coverage-quantile calibration, $q=0.95$, $\alpha=1.05$ (right), for the
+    same $H_0$ diagram (DTM filtration, $k=5$, Thomas design distribution,
+    Section~\ref{sec:simulator}). Top: the diagram against its calibrated
+    birth-persistence box; the naive box is stretched by an outlier diagram
+    elsewhere in the population, and the dashed square marks the region
+    zoomed into below. Bottom: that region at each calibration's native
+    pixel density -- a $7\times7$ block of mostly-fused pixels under the
+    naive bound versus a $16\times16$ grid resolving the secondary peak
+    under the quantile bound, since the same $64\times64$ grid now covers a
+    narrower range.}
     \label{fig:calibration_comparison}
 \end{figure}
 
@@ -1042,7 +954,7 @@ For each training diagram $D_i^{(h)}$, define the three summary statistics
     p_i^{\max} = \max_{(b,d) \in D_i^{(h)}} (d - b),
 \end{equation}
 i.e. the smallest birth, largest birth, and largest persistence value attained
-\emph{within a single diagram}. Given a coverage level $q \in (0,1)$ and a
+\emph{within a single diagram}. Given a coverage level $q \in (0,1]$ and a
 padding factor $\alpha \geq 1$, we set the calibrated birth and persistence
 ranges to be the $q$-quantiles of these per-diagram statistics, taken over the
 training set:
@@ -1066,9 +978,9 @@ pooled set implicitly weights each diagram by how many topological features it
 produces: a single diagram with an unusually large number of points -- near the
 diagonal or otherwise -- can dominate the resulting bound, while a diagram
 consisting of one strong outlier and few other points contributes only that
-outlier. By instead computing one representative statistic per diagram and
-quantiling \emph{over diagrams}, every training cloud contributes exactly once to
-the calibration, regardless of how many persistence pairs it happens to produce.
+outlier. Instead, we compute one representative statistic per diagram and
+calculate the quantile \emph{over diagrams} so every training cloud contributes exactly once to
+the calibration, regardless of how many persistence pairs it has.
 Framing outlier rejection as a coverage fraction over diagrams -- rather than
 over points -- makes the trade-off explicit and controllable: at most
 $\lceil (1-q) N_{train} \rceil$ diagrams may have their most extreme birth or
@@ -1078,21 +990,19 @@ approach of calibrating to the global maximum is recovered as the degenerate cas
 $q \to 1$.
 
 This scheme is also compatible with the stability guarantees of persistence
-images \citep{adams2017persistence}, which are stated for a fixed bandwidth and a
+images REF(adams2017persistence), which are stated for a fixed bandwidth and a
 fixed image domain: since $\sigma_{\text{pixels}}$ is specified in pixel units
 (Definition \ref{def:per_image}) rather than in absolute birth/persistence units,
 and the birth and persistence ranges are calibrated independently of one another,
 a pixel remains a comparable, well-defined location across every image built from
-the calibrated imager -- irrespective of the very different physical spans the
-two axes typically have.
+the calibrated imager.
 
 Because the calibrated ranges are a property of the training distribution, they
 must be fit \emph{exclusively} on $\{D_i^{(h)}\}_{i \in \text{train}}$, then
 frozen and applied unchanged to validation, test, and adversarial diagrams.
 Fitting the ranges on the full, unsplit population of clouds -- before the
-train/validation/test partition is drawn -- lets information about the held-out
-clouds leak into the calibration used to build every training image, since every
-pixel's meaning is defined relative to the calibrated bounds. As the
+train/validation/test sets are partitioned -- leaks information about the held-out
+clouds into the training images. As the
 train/validation/test partition is redrawn per random seed, calibration must
 likewise be refit per seed, on that seed's training rows only, and then applied
 frozen to the corresponding validation, test, and adversarial rows.
@@ -1100,46 +1010,19 @@ frozen to the corresponding validation, test, and adversarial rows.
 For homology dimension $H_0$, birth values are often identically zero (or
 otherwise carry negligible spread) under the chosen filtration, in which case
 $b_i^{\min} \approx b_i^{\max}$ for all $i$ and the calibrated birth range
-collapses to a point. We detect this case explicitly and fall back to a
+collapses to a point. In these cases we fall back to a
 one-dimensional vectorization of the diagram rather than fabricate an axis, since
-a degenerate range would make an entire column of pixels convey no information.
+the degenerate range would make an entire column of pixels convey no information.
+
+The coverage-quantile rule itself is not specific to the persistence image: the
+same $(q,\alpha)$ scheme is applied to the corresponding per-diagram statistics of
+the 1-D grid underlying landscapes, silhouettes, and Betti/Euler curves 
+(Appendix~\ref{app:calibration-sweeps}).
 
 % -----------------------------------------------------------------------------
 \subsection{Encoder and fusion}
 \label{ssec:encoder-fusion}
 % -----------------------------------------------------------------------------
-
-\begin{table}[htbp]
-\centering
-\small
-\begin{tabular}{lcc}
-\toprule
-Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
-\midrule
-Full model (CoordConv on)  & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
-CoordConv removed          & $0.126 \pm 0.005$ & $0.194 \pm 0.002$ \\
-\bottomrule
-\end{tabular}
-\caption{CoordConv ablation: the shared-weight encoder of
-Section~\ref{ssec:encoder-fusion} with and without the two coordinate
-channels, at the default $q=0.95$ calibration, $n=5$ seeds per arm on both
-design distributions.}
-\label{tab:coordconv-ablation}
-\end{table}
-
-CoordConv removal is within seed noise of the full model on both datasets --
-if anything marginally better on Thomas and on nested-Thomas. This does not
-support the claim that CoordConv is necessary to exploit the calibrated pixel
-grid; at the current calibration ($q=0.95$, Section~\ref{ssec:calibration})
-the convolutional stack appears to recover comparable information without
-explicit coordinate channels. \todo{Still worth the calibrated-vs-naive
-cross suggested above -- the claim that CoordConv helps more under calibrated
-axes than uncalibrated ones has not been tested, only CoordConv on/off at the
-calibrated default.}
-
-\expt{Multi-$k$ is the reason this subsection exists but is never justified:
-[PI | H0+H1 | DTM\{5\} | 5], [PI | H0+H1 | DTM\{10\} | 5],
-[PI | H0+H1 | DTM\{15\} | 5] against the fused arm.}
 
 Consider the training clouds $\{\pc_i, \theta_i\}_{i=1}^{N_{train}}$. We pick $n_k$
 scales for our $DTM_k$ filtration and compute persistence
@@ -1182,15 +1065,7 @@ for each scale. Furthermore, the fusion step can also be done in several ways ot
 such as averaging or max-pooling the embeddings across scales.
 
 We find that a shared encoder with concatenation is the best option (and also the simplest), and justify
-this choice in Section REF by ablation studies.
-
-\paragraph{Training.} Unless a sweep varies it explicitly, every experiment in
-this paper uses the same optimizer and schedule: AdamW ($\text{lr}=10^{-3}$,
-weight decay $3\times10^{-4}$), batch size $32$, up to $500$ epochs with
-early-stopping patience $50$ on the validation loss, over three seeds
-($9371$, $9372$, $9373$). The FCNN head is the one defined in
-Section~\ref{sec:method}: two hidden layers of width $64$ and $32$ with
-dropout $p=0.1$.
+this choice in Section~\ref{ssec:exp-ablations} by ablation studies.
 
 
 % #############################################################################
@@ -1200,7 +1075,112 @@ dropout $p=0.1$.
 \section{Experiments}
 \label{sec:experiments}
 
-Before comparing vectorizations or architectures, we quantify the effect
+In this section we aim to present the experimental results that informed the
+design choices made, specifically the calibration hyperparameters and architecture. 
+Once these choices have been justified, we present a comparison
+of the various vectorizations' efficacies for parameter estimation.
+
+A joint sweep over calibration paramaters, architectures, and vectorizations 
+is computationally unfeasible. Instead, we adopt a greedy sequence fixed in advance. 
+
+Encoder and fusion mode are selected first
+(Section~\ref{ssec:exp-ablations}), against the persistence image at the
+default calibration ($q=0.95$, Section~\ref{ssec:calibration}). That
+architecture is then held fixed while the calibration parameters
+$(q,\alpha,\sigma_{\text{pixels}},G)$ are swept (Section~\ref{ssec:exp-calibration}).
+A confirmation pass re-runs the two architectures that survive the fusion-mode
+sweep -- shared and independent encoders under concatenation -- at the
+selected calibration (Table~\ref{tab:encoder-confirm}), to check that the
+architecture choice was not an artifact of the default calibration under which it
+happened to be made.
+
+Vectorization-specific parameters (landscape $K$,
+silhouette $p$, etc.) are swept last, with calibration and architecture
+both frozen at their selected values (Section~\ref{ssec:exp-summaries},
+Appendix~\ref{app:calibration-sweeps}).
+
+Three conventions recur across every results table; we state them here to avoid
+unecessary repetition in the captions. All reported losses are the
+squared error in log-normalized space defined in Section~\ref{ssec:eval-protocol},
+averaged over parameters. A dagger ($^\dagger$) marks an arm on
+which at least one seed failed to converge and collapsed instead to the
+$\mathcal{L}\approx0.9$--$1.0$ floor; in every such case the reported
+mean is dominated by the failed seed(s) and should not be read as the arm's
+typical performances.
+
+% -----------------------------------------------------------------------------
+\subsection{Reference points and controls}
+\label{ssec:exp-controls}
+% -----------------------------------------------------------------------------
+
+\paragraph{Sanity check: label shuffling.} The $^\dagger$ divergence in
+Table~\ref{tab:calibration-sweep} is described as ``no better than predicting
+the design-distribution mean,'' but that floor was never independently
+measured. We do so directly: retraining the default PI model with training
+labels randomly permuted (inputs unchanged), so the only learnable target is
+each parameter's marginal distribution.
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Full model (correct labels) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+Shuffled labels             & $1.011 \pm 0.024$ & $0.997 \pm 0.018$ \\
+\bottomrule
+\end{tabular}
+\caption{Label-shuffle control, $n=5$ seeds, both design distributions. Same
+architecture and calibration as the full model; only the training-label
+assignment is permuted.}
+\label{tab:label-shuffle}
+\end{table}
+Both datasets land at $\mathcal{L}\approx1.0$, confirming the $^\dagger$ rows
+of Table~\ref{tab:calibration-sweep} are genuinely collapsing to
+chance-level prediction and not to some other failure mode, and giving an
+empirical floor against which every other result in this section can be
+read.
+
+% [MOVED FROM: opening of Section 6, where it preceded any description of the
+%  model it ablates]
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Full model (PI, $H_0{+}H_1$, DTM$\{5,10,15\}$) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+$\log N$ removed & $0.305 \pm 0.392^\dagger$ & $0.200 \pm 0.006$ \\
+Topology removed ($\log N$ only) & $0.891 \pm 0.017$ & $0.946 \pm 0.018$ \\
+\bottomrule
+\end{tabular}
+\caption{Bracketing the topological contribution: the full model against a
+model stripped of the $\log N(\pc)$ feature (Section~\ref{ssec:encoder-fusion})
+and against a model with the topology removed entirely, keeping only $\log
+N(\pc)$ fed straight to the FCNN head. Both design distributions, $n=5$ seeds
+per arm. One of five Thomas seeds diverged to the design-distribution-mean
+floor ($\mathcal{L}\approx1.0$, cf.\ Table~\ref{tab:calibration-sweep}); the
+other four land at $0.123$--$0.133$, in line with the full model.}
+\label{tab:logn-ablation}
+\end{table}
+
+Training on $\log N$ alone (i.e. no topological summary) collapses to the same
+$\mathcal{L}\approx0.9$--$1.0$ floor as the label-shuffle control of
+Section~\ref{ssec:exp-controls} on both datasets, so the point count carries
+almost none of the recoverable signal on its own. Conversely, removing $\log N$ from the
+full model costs little on nested-Thomas ($0.196\to0.200$) and is
+merely noisy on Thomas rather than clearly harmful (four of five seeds are
+indistinguishable from the full model; the fifth diverges). Together the two
+arms show the persistence images -- not the point count -- are carrying the
+signal, with $\log N$ a minor, possibly non-essential addition.
+
+% -----------------------------------------------------------------------------
+\subsection{Calibration}
+\label{ssec:exp-calibration}
+% -----------------------------------------------------------------------------
+
+We quantify the effect
 of the calibration parameters introduced in Section~\ref{ssec:calibration}:
 coverage $q$, padding $\alpha$, kernel width $\sigma_{\text{pixels}}$, and
 raster resolution $G$. Table~\ref{tab:calibration-sweep} reports the
@@ -1208,7 +1188,396 @@ sweep, each arm varying a single parameter around the default
 calibration while holding architecture and the remaining three parameters
 fixed.
 
-\begin{table}[htbp]
+\fig{$\mathcal{L}$ against $q$, both design distributions, with $q=1.00$ marked
+as the naive endpoint. One-parameter family, so a line plot reads better than a
+table and makes the dataset disagreement below visible at a glance.}
+
+Excluding the $^\dagger$ rows, resolution $G=128$ is the only arm that is
+unambiguously bad -- $G\in\{32,64\}$, $\alpha$, and $\sigma_{\text{pixels}}$
+all vary within one seed-standard-deviation of the default across both
+datasets. Coverage $q$ is the one parameter with a genuine process-dependent
+disagreement: the Thomas optimum moves toward the naive endpoint $q=1.00$
+($0.120$ vs.\ $0.126$ at the default), while nested-Thomas prefers tighter
+coverage at $q=0.90$ ($0.195$) and gets markedly worse as $q\to1$. We choose
+to keep the shared default $q=0.95$.
+
+% -----------------------------------------------------------------------------
+\subsection{Architecture ablations}
+\label{ssec:exp-ablations}
+% -----------------------------------------------------------------------------
+
+The architecture sweep was run on the persistence-image arm at the default $q=0.95$
+calibration; Section~\ref{ssec:exp-summaries} confirms PI is the arm worth
+ablating.
+
+The sweep crosses \emph{encoder mode} (shared-weight vs.\
+independent-per-$k$) against \emph{fusion mode} (concatenation, average-pool,
+or a small convolutional-flatten fusion head), five seeds per combination, on
+Thomas.
+
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+Encoder mode & Fusion & $\mathcal{L}$ (mean $\pm$ sd) & Failed seeds \\
+\midrule
+shared      & concat        & $0.122 \pm 0.007$ & $0/5$ \\
+shared      & conv-avg      & $0.431 \pm 0.425^\dagger$ & $2/5$ \\
+shared      & conv-flatten  & $0.589 \pm 0.425^\dagger$ & $3/5$ \\
+independent & concat        & $0.129 \pm 0.006$ & $0/5$ \\
+independent & conv-avg      & $0.133 \pm 0.015$ & $0/5$ \\
+independent & conv-flatten  & $0.141 \pm 0.016$ & $0/5$ \\
+\bottomrule
+\end{tabular}
+\caption{Full encoder-mode $\times$ fusion-mode cross, $n=5$ seeds per
+combination, on Thomas at the default PI calibration. ``Failed'' seeds are
+those that collapse to the $\mathcal{L}\approx0.9$ design-distribution-mean
+floor of Table~\ref{tab:label-shuffle} rather than converging.
+$^\dagger$ mean is dominated by the failed seeds and is not a stable estimate
+of the arm's typical performance; see per-seed values in the text.}
+\label{tab:encoder-fusion-sweep}
+\end{table}
+
+\fig{Per-seed loss scatter across the six configurations -- the collapse
+pattern below is the interesting part and this table's means alone
+understate it.}
+
+Restricted to concatenation, shared and independent encoders match to within
+seed noise ($0.122\pm0.007$ vs.\ $0.129\pm0.006$); since sharing weights across
+scales reduces the parameter count (roughly $K$-fold) and removes a design
+axis, we adopt the shared encoder going forward. 
+
+Both convolutional-fusion variants are unstable, but \emph{only when paired with the shared encoder}:
+shared/conv-avg and shared/conv-flatten each collapse to the
+$\mathcal{L}\approx0.9$ floor on 2/5 and 3/5 seeds respectively (individual
+per-seed losses: $\{0.128, 0.120, 0.902, 0.115, 0.892\}$ and $\{0.903, 0.118,
+0.903, 0.130, 0.892\}$), while the identical fusion heads under an
+independent-per-$k$ encoder converge cleanly on all five seeds every time
+($0.133\pm0.015$, $0.141\pm0.016$) without matching plain concatenation.
+
+Flat concatenation is therefore preferred not only for its simplicity but
+because -- together with the shared-encoder counterpart -- it is the only
+combination that trains reliably and reaches the best loss. The same two concatenation arms (shared and independent encoder) were
+re-run on nested-Thomas to check the choice transfers across design
+distributions:
+
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Encoder mode & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+shared, concat      & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+independent, concat & $0.133 \pm 0.005$ & $0.228 \pm 0.029$ \\
+\bottomrule
+\end{tabular}
+\caption{Cross-dataset confirmation of the shared-vs-independent encoder
+choice, $n=5$ seeds per arm.}
+\label{tab:encoder-confirm}
+\end{table}
+
+On nested-Thomas the shared encoder's advantage over the independent one is
+larger than on Thomas and the independent arm is noisier
+($\pm0.029$ vs.\ $\pm0.005$), so the shared-encoder choice seems to matter even
+more on the more difficult five-parameter design distribution, reinforcing 
+the choice made above.
+
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+Full model (CoordConv on) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+CoordConv removed & $0.126 \pm 0.005$ & $0.194 \pm 0.002$ \\
+\bottomrule
+\end{tabular}
+\caption{CoordConv ablation: the shared-weight encoder of
+Section~\ref{ssec:encoder-fusion} with and without the two coordinate
+channels, at the default $q=0.95$ calibration, $n=5$ seeds per arm on both
+design distributions.}
+\label{tab:coordconv-ablation}
+\end{table}
+
+CoordConv removal is within seed noise of the full model on both datasets --
+if anything marginally better on Thomas and on nested-Thomas. This does not
+support the claim that CoordConv is necessary to exploit the calibrated pixel
+grid; at the current calibration ($q=0.95$, Section~\ref{ssec:calibration})
+the convolutional stack appears to recover comparable information without
+explicit coordinate channels.
+
+\subsection{Vectorization Comparisons}
+\label{ssec:exp-summaries}
+
+Figure~\ref{fig:vectorization_schematic} gives a visual overview of all five
+vectorizations compared below, computed from the same persistence diagram. We now
+describe each in turn and report their respective performance in Table~\ref{tab:main-comparison}.
+
+\begin{figure}[tbp]
+    \centering
+    \includegraphics[width=\textwidth]{vectorization_schematic.pdf}
+    \caption{One point cloud $\rightarrow$ its $H_0/H_1$ persistence diagrams
+    $\rightarrow$ the five vectorizations compared in
+    Section~\ref{ssec:exp-summaries}: persistence-image raster, landscape
+    stack, silhouette curve, Betti curve, and persistence-statistics summary.
+    Top row: the tight-cluster design ($\kappa=50$, $\mu=4$, $\sigma=0.01$);
+    bottom row: the near-Poisson design ($\kappa=4$, $\mu=5$, $\sigma=0.5$),
+    the same two extremes of Table~\ref{tab:sim-validation}. Statistics-panel
+    bars are min-max normalized per statistic, with raw values printed above
+    each bar, since count, total persistence, and entropy live on
+    incomparable scales.}
+    \label{fig:vectorization_schematic}
+\end{figure}
+
+\paragraph{Landscape.} The $K$ layers $\lambda_1(t) \geq \lambda_2(t) \geq
+\dots \geq \lambda_K(t)$ are the order statistics of the tent family
+$\{\Lambda_i(t)\}_i$ (Definition~\ref{def:tent}) at each grid point $t$:
+$\lambda_j(t)$ is the $j$-th largest tent value. $K$ is chosen per diagram
+sample by a coverage rule -- the smallest $K$ for which layer $K+1$ is
+negligible for 99\% of training diagrams, capped at 16 -- giving a $(K,G)$
+raster per homology dimension.
+
+\paragraph{Silhouette.} Rather than keep every order statistic, the
+silhouette collapses the same tents into one persistence-weighted average,
+    \[
+    \phi^{(p)}(t) = \frac{\sum_i |d_i-b_i|^p\, \Lambda_i(t)}
+    {\sum_i |d_i-b_i|^p},
+    \]
+a single $(1,G)$ curve. $p=0$ is an unweighted mean over tents and $p \to
+\infty$ concentrates entirely on the longest-lived feature; we run $p$ as an
+arm over $\{0,1,2,3\}$.
+
+\paragraph{Betti/Euler curve.} The Betti curve $\beta_k(r) = \#\{i : b_i
+\leq r < d_i\}$ counts $k$-features alive at scale $r$ -- a feature count
+rather than a tent reduction, but built from the same persistence pairs.
+The Euler curve $\chi(r) = \beta_0(r) - \beta_1(r)$ is a signed count nested
+inside the two Betti channels, not additional information.
+
+For a discussion of each vectorization's calibration (grid ranges, $K$-selection, shared vs.\ per-dimension
+axes) refer to Appendix~\ref{app:calibration-sweeps}; for per-stage tensor
+shapes refer to Appendix~\ref{app:tensor-shapes}.
+
+\begin{table}[tbp]
+\centering
+\footnotesize
+\begin{tabular}{lrrcccc}
+\toprule
+ & & & \multicolumn{2}{c}{$\mathcal{L}$, native encoder} & \multicolumn{2}{c}{$\mathcal{L}$, MLP encoder} \\
+\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Vec. & dim/channel & channels & T & NT & T & NT \\
+\midrule
+PI  & $64\times64=4096$ & 6  & $0.126 \pm 0.008$ (10) & $0.196 \pm 0.006$ (5) & $0.154 \pm 0.012$ (5) & $0.261 \pm 0.011$ (5) \\
+LS  & $16\times128=2048$ & 6  & $0.132 \pm 0.008$ (3)  & $0.250 \pm 0.005$ (3) & $0.167 \pm 0.019$ (5) & $0.284 \pm 0.009$ (5) \\
+SIL & $128$              & 12 & $0.165 \pm 0.013$ (3)  & $0.271 \pm 0.012$ (3) & $0.177 \pm 0.013$ (5) & $0.297 \pm 0.004$ (5) \\
+BC  & $128$              & 6  & $0.196 \pm 0.014$ (3)  & $0.290 \pm 0.005$ (3) & $0.176 \pm 0.009$ (5) & $0.266 \pm 0.003$ (5) \\
+\bottomrule
+\end{tabular}
+\caption{Vectorization methods comparison. ``Native'' denotes the methods'
+purpose-built encoder (CNN for PI/LS, 1-D CoordConv for SIL/BC); ``MLP'' is
+the architecture-agnostic \texttt{FlattenMLPEncoder} applied to the same
+tensor. All native-path arms use the $q=0.95$ calibration matched to the
+persistence image rather than each
+vectorization's own tuned default from Appendix~\ref{app:alt-calibration},
+so the comparison is calibration-fair;
+BC's own appendix-preferred $q=0.99$ scores slightly better
+($0.179\pm0.012$ T / $0.284\pm0.011$ NT) but is not used here for
+consistency. SIL is fixed at $p=1$ throughout (the SIL-1 arm of
+Appendix~\ref{app:calib-silhouette}) for both the native and MLP path. T =
+Thomas, NT = nested-Thomas; seed count $n$ in parentheses.}
+\label{tab:main-comparison}
+\end{table}
+\fig{Per-parameter error by vectorization, grouped bars, $\kappa/\mu/\sigma$.
+This is the figure that carries the diagnostic claim -- the scalar table only
+carries the ranking.}
+
+\fig{Native vs MLP path scatter, one point per vectorization. Points near the
+diagonal = the summary is doing the work; large vertical spread = the encoder is.}
+
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{llcc}
+\toprule
+Vectorization & Homology dims & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+PI & $H_0$ only     & $0.126 \pm 0.006$ & $0.194 \pm 0.006$ \\
+PI & $H_1$ only     & $0.895 \pm 0.019$ & $0.911 \pm 0.013$ \\
+PI & $H_0{+}H_1$ (default) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
+\addlinespace
+LS & $H_0$ only     & $0.135 \pm 0.006$ & $0.246 \pm 0.002$ \\
+LS & $H_1$ only     & \#\#\# & \#\#\# \\
+\addlinespace
+BC & $H_0$ only     & $0.237 \pm 0.012$ & $0.294 \pm 0.014$ \\
+BC & $H_1$ only     & $0.260 \pm 0.019$ & $0.510 \pm 0.009$ \\
+\bottomrule
+\end{tabular}
+\caption{Homology-dimension ablation (C3), $n=5$ seeds per arm, both design
+distributions, native encoder path at the shared $q=0.95$ calibration
+(Section~\ref{ssec:calibration}) rather than each vectorization's own
+appendix-preferred default. PI and BC are complete;
+LS's $H_1$-only arm has not been run (\#\#\# = not yet run) -- LS's
+$H_0{+}H_1$ default is the native row of Table~\ref{tab:main-comparison}
+($0.132\pm0.008$ T / $0.250\pm0.005$ NT, 3 seeds), not repeated here since it
+was not re-run at $n=5$.}
+\label{tab:homology-ablation}
+\end{table}
+For the persistence image, $H_1$ alone lands within noise of the
+label-shuffle floor (Section~\ref{ssec:exp-controls}) on both datasets,
+while $H_0$ alone is statistically indistinguishable from the fused
+$H_0{+}H_1$ default -- essentially all the recoverable signal is in $H_0$
+(connected-component birth/death, i.e.\ local density) and $H_1$ (loop
+structure) contributes nothing measurable beyond it on either design
+distribution. The Betti curve does not replicate this collapse: BC's
+$H_1$-only arm ($0.260$ T / $0.510$ NT) is worse than its $H_0$-only arm
+($0.237$ T / $0.294$ NT) but nowhere near the $\approx\!0.9$--$1.0$
+label-shuffle floor that PI's $H_1$-only arm collapses to, on either
+dataset. A feature-count curve therefore retains some usable signal in the
+loop structure that a persistence-image raster, at this calibration, does
+not -- though BC's $H_0$-only number is itself well above PI's, so this is
+not a claim that BC's $H_1$ channel is more informative in absolute terms.
+
+
+% -----------------------------------------------------------------------------
+\subsection{Estimation performance}
+\label{ssec:exp-performance}
+% #############################################################################
+
+\paragraph{Comparison against classical estimators.}
+\todo{minimum contrast on $K$ and on $g$, and Palm likelihood, run on the SAME
+clouds (Section \ref{sec:simulator}). This is the headline comparison and the
+only one that can substantiate the limitations claimed in Section 1.}
+
+\paragraph{Error surfaces over the design grid.}
+\todo{error as a surface over $(\log\nu, \log\lambda)$ using the grid evaluation
+set. Expect degradation as $\nu \to 1$ (weak identifiability) -- if the model
+degrades more gracefully than minimum contrast there, that IS the result.}
+
+\paragraph{Per-parameter breakdown.}
+\todo{$\kappa$, $\mu$, $\sigma$ separately. They are not equally hard and a
+single scalar loss hides this.}
+
+\paragraph{Performance relative to the irreducible error floor.}
+\todo{report error as a ratio to the single-realization floor defined in
+Section \ref{sec:problem}, so the numbers mean something absolute.}
+
+\paragraph{Extrapolation.}
+\todo{the out-of-range evaluation set -- degradation one increment outside each
+design range.}
+
+\paragraph{Cross-family results.}
+\todo{Thomas / Mat\'ern cluster / nested Thomas. Whether one model trained across
+families beats per-family models is an interesting question in itself, and the
+common reparameterization of Section 5.1 is what makes it askable.}
+% #############################################################################
+% 8. DISCUSSION AND LIMITATIONS
+% #############################################################################
+% NOTE -- PURPOSE: pre-empt the obvious objections. Short.
+% #############################################################################
+\section{Discussion and Limitations}
+
+\todo{Add a paragraph on the negative results: three alternative vectorizations
+were implemented and none improved on persistence images. Say plainly what this
+does and does not license -- it is evidence about these summaries under this
+architecture and this design distribution, not a general claim about
+vectorizations.}
+\todo{Add: the per-diagram coverage rule was inherited unchanged by the 1-D
+summaries for comparability, which may not be optimal for each individually.}
+\tab{Compute cost: feature-extraction time per cloud by vectorization, training
+time, and amortized inference time per cloud against minimum contrast per cloud.
+The last comparison strongly favours the method and is currently unmentioned.}
+
+\paragraph{The design distribution is a prior.}
+% [MOVED FROM: end of old Section 3.1.4, where it was a stray closing remark]
+Finally, we note that the design distribution acts as a prior, so the trained
+model approximates a posterior summary under it, and its ranges must therefore
+cover the intended application domain.
+\todo{expand -- this is the single most important limitation of any amortized
+estimator and deserves a full paragraph, not a trailing sentence}
+
+\paragraph{Computational cost.}
+\todo{persistence computation scales badly in $n$; this is why the point budget
+of Section 5.1 is capped at 800. State the cost explicitly and compare against
+the cost of minimum contrast.}
+
+\paragraph{Single realization.}
+\todo{the estimator sees one realization; classical methods often assume the
+same, but say so explicitly}
+
+\paragraph{Homogeneity and stationarity.}
+\todo{everything here assumes homogeneous, stationary, isotropic processes}
+% #############################################################################
+% 9. FUTURE WORK
+% #############################################################################
+% NOTE -- PURPOSE: REQUIRED for the progression report; for the paper this can
+% be folded into Section 8. Keep it concrete and sequenced -- this is the
+% section the panel reads to judge whether there is a viable thesis here.
+% #############################################################################
+\section{Future Work}
+
+\todo{immediate: complete Section \ref{ssec:exp-performance}. Give this a
+timeline -- it is the nearest-term deliverable.}
+
+\todo{near term: the encoder question flagged in Section 6.3 as requiring
+further study -- attention over scales, set-based encoders operating on diagrams
+directly rather than on rasters}
+
+\todo{medium term: inhomogeneous / non-stationary processes, where classical
+closed forms are least available and the topological approach has the most to
+gain -- this is arguably where the thesis-scale contribution lies}
+
+\todo{medium term: real data. Galaxy catalogues if the running example of
+Section 1 is cosmological; name a specific dataset.}
+
+\todo{longer term: uncertainty quantification -- the model currently emits a
+point estimate with no interval, which limits its use as a drop-in replacement
+for likelihood-based methods}
+
+% #############################################################################
+% APPENDIX
+% #############################################################################
+% NOTE -- PURPOSE:
+%   A. every calibration sweep in the paper, one subsection per vectorization,
+%      in a common format. <NEW> The persistence-image sweep has been moved here
+%      from Section 7 so that A is complete rather than covering only the
+%      alternatives -- the section is retitled accordingly.
+%   B. per-stage tensor shapes for all vectorizations. <NEW> forward-referenced
+%      from Section 7.4 but not yet written; the material exists in the
+%      implementation notes and needs pasting in.
+% #############################################################################
+\appendix
+
+\section{Calibration Sweeps}
+\label{app:calibration-sweeps}
+
+\label{app:alt-calibration}% retained: referenced from Section 7.4
+
+Section~\ref{ssec:calibration} discusses the calibration for the persistence image's birth/persistence
+axes by per-diagram coverage quantiles fit on the training split alone. The same
+$(q, \alpha)$ scheme -- coverage $q$ and padding $\alpha$ over per-diagram
+$b^{\min}, b^{\max}, p^{\max}$ -- carries over unchanged to the 1-D grid
+$[t_{\min}, T]$ underlying landscapes, silhouettes, and Betti/Euler curves, since
+all three are built from the same tent family $\{\Lambda_i(t)\}_i$
+(Definition~\ref{def:tent}) rather than the 2-D birth-persistence surface. This
+appendix reports, per vectorization, the calibration sweeps run at the shared
+multi-scale architecture of Section~\ref{ssec:encoder-fusion}: a CoordConv-augmented
+CNN encoder with shared weights across DTM scales $k \in \{5,10,15\}$ followed
+by concatenation fusion, and a
+two-layer MLP head (exactly as used for the persistence-image sweep of
+Table~\ref{tab:calibration-sweep}).
+\todo{<NEW> This intro says the appendix covers the vectorizations
+\emph{other than} the persistence image. It now covers the persistence image
+too (Appendix~\ref{app:calib-pi}) -- adjust the framing sentence.}
+
+\subsection{Persistence Images}
+\label{app:calib-pi}
+
+% [MOVED FROM: Section 7, where the four-group table dominated the opening of
+%  the Experiments section. The distilled coverage-only table stays in
+%  Section 7.2; this is the full sweep.]
+\begin{table}[tbp]
 \centering
 \small
 \begin{tabular}{llcc}
@@ -1247,386 +1616,19 @@ both the Thomas and nested-Thomas design distributions
 (Section~\ref{sec:simulator}). Diagrams use the default $DTM_{\{5,10,15\}}$,
 $H_0{+}H_1$ pipeline and shared-weight architecture of
 Section~\ref{ssec:encoder-fusion}. Cells report $\mathcal{L}$
-(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds).
+(Section~\ref{ssec:eval-protocol}, mean $\pm$ sd over 3 seeds).
 $^\dagger$ marks configurations that diverge on at least one of the
 three seeds (per-seed $\mathcal{L} \approx 0.9$--$1.0$, i.e.\ no better than
 predicting the design-distribution mean); their mean is dominated by the
 diverged seed(s) and should not be read as a stable estimate.}
 \label{tab:calibration-sweep}
 \end{table}
-
-Excluding the $^\dagger$ rows, resolution $G=128$ is the only arm that is
-unambiguously bad -- $G\in\{32,64\}$, $\alpha$, and $\sigma_{\text{pixels}}$
-all vary within one seed-standard-deviation of the default across both
-datasets. Coverage $q$ is the one parameter with a genuine, dataset-dependent
-disagreement: the Thomas optimum moves toward the naive endpoint $q=1.00$
-($0.120$ vs.\ $0.126$ at the default), while nested-Thomas prefers tighter
-coverage at $q=0.90$ ($0.195$) and gets markedly worse as $q\to1$; we
-therefore keep the shared default $q=0.95$ rather than fit $q$ per dataset.
-
-\paragraph{Sanity check: label shuffling.} The $^\dagger$ divergence in
-Table~\ref{tab:calibration-sweep} is described as ``no better than predicting
-the design-distribution mean,'' but that floor was never independently
-measured. We do so directly: retraining the default PI model with training
-labels randomly permuted (inputs unchanged), so the only learnable target is
-each parameter's marginal distribution.
-
-\begin{table}[htbp]
-\centering
-\small
-\begin{tabular}{lcc}
-\toprule
-Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
-\midrule
-Full model (correct labels) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
-Shuffled labels             & $1.011 \pm 0.024$ & $0.997 \pm 0.018$ \\
-\bottomrule
-\end{tabular}
-\caption{Label-shuffle control, $n=5$ seeds, both design distributions. Same
-architecture and calibration as the full model; only the training-label
-assignment is permuted.}
-\label{tab:label-shuffle}
-\end{table}
-
-Both datasets land at $\mathcal{L}\approx1.0$, confirming the $^\dagger$ rows
-of Table~\ref{tab:calibration-sweep} are genuinely collapsing to
-chance-level prediction and not to some other failure mode, and giving an
-empirical floor against which every other result in this section can be
-read.
-
-\subsection{Vectorization Comparisons}
-\label{ssec:exp-summaries}
-
-Figure~\ref{fig:vectorization_schematic} gives a visual overview of all five
-vectorizations compared below, computed from the same persistence diagram. We now
-describe each in turn and report their respective performance in Table~\ref{tab:main-comparison}.
-
-\paragraph{Landscape.} The $K$ layers $\lambda_1(t) \geq \lambda_2(t) \geq
-\dots \geq \lambda_K(t)$ are the order statistics of the tent family
-$\{\Lambda_i(t)\}_i$ (Definition~\ref{def:tent}) at each grid point $t$:
-$\lambda_j(t)$ is the $j$-th largest tent value. $K$ is chosen per diagram
-sample by a coverage rule -- the smallest $K$ for which layer $K+1$ is
-negligible for 99\% of training diagrams, capped at 16 -- giving a $(K,G)$
-raster per homology dimension.
-
-\paragraph{Silhouette.} Rather than keep every order statistic, the
-silhouette collapses the same tents into one persistence-weighted average,
-    \[
-    \phi^{(p)}(t) = \frac{\sum_i |d_i-b_i|^p\, \Lambda_i(t)}
-    {\sum_i |d_i-b_i|^p},
-    \]
-a single $(1,G)$ curve. $p=0$ is an unweighted mean over tents and $p \to
-\infty$ concentrates entirely on the longest-lived feature; we run $p$ as an
-arm over $\{0,1,2,3\}$.
-
-\paragraph{Betti/Euler curve.} The Betti curve $\beta_k(r) = \#\{i : b_i
-\leq r < d_i\}$ counts $k$-features alive at scale $r$ -- a feature count
-rather than a tent reduction, but built from the same persistence pairs.
-The Euler curve $\chi(r) = \beta_0(r) - \beta_1(r)$ is a signed count nested
-inside the two Betti channels, not additional information.
-
-For a discussion of each vectorization's calibration (grid ranges, $K$-selection, shared vs.\ per-dimension
-axes) and tensor shapes, refer to REF.
-
-\begin{table}[htbp]
-\centering
-\small
-\begin{tabular}{lcccccc}
-\toprule
-Vec. & per-channel dim & channels & $\mathcal{L}$ native (T) & $\mathcal{L}$ native (NT) & $\mathcal{L}$ MLP (T) & $\mathcal{L}$ MLP (NT) \\
-\midrule
-PI  & $64\times64=4096$ & 6  & $0.126 \pm 0.008$ (10) & $0.196 \pm 0.006$ (5) & $0.154 \pm 0.012$ (5) & $0.261 \pm 0.011$ (5) \\
-LS  & $16\times128=2048$ & 6  & $0.132 \pm 0.008$ (3)  & $0.250 \pm 0.005$ (3) & $0.167 \pm 0.019$ (5) & $0.284 \pm 0.009$ (5) \\
-SIL & $128$              & 12 & $0.165 \pm 0.013$ (3)  & $0.271 \pm 0.012$ (3) & $0.177 \pm 0.013$ (5) & $0.297 \pm 0.004$ (5) \\
-BC  & $128$              & 6  & $0.196 \pm 0.014$ (3)  & $0.290 \pm 0.005$ (3) & $0.176 \pm 0.009$ (5) & $0.266 \pm 0.003$ (5) \\
-\bottomrule
-\end{tabular}
-\caption{Vectorization methods comparison: ``native'' denote's the methods'
-purpose-built encoder (CNN for PI/LS, 1-D CoordConv for SIL/BC); ``MLP'' is
-the architecture-agnostic \texttt{FlattenMLPEncoder} applied to the same
-tensor. All native-path arms use the $q=0.95$ calibration matched to the
-persistence image rather than each
-vectorization's own tuned default from Appendix~\ref{app:alt-calibration},
-so the comparison is calibration-fair, not each-vectorization-optimal;
-BC's own appendix-preferred $q=0.99$ scores slightly better
-($0.179\pm0.012$ T / $0.284\pm0.011$ NT) but is not used here for
-consistency. SIL is fixed at $p=1$ throughout (the SIL-1 arm of
-Appendix~\ref{app:calib-silhouette}) for both the native and MLP path. T =
-Thomas, NT = nested-Thomas; seed count $n$ in parentheses
-(PI native/T uses the 10-seed default run, all other cells use 3--5 seeds --
-see Section~\ref{ssec:encoder-fusion} for the shared training protocol).
-Per-channel dim $\times$ channels gives the flattened tensor size actually
-fed to the encoder (PI: $24{,}576$; LS: $12{,}288$; SIL: $1{,}536$; BC:
-$768$) -- comparisons above are not capacity-matched.}
-\label{tab:main-comparison}
-\end{table}
-
-\fig{Per-parameter error by vectorization, grouped bars, $\kappa/\mu/\sigma$.
-This is the figure that carries the diagnostic claim -- the scalar table only
-carries the ranking.}
-
-\fig{Native vs MLP path scatter, one point per vectorization. Points near the
-diagonal = the summary is doing the work; large vertical spread = the encoder is.}
-
-\begin{table}[htbp]
-\centering
-\small
-\begin{tabular}{lcccc}
-\toprule
-Vectorization & Homology dims & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
-\midrule
-PI & $H_0$ only     & $0.126 \pm 0.006$ & $0.194 \pm 0.006$ \\
-PI & $H_1$ only     & $0.895 \pm 0.019$ & $0.911 \pm 0.013$ \\
-PI & $H_0{+}H_1$ (default) & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
-\addlinespace
-LS & $H_0$ only     & $0.135 \pm 0.006$ & $0.246 \pm 0.002$ \\
-LS & $H_1$ only     & \#\#\# & \#\#\# \\
-\addlinespace
-BC & $H_0$ only     & $0.237 \pm 0.012$ & $0.294 \pm 0.014$ \\
-BC & $H_1$ only     & $0.260 \pm 0.019$ & $0.510 \pm 0.009$ \\
-\bottomrule
-\end{tabular}
-\caption{Homology-dimension ablation (C3), $n=5$ seeds per arm, both design
-distributions, native encoder path at the shared $q=0.95$ calibration
-(Section~\ref{ssec:calibration}) rather than each vectorization's own
-appendix-preferred default. PI and BC are complete;
-LS's $H_1$-only arm has not been run (\#\#\# = not yet run) -- LS's
-$H_0{+}H_1$ default is the native row of Table~\ref{tab:main-comparison}
-($0.132\pm0.008$ T / $0.250\pm0.005$ NT, 3 seeds), not repeated here since it
-was not re-run at $n=5$.}
-\label{tab:homology-ablation}
-\end{table}
-
-For the persistence image, $H_1$ alone lands within noise of the
-label-shuffle floor (Section~\ref{ssec:exp-summaries}) on both datasets,
-while $H_0$ alone is statistically indistinguishable from the fused
-$H_0{+}H_1$ default -- essentially all the recoverable signal is in $H_0$
-(connected-component birth/death, i.e.\ local density) and $H_1$ (loop
-structure) contributes nothing measurable beyond it on either design
-distribution. The Betti curve does not replicate this collapse: BC's
-$H_1$-only arm ($0.260$ T / $0.510$ NT) is worse than its $H_0$-only arm
-($0.237$ T / $0.294$ NT) but nowhere near the $\approx\!0.9$--$1.0$
-label-shuffle floor that PI's $H_1$-only arm collapses to, on either
-dataset. A feature-count curve therefore retains some usable signal in the
-loop structure that a persistence-image raster, at this calibration, does
-not -- though BC's $H_0$-only number is itself well above PI's, so this is
-not a claim that BC's $H_1$ channel is more informative in absolute terms.
-
-% -----------------------------------------------------------------------------
-\subsection{Architecture ablations}
-\label{ssec:exp-ablations}
-% -----------------------------------------------------------------------------
-
-This sweep was run on the persistence-image arm at the default $q=0.95$
-calibration; Section~\ref{ssec:exp-summaries} confirms PI is the arm worth
-ablating.
-
-We ran a sweep crossing \emph{encoder mode} (shared-weight vs.\
-independent-per-$k$) against \emph{fusion mode} (concatenation, average-pool,
-or a small convolutional-flatten fusion head), five seeds per combination, on
-Thomas.
-
-\begin{table}[htbp]
-\centering
-\small
-\begin{tabular}{llcc}
-\toprule
-Encoder mode & Fusion & $\mathcal{L}$ (mean $\pm$ sd) & Failed seeds \\
-\midrule
-shared      & concat        & $0.122 \pm 0.007$ & $0/5$ \\
-shared      & conv-avg      & $0.431 \pm 0.425^\dagger$ & $2/5$ \\
-shared      & conv-flatten  & $0.589 \pm 0.425^\dagger$ & $3/5$ \\
-independent & concat        & $0.129 \pm 0.006$ & $0/5$ \\
-independent & conv-avg      & $0.133 \pm 0.015$ & $0/5$ \\
-independent & conv-flatten  & $0.141 \pm 0.016$ & $0/5$ \\
-\bottomrule
-\end{tabular}
-\caption{Full encoder-mode $\times$ fusion-mode cross, $n=5$ seeds per
-combination, on Thomas at the default PI calibration. ``Failed'' seeds are
-those that collapse to the $\mathcal{L}\approx0.9$ design-distribution-mean
-floor of Table~\ref{tab:label-shuffle} rather than converging.
-$^\dagger$ mean is dominated by the failed seeds and is not a stable estimate
-of the arm's typical performance; see per-seed values in the text.}
-\label{tab:encoder-fusion-sweep}
-\end{table}
-
-\fig{Per-seed loss scatter across the six configurations -- the collapse
-pattern below is the interesting part and this table's means alone
-understate it.}
-
-Restricted to concatenation, shared and independent encoders match to within
-seed noise ($0.122\pm0.007$ vs.\ $0.129\pm0.006$); since tying weights across
-scales also cuts the parameter count roughly $K$-fold and removes one design
-axis, we adopt the shared encoder going forward. Both convolutional-fusion
-variants are unstable, but \emph{only when paired with the shared encoder}:
-shared/conv-avg and shared/conv-flatten each collapse to the
-$\mathcal{L}\approx0.9$ floor on 2/5 and 3/5 seeds respectively (individual
-per-seed losses: $\{0.128, 0.120, 0.902, 0.115, 0.892\}$ and $\{0.903, 0.118,
-0.903, 0.130, 0.892\}$), while the identical fusion heads under an
-independent-per-$k$ encoder converge cleanly on all five seeds every time
-($0.133\pm0.015$, $0.141\pm0.016$) without matching plain concatenation.
-Flat concatenation is therefore preferred not only for its simplicity but
-because, together with its shared-encoder counterpart, it is the only
-combination that both trains reliably and reaches the best loss; the
-convolutional-fusion instability is specifically an interaction with weight
-sharing, not a property of convolutional fusion on its own.
-
-The same two concatenation arms (shared and independent encoder) were
-re-run on nested-Thomas to check the choice transfers across design
-distributions:
-
-\begin{table}[htbp]
-\centering
-\small
-\begin{tabular}{lcc}
-\toprule
-Encoder mode & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
-\midrule
-shared, concat      & $0.124 \pm 0.007$ & $0.196 \pm 0.006$ \\
-independent, concat & $0.133 \pm 0.005$ & $0.228 \pm 0.029$ \\
-\bottomrule
-\end{tabular}
-\caption{Cross-dataset confirmation of the shared-vs-independent encoder
-choice, $n=5$ seeds per arm.}
-\label{tab:encoder-confirm}
-\end{table}
-
-On nested-Thomas the shared encoder's advantage over the independent one is
-larger than on Thomas and the independent arm is noisier
-($\pm0.029$ vs.\ $\pm0.005$), so the shared-encoder choice, if anything,
-matters more on the harder five-parameter design distribution -- reinforcing
-rather than undercutting the choice made above.
-
-% -----------------------------------------------------------------------------
-\subsection{Estimation performance}
-\label{ssec:exp-performance}
-% #############################################################################
-
-\paragraph{Comparison against classical estimators.}
-\todo{minimum contrast on $K$ and on $g$, and Palm likelihood, run on the SAME
-clouds (Section \ref{sec:simulator}). This is the headline comparison and the
-only one that can substantiate the limitations claimed in Section 1.}
-
-\paragraph{Error surfaces over the design grid.}
-\todo{error as a surface over $(\log\nu, \log\lambda)$ using the grid evaluation
-set. Expect degradation as $\nu \to 1$ (weak identifiability) -- if the model
-degrades more gracefully than minimum contrast there, that IS the result.}
-
-\paragraph{Per-parameter breakdown.}
-\todo{$\kappa$, $\mu$, $\sigma$ separately. They are not equally hard and a
-single scalar loss hides this.}
-
-\paragraph{Performance relative to the irreducible error floor.}
-\todo{report error as a ratio to the single-realization floor defined in
-Section \ref{sec:problem}, so the numbers mean something absolute.}
-
-\paragraph{Extrapolation.}
-\todo{the out-of-range evaluation set -- degradation one increment outside each
-design range.}
-
-\paragraph{Cross-family results.}
-\todo{Thomas / Mat\'ern cluster / nested Thomas. Whether one model trained across
-families beats per-family models is an interesting question in itself, and the
-common reparameterization of Section 5.1 is what makes it askable.}
-
-
-% #############################################################################
-% 8. DISCUSSION AND LIMITATIONS
-% #############################################################################
-% NOTE -- PURPOSE: pre-empt the obvious objections. Short.
-% #############################################################################
-\section{Discussion and Limitations}
-
-\todo{Add a paragraph on the negative results: three alternative vectorizations
-were implemented and none improved on persistence images. Say plainly what this
-does and does not license -- it is evidence about these summaries under this
-architecture and this design distribution, not a general claim about
-vectorizations.}
-\todo{Add: the per-diagram coverage rule was inherited unchanged by the 1-D
-summaries for comparability, which may not be optimal for each individually.}
-\tab{Compute cost: feature-extraction time per cloud by vectorization, training
-time, and amortized inference time per cloud against minimum contrast per cloud.
-The last comparison strongly favours the method and is currently unmentioned.}
-
-\paragraph{The design distribution is a prior.}
-% [MOVED FROM: end of old Section 3.1.4, where it was a stray closing remark]
-Finally, we note that the design distribution acts as a prior, so the trained
-model approximates a posterior summary under it, and its ranges must therefore
-cover the intended application domain.
-\todo{expand -- this is the single most important limitation of any amortized
-estimator and deserves a full paragraph, not a trailing sentence}
-
-\paragraph{Computational cost.}
-\todo{persistence computation scales badly in $n$; this is why the point budget
-of Section 5.1 is capped at 800. State the cost explicitly and compare against
-the cost of minimum contrast.}
-
-\paragraph{Single realization.}
-\todo{the estimator sees one realization; classical methods often assume the
-same, but say so explicitly}
-
-\paragraph{Homogeneity and stationarity.}
-\todo{everything here assumes homogeneous, stationary, isotropic processes}
-
-
-% #############################################################################
-% 9. FUTURE WORK
-% #############################################################################
-% NOTE -- PURPOSE: REQUIRED for the progression report; for the paper this can
-% be folded into Section 8. Keep it concrete and sequenced -- this is the
-% section the panel reads to judge whether there is a viable thesis here.
-% #############################################################################
-\section{Future Work}
-
-\todo{immediate: complete Section \ref{ssec:exp-performance}. Give this a
-timeline -- it is the nearest-term deliverable.}
-
-\todo{near term: the encoder question flagged in Section 6.3 as requiring
-further study -- attention over scales, set-based encoders operating on diagrams
-directly rather than on rasters}
-
-\todo{medium term: inhomogeneous / non-stationary processes, where classical
-closed forms are least available and the topological approach has the most to
-gain -- this is arguably where the thesis-scale contribution lies}
-
-\todo{medium term: real data. Galaxy catalogues if the running example of
-Section 1 is cosmological; name a specific dataset.}
-
-\todo{longer term: uncertainty quantification -- the model currently emits a
-point estimate with no interval, which limits its use as a drop-in replacement
-for likelihood-based methods}
-
-
-% #############################################################################
-% APPENDIX
-% #############################################################################
-% NOTE -- PURPOSE: the "Appendix A" forward-referenced from
-% Section~\ref{ssec:calibration} (twice) and Section~\ref{ssec:exp-summaries}
-% -- full calibration detail for every vectorization OTHER than the
-% persistence image, one subsection per vectorization. Persistence
-% Landscapes, Silhouettes, and Betti/Euler curves are now populated; the
-% persistence-statistics floor control (calibration-free -- see
-% ssec:exp-summaries -- so there may be nothing to sweep here beyond a
-% sanity-check subsection) is still \todo.
-% #############################################################################
-\appendix
-
-\section{Calibration of Alternative Vectorizations}
-\label{app:alt-calibration}
-
-Section~\ref{ssec:calibration} discusses the calibration for the persistence image's birth/persistence
-axes by per-diagram coverage quantiles fit on the training split alone. The same
-$(q, \alpha)$ scheme -- coverage $q$ and padding $\alpha$ over per-diagram
-$b^{\min}, b^{\max}, p^{\max}$ -- carries over unchanged to the 1-D grid
-$[t_{\min}, T]$ underlying landscapes, silhouettes, and Betti/Euler curves, since
-all three are built from the same tent family $\{\Lambda_i(t)\}_i$
-(Definition~\ref{def:tent}) rather than the 2-D birth-persistence surface. This
-appendix reports, per vectorization, the calibration sweeps run at the shared
-multi-scale architecture of Section~\ref{ssec:encoder-fusion}: a CoordConv-augmented
-CNN encoder with shared weights across DTM scales $k \in \{5,10,15\}$ followed
-by concatenation fusion, and a
-two-layer MLP head (exactly as used for the persistence-image sweep of
-Table~\ref{tab:calibration-sweep}).
+\todo{<NEW> Add a one-paragraph reading of the $\alpha$, $\sigma_{\text{pixels}}$
+and $G$ groups here (the coverage discussion stays in
+Section~\ref{ssec:exp-calibration}). The $G=128$ divergence in particular is
+unexplained: both seeds fail on both design distributions, which looks like an
+optimization failure at increased raster size rather than a calibration effect,
+and if so it should be said rather than left as a $^\dagger$.}
 
 \subsection{Persistence Landscapes}
 \label{app:calib-landscape}
@@ -1652,7 +1654,7 @@ the rule choose it. Table~\ref{tab:calibration-sweep-landscape} reports all
 three, one-at-a-time, holding $c = 0.99$, $K_{\max} = 16$, and the diagram-grid
 coverage $q = 0.95$ fixed except where swept.
 
-\begin{table}[htbp]
+\begin{table}[tbp]
 \centering
 \small
 \begin{tabular}{llcc}
@@ -1687,7 +1689,7 @@ landscape channels per scale (six total). The diagram-grid coverage $q =
 0.95$ (Section~\ref{ssec:calibration}) is fixed across every arm;
 $K$-selection uses coverage $c=0.99$ and cap $K_{\max}=16$, both fixed except
 in the third group. Cells report $\mathcal{L}$
-(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds). $^\ddagger$
+(Section~\ref{ssec:eval-protocol}, mean $\pm$ sd over 3 seeds). $^\ddagger$
 the $G=512$, $K=8$ arm matches the $4096$-d persistence-image budget of
 Table~\ref{tab:calibration-sweep} exactly; the other three rows of that group
 hold $G=128$ fixed and vary only $K$, so this row is not raster-size-matched
@@ -1708,7 +1710,6 @@ monotonically worse. Within the range tested, more landscape layers help and
 $K_{\max}$ -- not $\tau$ -- is the binding constraint; distinguishing the
 rule's own threshold from its cap would require re-running with a larger
 $K_{\max}$.
-
 \subsection{Silhouettes}
 \label{app:calib-silhouette}
 
@@ -1729,7 +1730,7 @@ only the grid-resolution sweep, holding $q=0.95$ and $\alpha=1.05$
 (Section~\ref{ssec:calibration}) fixed at the values selected for the
 persistence image.
 
-\begin{table}[htbp]
+\begin{table}[tbp]
 \centering
 \small
 \begin{tabular}{llcc}
@@ -1751,7 +1752,7 @@ the persistence-image sweep of Table~\ref{tab:calibration-sweep}. The
 diagram-grid coverage $q=0.95$ and padding $\alpha=1.05$
 (Section~\ref{ssec:calibration}) are fixed across every arm at the values
 selected for the persistence image. Cells report $\mathcal{L}$
-(Section~\ref{ssec:exp-performance}, mean $\pm$ sd over 3 seeds).}
+(Section~\ref{ssec:eval-protocol}, mean $\pm$ sd over 3 seeds).}
 \label{tab:calibration-sweep-silhouette}
 \end{table}
 
@@ -1761,7 +1762,6 @@ configuration shows the divergence behavior marked $^\dagger$ in
 Table~\ref{tab:calibration-sweep}. $G=64$ is a reasonable default going
 forward -- it costs a quarter of $G=256$'s raster and is not measurably worse
 on either dataset.
-
 \subsection{Betti and Euler Curves}
 \label{app:calib-betti}
 
@@ -1779,7 +1779,7 @@ magnitudes), so grid resolution $G$ and calibration coverage $q$ are the two
 axes swept, one at a time, at the shared multi-scale architecture of
 Table~\ref{tab:calibration-sweep}.
 
-\begin{table}[htbp]
+\begin{table}[tbp]
 \centering
 \small
 \begin{tabular}{llcc}
@@ -1805,7 +1805,7 @@ $H_0{+}H_1$ pipeline (Euler channel disabled, see text) and shared-weight
 architecture of Section~\ref{ssec:encoder-fusion}. Padding is fixed at
 $\alpha=1.05$ throughout -- the value selected for the persistence image --
 rather than this vectorization's own code default of $\alpha=1.1$. Cells
-report $\mathcal{L}$ (Section~\ref{ssec:exp-performance}, mean $\pm$ sd over
+report $\mathcal{L}$ (Section~\ref{ssec:eval-protocol}, mean $\pm$ sd over
 3 seeds).}
 \label{tab:calibration-sweep-betti}
 \end{table}
@@ -1821,6 +1821,31 @@ this is a real effect and not a diverged seed. Unlike the $^\dagger$ rows of
 Table~\ref{tab:calibration-sweep}, no arm here shows per-seed divergence to
 the design-distribution mean; $q=1.00$ is simply a worse calibrated range, not
 a failure mode.
+
+\subsection{Persistence Statistics}
+\label{app:calib-stat}
+
+\todo{<NEW> Either a short subsection stating that this vectorization is
+calibration-free (the 18 statistics are a pure per-diagram function; the only
+train-fit step is a per-column z-score before the MLP, which has no free
+parameter), or remove the floor control from the paper entirely -- see the TODO
+in Section~\ref{ssec:exp-summaries}. Note the asymmetry worth one sentence if it
+stays: the statistics path is z-scored while the raster and curve paths are
+deliberately left unnormalized.}
+
+
+\section{Tensor Shapes}
+\label{app:tensor-shapes}
+
+\todo{<NEW> Forward-referenced from Section~\ref{ssec:exp-summaries} but not yet
+written. One stage-by-stage shape table per vectorization, from
+$(M_i, 2)$ birth--death pairs through to the head input, in the notation of
+Section~\ref{ssec:encoder-fusion} ($B$, $n_k$, $D$, $G$, $E$). The persistence
+image path is the one already described in prose in
+Section~\ref{ssec:encoder-fusion}; the landscape $(K,G)$ raster, silhouette
+two-channel curve, Betti curve and statistics vector paths need the same
+treatment. Flag in the landscape row that the raster is non-square, which is why
+the coordinate-channel builder needs independent height and width ramps.}
 
 
 \end{document}
