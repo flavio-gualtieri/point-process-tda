@@ -181,9 +181,10 @@ def plot_box_panel(ax, diagram, birth_range, pers_range, title, box_color, crop=
     pad_y = 0.05 * (pers_range[1] - pers_range[0])
     ax.set_xlim(birth_range[0] - pad_x, birth_range[1] + pad_x)
     ax.set_ylim(pers_range[0] - pad_y, pers_range[1] + pad_y)
-    ax.set_xlabel("birth", fontsize=8)
-    ax.set_ylabel("persistence", fontsize=8)
-    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("birth", fontsize=13)
+    ax.set_ylabel("persistence", fontsize=13)
+    ax.tick_params(labelsize=11)
+    ax.set_title(title, fontsize=13)
 
 
 def plot_pi_panel(ax, diagram, birth_range, pers_range, title, crop, dim=HOMOLOGY_DIM):
@@ -209,7 +210,7 @@ def plot_pi_panel(ax, diagram, birth_range, pers_range, title, crop, dim=HOMOLOG
     n_px_shown = (cb_hi - cb_lo) / (birth_range[1] - birth_range[0]) * RESOLUTION
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title(f"{title}\n(~{n_px_shown:.0f} px across the crop below)", fontsize=10)
+    ax.set_title(f"{title} (~{n_px_shown:.0f} px)", fontsize=13)
 
 
 def main():
@@ -220,39 +221,26 @@ def main():
     typ_idx = pick_typical(diagrams, homology_dim=HOMOLOGY_DIM)
     typical = diagrams[typ_idx]
 
-    outlier_idx = int(np.argmax([
-        (d.finite_pairs(HOMOLOGY_DIM)[:, 1] - d.finite_pairs(HOMOLOGY_DIM)[:, 0]).max()
-        if len(d.finite_pairs(HOMOLOGY_DIM)) else 0.0
-        for d in diagrams
-    ]))
-    outlier_params = params[outlier_idx]
-
-    # Shared physical zoom window: the typical diagram's own footprint plus a
-    # margin, identical in both panels below -- so the two rasters differ
-    # only in how many of the fixed 64x64 grid's pixels land inside it.
+    # Shared physical zoom window: the typical diagram's own footprint, snug
+    # (a tight 2% pad, not the previous fixed 0.02-0.03 margin) so the crop
+    # frames exactly the features of interest, identical in both panels below
+    # -- the two rasters then differ only in how many of the fixed 64x64
+    # grid's pixels land inside that window.
     typ_pairs = typical.finite_pairs(HOMOLOGY_DIM)
     tb, tp = typ_pairs[:, 0], typ_pairs[:, 1] - typ_pairs[:, 0]
-    crop = ((max(0.0, tb.min() - 0.02), tb.max() + 0.03), (0.0, tp.max() + 0.03))
+    b_span, p_span = tb.max() - tb.min(), tp.max() - tp.min()
+    crop = ((max(0.0, tb.min() - 0.02 * b_span), tb.max() + 0.02 * b_span),
+            (0.0, tp.max() + 0.02 * p_span))
 
     fig, axes = plt.subplots(2, 2, figsize=(8.4, 8.4))
 
     plot_box_panel(axes[0, 0], typical, n_birth, n_pers,
-                    "Naive min/max\n(pooled over all points, all diagrams)", ORANGE, crop=crop)
+                    "Naive min/max", ORANGE, crop=crop)
     plot_box_panel(axes[0, 1], typical, q_birth, q_pers,
-                    f"Coverage-quantile ($q$={COVERAGE}, $\\alpha$={PAD})\n"
-                    "(per-diagram statistic, quantiled over diagrams)", BLUE, crop=crop)
-    plot_pi_panel(axes[1, 0], typical, n_birth, n_pers,
-                   "PI under naive bound, zoomed to dashed box", crop)
-    plot_pi_panel(axes[1, 1], typical, q_birth, q_pers,
-                   "PI under quantile bound, zoomed to dashed box", crop)
+                    f"Coverage-quantile ($q$={COVERAGE}, $\\alpha$={PAD})", BLUE, crop=crop)
+    plot_pi_panel(axes[1, 0], typical, n_birth, n_pers, "PI, naive bound", crop)
+    plot_pi_panel(axes[1, 1], typical, q_birth, q_pers, "PI, quantile bound", crop)
 
-    fig.suptitle(
-        "Same $H_0$ diagram (DTM filtration), two calibrations: the naive bound is\n"
-        f"stretched by an outlier diagram elsewhere in the population "
-        f"($\\mu$={outlier_params['mean_offspring']:.1f} offspring/parent, not shown), "
-        "compressing this diagram's own texture",
-        fontsize=10.5, y=1.02,
-    )
     fig.tight_layout()
     png_path = FIG_DIR / "calibration_comparison.png"
     pdf_path = FIG_DIR / "calibration_comparison.pdf"
