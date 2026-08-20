@@ -1,0 +1,79 @@
+# python scripts/train.py configs/runs/nested_thomas/vec_multik_landscape_rips.yaml
+#
+# Rips-alone counterpart of vec_multik_landscape_native.yaml -- see
+# configs/runs/thomas/vec_multik_landscape_rips.yaml's header for why this
+# (unlike pi_multik_rips.yaml) actually trains: landscapes only need a 1-D
+# [t_min, T] grid per homology dim (axis_bounds_1d), which stays
+# non-degenerate even with every H0 birth pinned at 0 under plain Rips,
+# unlike persistence_image's 2-D birth x persistence box.
+#
+# process.design is descriptive only (data/nested_thomas/clouds.pkl and
+# data/nested_thomas/rips/diagrams.pkl already exist from this process's
+# earlier generate.py/featurize.py runs -- see pi_multik_rips.yaml/
+# betti_cnn_rips_h0.yaml's own earlier runs against the same rips
+# filtration -- this file just points method:/train.py at those same
+# cached diagrams).
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: rips, params: {maxdim: 1}}
+
+features: []
+
+method:
+  name: vec_multik
+  params:
+    vectorization: landscape
+    encoder_path: native
+
+    G: 128
+    homology_dims: [0, 1]
+    include_entropy: false
+    pd_calibration_coverage: 0.95
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+use_adversarial: true

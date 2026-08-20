@@ -1,0 +1,85 @@
+# python scripts/train.py configs/runs/thomas/vec_multik_landscape_rips.yaml
+#
+# Rips-alone counterpart of vec_multik_landscape_native.yaml (k_values
+# auto-derives to a single "scale" from this one-entry filtration list --
+# vec_multik's late-fusion-across-k machinery still applies with n_k=1, it
+# just has nothing to fuse; same as betti_multik_rips.yaml's rips arm).
+#
+# This is the fix for pi_multik_rips.yaml's failure, not a repeat of it:
+# pi_multik/persistence_image needs BOTH axes of its birth x persistence
+# box to have spread, and plain Rips gives every H0 feature birth=0 (every
+# vertex enters the complex at filtration value 0), which axis_bounds
+# rejects outright ("H0 birth axis is degenerate; use a 1-D vectorizer" --
+# see pi_multik_rips.yaml's header for the full story). Landscapes only
+# calibrate a 1-D [t_min, T] grid per dim (axis_bounds_1d), pooling birth
+# extrema into t_min and death extrema into T -- with every H0 birth at 0,
+# t_min just calibrates to ~0 and T still comes out positive from the death
+# quantile, so `T > t_min` holds trivially and calibration succeeds. H0
+# under Rips is then a legitimate (if birth-info-free) landscape over
+# component lifetimes, not a placeholder.
+#
+# process.design is descriptive only (data/thomas/clouds.pkl and
+# data/thomas/rips/diagrams.pkl already exist from this process's earlier
+# generate.py/featurize.py runs -- see pi_multik_rips.yaml/
+# betti_cnn_rips_h0.yaml's own earlier runs against the same rips
+# filtration -- this file just points method:/train.py at those same
+# cached diagrams).
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: rips, params: {maxdim: 1}}
+
+features: []
+
+method:
+  name: vec_multik
+  params:
+    vectorization: landscape
+    encoder_path: native
+
+    G: 128
+    homology_dims: [0, 1]
+    include_entropy: false
+    pd_calibration_coverage: 0.95
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true
