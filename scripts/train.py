@@ -61,7 +61,7 @@ MULTI_K_METHODS = {
     "pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers", "pi_multik_earlyfusion",
     "betti_multik", "vec_multik",
 }
-CLASSICAL_BASELINE_NAMES = {"mincontrast", "mincontrast_g", "palm"}
+CLASSICAL_BASELINE_NAMES = {"mincontrast", "mincontrast_g", "mincontrast_nested", "mincontrast_g_nested", "palm"}
 FILE_KEY_TO_FEATURE_NAME = {"pi": "persistence_image", "images": "persistence_image"}
 # file_keys with no filtration dependency -- their results always live under
 # the "raw" tag (paths.RAW_TAG), regardless of what's configured under
@@ -281,6 +281,18 @@ def run_classical_baseline(
     n_starts = int(cfg.method.params.get("n_starts", 10))
     rng = np.random.default_rng(seed)
 
+    # Optional contrast-exponent override, threaded through the same way
+    # n_starts is -- absent by default, so every existing mincontrast*/palm
+    # config keeps using fit_multistart's own hardcoded c (0.25 for the
+    # K-based fits, 1.0 for the g-based ones). Lets a c-sweep (e.g. the
+    # nested-Thomas g fit's outstanding "re-run with c swept" experiment)
+    # run via `--set method.params.c=<value> --run-tag <label>` with no new
+    # config file, instead of only being reachable through each module's
+    # standalone __main__ CLI.
+    fit_kwargs = {}
+    if "c" in cfg.method.params:
+        fit_kwargs["c"] = float(cfg.method.params["c"])
+
     raw_predictions = np.full((len(test_idx), len(label_names)), np.nan)
     n_fit = 0
     for row, i in enumerate(test_idx):
@@ -292,7 +304,7 @@ def run_classical_baseline(
         low = np.asarray(reg.get("low", [0.0, 0.0]), dtype=float)
         high = np.asarray(reg.get("high", [1.0, 1.0]), dtype=float)
         points_unit = module.crop_and_rescale(points, low, high, rng=rng)
-        result = module.fit_multistart(points_unit, n_starts=n_starts, rng=rng)
+        result = module.fit_multistart(points_unit, n_starts=n_starts, rng=rng, **fit_kwargs)
         raw_predictions[row] = [result.get(name, np.nan) for name in label_names]
         n_fit += 1
     print(f"[{method_name} seed={seed}] fit {n_fit}/{len(test_idx)} test clouds.")

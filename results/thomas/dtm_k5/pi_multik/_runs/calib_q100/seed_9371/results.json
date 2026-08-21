@@ -1,0 +1,106 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.12387924966048786,
+  "test_loss_per_target": {
+    "parent_intensity": 0.1957111358642578,
+    "mean_offspring": 0.14014625549316406,
+    "cluster_scale": 0.035780347883701324
+  },
+  "seed": 9371,
+  "git_commit": "e598958a2fc379622b27a1cd874bd11029d0d1a6",
+  "git_dirty": true,
+  "timestamp": "2026-08-21T04:36:55.437960+00:00",
+  "run_tag": "calib_q100",
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9371,
+    "homology_dims": [
+      0,
+      1
+    ],
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 1.0,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "target_label_names": [
+      "parent_intensity",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "log_label_names": [
+      "parent_intensity",
+      "mean_offspring",
+      "cluster_scale"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "run_tag": "calib_q100",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0",
+      "k5_h1"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.0019601636787269358,
+            1.0305095415494996
+          ],
+          "pers_range": [
+            0.0,
+            0.5973637642051698
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.008035542014615411,
+          "sigma_pers": 0.004666904407852889,
+          "weight_fn": "linear_weight"
+        },
+        "1": {
+          "birth_range": [
+            0.005100710159546503,
+            0.8401346575255454
+          ],
+          "pers_range": [
+            0.0,
+            0.2906456364377782
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.006523702713796866,
+          "sigma_pers": 0.002270669034670142,
+          "weight_fn": "linear_weight"
+        }
+      }
+    }
+  },
+  "adversarial_loss": 0.12455240708589554,
+  "adversarial_loss_per_target": {
+    "parent_intensity": 0.20459216833114624,
+    "mean_offspring": 0.13117928802967072,
+    "cluster_scale": 0.03788578510284424
+  },
+  "adversarial_path": "/gpfs/scratch/qp252676/globus/point-process-tda/data/thomas/adversarial_clouds.pkl"
+}

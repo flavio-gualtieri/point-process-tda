@@ -25,7 +25,17 @@ from cloudforger.paths import DEFAULT_RESULTS_ROOT, ResultsPaths
 # Methods whose results always live under the "raw" filtration tag,
 # regardless of what's configured under `filtration:` -- mirrors
 # scripts/train.py's FILTRATION_INDEPENDENT_FILE_KEYS + baseline dispatch.
-RAW_TAG_METHODS = {"raw_pc", "pairwise", "vihrs", "vihrs_checkpointed", "vihrs_500", "mincontrast", "palm"}
+# All of scripts/train.py's CLASSICAL_BASELINE_NAMES belong here: run_classical_baseline
+# always calls results_paths.seed_dir([], method_name, ...) (empty filtration list), regardless
+# of what `filtration:` the eval config sets -- mincontrast_g was previously missing from this
+# set (silently harmless only when the eval config passed to this script also has no
+# `filtration:` of its own, so the two empty-list resolutions coincided); added here along with
+# the two new nested-Thomas baselines so a mincontrast* method mixed into a --methods list under
+# a filtration-bearing config (e.g. comparing against pi_multik) resolves to the right directory.
+RAW_TAG_METHODS = {
+    "raw_pc", "pairwise", "vihrs", "vihrs_checkpointed", "vihrs_500",
+    "mincontrast", "mincontrast_g", "mincontrast_nested", "mincontrast_g_nested", "palm",
+}
 
 PALETTE = [
     "#2a78d6", "#1baf7a", "#eda100", "#008300",

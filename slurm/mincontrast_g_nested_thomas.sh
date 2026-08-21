@@ -1,0 +1,61 @@
+#!/bin/bash
+
+#SBATCH -J mincontrast_g_nested_thomas
+#SBATCH -t 16:00:00
+#SBATCH --mem-per-cpu=11G
+#SBATCH --array=0-4
+#SBATCH --output=logs/mincontrast_g_nested_thomas_%A_%a.out
+#SBATCH --error=logs/mincontrast_g_nested_thomas_%A_%a.err
+
+# "min contrast on G" classical baseline, nested Thomas -- CPU only. Sibling
+# of mincontrast_nested_thomas.sh (K-based) and mincontrast_g_thomas.sh
+# (single-level g); see mincontrast_g_nested.py's module docstring for the
+# closed-form g of the writeup's \eqref{eq:g-nested} this fits against.
+# Same run_classical_baseline dispatch, same test-partition/multistart
+# convention (method.params.n_starts in
+# configs/runs/nested_thomas/mincontrast_g.yaml), default contrast exponent
+# c=1.0. NEW baseline, not yet validated end-to-end -- same caveat as
+# mincontrast_nested_thomas.sh.
+#
+# This run alone does NOT cover the "Outstanding experiments" bullet's
+# second half ("re-run it on g with the exponent c swept") -- rerun with
+# `--set method.params.c=<value> --run-tag c<label>` appended to the python
+# invocation below (e.g. c=0.25, to match K's validated exponent) for that
+# sweep; run_classical_baseline threads method.params.c through when
+# present, so no new config file is needed, but each swept value needs its
+# own --run-tag or it overwrites this script's c=1.0 results at the same
+# path.
+#
+# Time limit is a rough guess, same caveat as mincontrast_nested_thomas.sh
+# -- empirical_g's per-t kernel evaluation is a similar O(n^2)-per-fit cost
+# to empirical_K's per-t masking, over the same 4 free parameters, so
+# expect comparable runtime to that script, not a different order of
+# magnitude.
+#
+# Results land under results/nested_thomas/raw/mincontrast_g_nested/seed_<seed>/.
+#
+# 5 seeds via --array=0-4, matching mincontrast_g.yaml's 5-seed list.
+#
+# ASSUMES data/nested_thomas/clouds.pkl already exists (it does).
+#
+# Submit from the point-process-tda repo root:
+#   sbatch slurm/mincontrast_g_nested_thomas.sh
+
+set -euo pipefail
+
+cd "$SLURM_SUBMIT_DIR"
+mkdir -p logs
+
+module load miniforge
+set +u
+mamba activate /gpfs/scratch/qp252676/globus/envs/cloud-env
+set -u
+
+SEEDS=(9371 9372 9373 9374 9375)
+SEED="${SEEDS[$SLURM_ARRAY_TASK_ID]}"
+
+echo "Host: $(hostname)"
+echo "Job ID: ${SLURM_JOB_ID:-unset}  Array task: ${SLURM_ARRAY_TASK_ID:-unset}  Seed: $SEED"
+
+python -u scripts/train.py configs/runs/nested_thomas/mincontrast_g.yaml \
+  --seed "$SEED"
