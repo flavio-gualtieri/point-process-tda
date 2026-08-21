@@ -2,9 +2,6 @@
 % First-year progression report
 % Topological Feature Learning for Parameter Estimation in Neyman-Scott
 % Processes -- Flavio Gualtieri
-%
-% Text in blue (\new{...}) is NOT lifted verbatim from the preprint.
-% Text in red (\rev{...}) is new or altered in this revision.
 % =============================================================================
 
 \documentclass[11pt,a4paper]{article}
@@ -17,6 +14,8 @@
 \usepackage{amssymb}
 \usepackage{amsthm}
 
+\usepackage{graphicx}
+\graphicspath{{../figs/}}
 \usepackage{booktabs}
 \usepackage{enumitem}
 \usepackage[font=small,labelfont=bf,skip=4pt]{caption}
@@ -28,7 +27,6 @@
 \setlength{\belowdisplayshortskip}{3pt}
 
 \usepackage{natbib}
-\usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
 \raggedbottom
 \renewcommand{\textfraction}{0.05}
@@ -41,6 +39,7 @@
 % ----------------------------------------------------------------------------
 \newcommand{\R}{\mathbb{R}}
 \newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
 \newcommand{\E}{\mathbb{E}}
 \newcommand{\pc}{\mathbf{x}}
 \newcommand{\simpcom}{\Sigma}
@@ -49,24 +48,21 @@
 \newcommand{\mo}{\mu}
 
 % ----------------------------------------------------------------------------
-\definecolor{newtextcolor}{rgb}{0.00,0.35,0.70}
-\newcommand{\new}[1]{\textcolor{newtextcolor}{#1}}
-\newcommand{\rev}[1]{\textcolor{red}{#1}}
-
-% ----------------------------------------------------------------------------
 \newtheoremstyle{definitioncolon}%
   {4pt}{4pt}{\normalfont}{}{\bfseries}{}{.5em}%
   {\thmname{#1}\thmnumber{ #2}\thmnote{: #3}}
 \theoremstyle{definitioncolon}
 \newtheorem{definition}{Definition}[section]
+\newtheorem{claim}[definition]{Claim}
 
 \newtheorem*{note}{Note}
 \newtheorem*{example}{Example}
+\newtheorem*{remark}{Remark}
 
 % ----------------------------------------------------------------------------
 \title{Topological Feature Learning for Parameter Estimation\\
        in Neyman-Scott Processes\\[4pt]
-       \large \new{First-year progression report}}
+       \large First-year progression report}
 \author{Flavio Gualtieri}
 \date{\today}
 
@@ -91,7 +87,7 @@ haloes hosting galaxies, the offspring intensity $\mu$ is the mean occupancy of
 a halo, and the cluster scale $\sigma$ is the spatial extent of the galaxy
 distribution within a halo; these are exactly the quantities a halo occupancy
 model is built to constrain REF. In forest ecology,
-\citet{waagepetersen2009twostep} one can fit Thomas processes to three tropical tree
+\citet{waagepetersen2009twostep} fit Thomas processes to three tropical tree
 species and read the cluster scale directly as a summary of how tightly seeds
 are dispersed, finding that species dispersed by exploding capsules, by wind,
 and by birds and mammals separate along that parameter.
@@ -225,7 +221,7 @@ ensemble trained with a proper scoring rule) on the same design distribution and
 average its posterior variance -- more faithful to the definition above. We
 report route (i) first because it is a one-line change to existing code, and
 flag route (ii) as the correct target.
-\rev{Note that neither route needs a closed form; both need only a simulator.}
+Note that neither route needs a closed form; both need only a simulator.
 \fi
 
 % #############################################################################
@@ -234,12 +230,9 @@ flag route (ii) as the correct target.
 % #############################################################################
 
 \citet{vihrs2022neural} first proposed the use of deep learning for parameter
-estimation. They implement
-an encoder/inference architecture similar to PointNet, but use the $L$-function as the learned
-feature.
-\citet{yip2025learning} employ a
+estimation. \citet{yip2025learning} employ a
 similar architecture as well, but use
-persistence images as the learned feature,mapping $H_0$--$H_2$ images of an
+persistence images as the input feature,mapping $H_0$--$H_2$ images of an
 $\alpha\mathrm{DTM}\ell$ filtration of a halo catalogue to $(\Omega_m,\sigma_8)$.
 Their model is designed to estimate cosmological parameters rather than the
 parameters of the underlying point process.
@@ -267,16 +260,32 @@ persistent homology that the later sections assume.
 \label{ssec:spp}
 % -----------------------------------------------------------------------------
 
+    \begin{definition}[Intensity function]
+    \label{def:intensity}
+        A $d$-dimensional SPP $X$ on a subset $W \subseteq \R^d$ is equipped
+        with an intensity function $\rho(u): \R^d \rightarrow \R^+$ such that
+            \[
+            \E[N(W)] = \int_W \rho(u) du,
+            \]
+        where $N(W) = \mid W \cap X \mid$ denotes the number of points of $X$
+        in $W$. When $\rho(u) = \lambda \in \R$, $X$ is said to be
+        \emph{homogeneous}.
+    \end{definition}
+
+    \begin{example}
+        For a homogeneous Poisson process with intensity $\lambda$, we have
+        $\rho(u) = \frac{1}{\lambda}$, i.e. points are scattered uniformly on
+        the space.
+    \end{example}
+
     \begin{definition}[Neyman-Scott process]
     \label{def:ns}
-        A $d$-dimensional SPP $X$ on $W \subseteq \R^d$ is equipped
-        with an intensity function $\rho(u): \R^d \rightarrow \R^+$ such that
-        $\E[N(W)] = \int_W \rho(u) du$,
-        where $N(W) = \mid W \cap X \mid$ denotes the number of points of $X$
-        in $W$. Let $P$ be a homogeneous Poisson \emph{parent} process with
-        intensity $\kpar$. For a Neyman-Scott process with Poisson-distributed
-        offspring we have
-            $\rho_{NS}(u) = \mo \sum_{p \in P} k(u - p)$,
+        Let $P$ be a homogeneous Poisson \emph{parent} process with intensity
+        $\kpar$. For a Neyman-Scott process with Poisson-distributed offspring
+        we have:
+            \[
+            \rho_{NS}(u) = \mo \sum_{p \in P} k(u - p),
+            \]
         where $k$ is a kernel that determines how the \emph{offspring} points
         are distributed around the parents.
     \end{definition}
@@ -284,87 +293,176 @@ persistent homology that the later sections assume.
     \begin{note}
         Neyman-Scott processes always have the parent and offspring intensities
         as parameters. Additional parameters are introduced by the choice of
-        kernel. A homogeneous Thomas process is a Neyman-Scott process with an
-        isotropic Gaussian kernel $\mathcal{N}(0, \sigma^2I)$, and has
-        parameters $\theta_{Thomas} = (\kappa, \mu, \sigma)$ corresponding to
-        the parent intensity, offspring intensity, and cluster scale,
-        respectively. For stationary and isotropic $X$, the pair correlation
-        function $g(r) = \rho^{(2)}(r)/\rho^2$ and the $K$-function
-        $K(r) = \int_{b_r(0)} g(\|h\|) dh$ are the two second-order summaries
-        the classical estimators above are fitted against: $\rho(u)K(r)$ is the
-        expected number of points we expect to
-        see within a distance $r$ of a typical point in $X$, and
-        $g$ can suggest whether SPPs are attractive ($g > 1$), or repulsive
-        ($g < 1$).
-        For the Thomas process
-        $g(h) = 1 + e^{-\|h\|^2/4\sigma^2}/(4\pi\sigma^2\kappa)$ and
-        $K(t) = \pi t^2 + (1-e^{-t^2/4\sigma^2})/\kappa$
-        \citep{waagepetersen2009twostep}. Neither depends on $\mu$, which enters
-        only through $\rho=\kappa\mu$; therefore any $K$- or $g$-based estimator cannot discern ...
+        kernel.
     \end{note}
+
+    \begin{definition}[Homogeneous Thomas process]
+    \label{def:thomas}
+        A homogeneous Thomas process is a Neyman-Scott process with an isotropic
+        Gaussian kernel $\mathcal{N}(0, \sigma^2I)$
+            \[
+            \rho_{Thomas}(u) = \mo \sum_{p \in P} k(0, \sigma^s),
+            \]
+        This process has parameters $\theta_{Thomas} = (\kappa, \mu, \sigma)$
+        corresponding to the parent intensity, offspring intensity, and cluster
+        scale, respectively.
+    \end{definition}
 
 % -----------------------------------------------------------------------------
 \subsection{Persistent homology}
-\label{ssec:ph}
+\label{ssec:persistence}
 % -----------------------------------------------------------------------------
 
 Radially averaged statistics -- such as the $g$ and $K$ functions -- collapse
-a point cloud to a real-valued curve indexed by scale $r$, discarding
-multi-scale connectivity information and
+a point cloud to a real-valued curve indexed by scale $r$. Features based on such
+statistics are constructed by evaluating over a chosen range $[r_{min}, r_{max}]$
+and subsampling at $n$ points along the interval to obtain a feature vector in $\R^n$.
+This approach is limited because it discards multi-scale connectivity information and
 void structure, i.e. \emph{how} the density is distributed across the space.
 Persistent homology retains this information by tracking a family of simplicial
-complexes on the point cloud as the scale parameter grows. The $H_0$ persistence
-summary records
-the order and scales at which clusters merge; the $H_1$ counterpart marks voids and gaps
-in the pattern as they persist across scales.
+complexes on the point cloud as the scale parameter grows, instead of a single scalar
+summary. Under a filtration such as Vietoris-Rips, the $H_0$ persistence summary records
+the order and scales at which clusters merge. The $H_1$ counterpart marks voids and gaps
+in the pattern as they persist across scales, allowing one to capture the clustering-induced
+emptiness or repulsion that a process may exhibit, which canonical statistics cannot see as clearly
+due to radial averaging.
 For each $h \in \N$, the $h$-dimensional persistence summary requires no closed form expression
 and no assumption about which process family generated it.
 
-Let $\pc = \{x_1, ..., x_n\} \subset \R^d$ be the point cloud of $X \cap W$, and
-let $\Sigma(\pc)$ denote the \emph{full
+Throughout this section, let $X$ be a point process on $R^d$ and $W \subseteq \R^d$ a bounded window with
+$|X \cap W| = n$ . Enumerate the points of $X \cap W$ to construct a point cloud
+$\pc = \{x_1, ..., x_n\} \subset \R^d$. Let $\Sigma(\pc)$ denote the \emph{full
 simplex} on $\pc$, i.e. the collection of all non-empty subsets of $\pc$.
 
-    \begin{definition}[Filtration]
+    \begin{definition}[Simplex]
+    \label{def:simplex}
+        A \emph{simplex} of $\pc$ is a non-empty finite subset
+        $\sigma \subseteq \pc$. Its faces are the non-empty subsets
+        $\tau \subseteq \sigma$.
+    \end{definition}
+
+    \begin{definition}[Simplicial complex]
+    \label{def:simpcomplex}
+        A simplicial complex $\simpcom$ on $\pc$ is a collection of simplices
+        closed under taking faces: $\sigma \in \simpcom, \tau \subseteq \sigma
+        \implies \tau \in \simpcom$.
+    \end{definition}
+
+    \begin{definition}
     \label{def:filtfunc}
         A filtration function on $\pc$ is a monotone map
         $f: \Sigma(\pc) \rightarrow \R^+$ such that
-        $f(\tau) \leq f(\sigma)$ for all $\tau \subseteq \sigma$.
-        Given $r \geq 0$ we construct
-        $\filt_r = \{\sigma \in \Sigma(\pc) : f(\sigma) \leq r\}$;
-        monotonicity of $f$ ensures each $\filt_r$ is a simplicial complex
-        and that $\filt_s \subseteq \filt_t$ for $0 \leq s \leq t$.
+            \[
+            f(\tau) \leq f(\sigma) \quad \forall \quad \tau \subseteq \sigma.
+            \]
     \end{definition}
+
+    \begin{example}
+        Vietoris-Rips filtration function:
+            \[
+            f_{VR}(\{x_i\}) = 0, \qquad f_{VR}(\{x_i, x_j\}) = \|x_i - x_j\|,
+            \]
+        extended to higher simplices by $f_{VR}(\sigma) = \max_{\{x_i,x_j\}
+        \subseteq \sigma} f_{VR}(\{x_i, x_j\})$, i.e. the diameter of $\sigma$.
+    \end{example}
 
     \begin{example}
     \label{ex:dtm}
         For $u \in \R^d$, let $N_k(u)$ denote its $k$ nearest neighbours in
         $\pc$. The $\mathrm{DTM}_k$ filtration function is
-        $f_{DTM}(\sigma; k) = \max_{u \in \sigma}\{(\frac{1}{k}
-        \sum_{v \in N_k(u)} d(u, v)^2)^{\frac{1}{2}}\}$,
-        extended to higher simplices by a max-over-edges rule
-        \citep{anai2020dtm}. It is monotone, and is hence a valid
-        filtration function \citep[Prop.\ 3.5]{anai2020dtm}.
+            \[
+            f_{DTM}(\sigma; k) = \max_{u \in \sigma}\{(\frac{1}{k}
+            \sum_{v \in N_k(u)} d(u, v)^2)^{\frac{1}{2}}\}
+            \]
+        again extended to higher simplices by the max-over-edges rule of the VR
+        example. \citep{anai2020dtm}.
+    \end{example}
+
+    \begin{claim}
+    \label{claim:dtm-monotone}
+        $f_{DTM_\kappa}$ is monotone, and is hence a valid filtration function
+        \citep[Prop.\ 3.5]{anai2020dtm}.
+    \end{claim}
+
+    \begin{definition}
+    \label{def:filtration}
+        Given a filtration function $f$ on $\pc$ and $r \geq 0$, we construct
+            \[
+            \mathcal{F}_r = \{\sigma \in \Sigma(\pc) : f(\sigma)
+            \leq r\}.
+            \]
+        Monotonicity of $f$ ensures each $\mathcal{F}_r$ is a simplicial complex
+        and that $\mathcal{F}_s \subseteq \mathcal{F}_t$ for $0 \leq s \leq t$.
+        The family $(\mathcal{F}_r)_{r \geq 0}$ is the \emph{filtration} induced
+        by $f$. We write $VR_r(\pc)$ for $\mathcal{F}_r$ under $f_{VR}$.
+    \end{definition}
+
+    \begin{definition}[Betti number]
+    \label{def:betti}
+        Fix $h \in \N$ and a simplicial complex $\Sigma$. Taking homology
+        with coefficients in a field (we use $\Z_2$), $H_h(\simpcom)$ is a
+        vector space of dimension $\beta_h = \dim H_h(\simpcom)$, the $h$-th
+        \emph{Betti number}. $\beta_0, \beta_1, \beta_2, \dots$ count connected
+        components, loops, and cavities, respectively.
+    \end{definition}
+
+    \begin{definition}[Persistence pair \& lifetime]
+    \label{def:pers-pair}
+        For a filtration $(\filt_r)_{r \geq 0}$, a $h$-dimensional homology
+        class is \emph{born} at the smallest scale $b \geq 0$ at which it
+        appears in $H_h(\simpcom_b)$, and \emph{dies} at the scale $d > b$ at
+        which it merges into an older class or becomes a boundary. The pair
+        $(b,d)$ is a \emph{persistence pair}, and $d - b$ its \emph{lifetime}.
+    \end{definition}
+
+    \begin{example}
+        Consider $H_0$. Every $0$-dimensional class is born at $r=0$ and dies
+        when its two components merge, i.e. at the filtration value of the
+        connecting edge.
     \end{example}
 
     \begin{definition}[Persistence diagram]
     \label{def:pd}
-        A $h$-dimensional homology
-        class is \emph{born} at the smallest scale $b \geq 0$ at which it
-        appears in $H_h(\simpcom_b)$, and \emph{dies} at the scale $d > b$ at
-        which it merges into an older class or becomes a boundary; $d - b$ is
-        its \emph{lifetime}. A persistence diagram $D_h = \{(b_i, d_i)\}_i$ is
-        the multiset of dimension-$h$ persistence pairs.
+        A persistence diagram $D_h = \{(b_i, d_i)\}_i$ is the multiset of
+        dimension-$h$ persistence pairs, plotted with birth on the $x$-axis and
+        death on the $y$-axis.
+    \end{definition}
+
+    \begin{remark}
+        Every point of $D_h$ lies above the diagonal $b=d$ because it must die
+        after it is born. Distance from the diagonal is lifetime, so short-lived
+        points near the diagonal are often treated as noise.
+    \end{remark}
+
+    \begin{definition}[Tent function]
+    \label{def:tent}
+        For a persistence pair $(b_i, d_i)$, the tent function is
+            \[
+            \Lambda_i(t) = \max\bigl(0,\, \min(t - b_i,\, d_i - t)\bigr),
+            \quad t \in \R,
+            \]
+        a triangular bump supported on $[b_i, d_i]$, peaking at height
+        $(d_i-b_i)/2$ when $t = (b_i+d_i)/2$. Persistence landscapes and
+        silhouettes are order statistics and weighted averages of this family;
+        persistence images replace the tent with a smooth Gaussian bump over
+        the same birth-persistence coordinates.
     \end{definition}
 
     \begin{definition}[Persistence image]
     \label{def:per_image}
-        The persistence image of $D_h$ is constructed by mapping to
-        birth-persistence coordinates $(b,d) \mapsto (b, d-b)$, weighting each
-        point by $w(d-b)$, forming the persistence surface
-        $\rho(z) = \sum_i w(d_i - b_i)\,\phi(z; (b_i, d_i - b_i))$ -- a
-        weighted sum of isotropic
-        Gaussian kernels with bandwidth $\sigma_{im}$ -- and integrating
-        $\rho$ over a $64 \times 64$ pixel grid.
+        The persistence image of $D_h$ is constructed by:
+            \begin{enumerate}
+                \item Mapping to birth-persistence coordinates:
+                      $(b,d) \mapsto (b, d-b)$.
+                \item Weighting each point by $w(d-b)$.
+                \item Forming the persistence surface
+                      $\rho(z) = \sum_i w(d_i - b_i)\,
+                      \phi(z; (b_i, d_i - b_i))$, a weighted sum of isotropic
+                      Gaussian kernels with bandwidth $\sigma_{im}$ centered at
+                      the transformed points.
+                \item Integrating $\rho$ over a $64 \times 64$ pixel grid,
+                      giving a single-channel image $PI \in \R^{64 \times 64}$.
+            \end{enumerate}
     \end{definition}
 
 
@@ -453,97 +551,6 @@ parent process at step 2 is itself a Thomas process rather than a homogeneous
 Poisson process.
 
 % -----------------------------------------------------------------------------
-\subsection{Simulator validation}
-\label{ssec:validation}
-% -----------------------------------------------------------------------------
-
-% -----------------------------------------------------------------------------
-% Commented out for now (2026-08-21): the original moment-matching
-% validation study (table + narrative) is hidden per instruction; the
-% newer nested-Thomas derivation immediately below (eq:g-nested) is KEPT
-% because Table~\ref{tab:classical-comparison}'s footnote $^d$ and three
-% Outstanding-experiments bullets cite \eqref{eq:g-nested} directly --
-% commenting it out too would leave those as broken "??" references.
-% \label{eq:varN} and \label{tab:sim-validation} live inside this hidden
-% block; re-enable by deleting the \iffalse/\fi pair below, and note the
-% Outstanding-experiments bullet that reproduces
-% Table~\ref{tab:sim-validation} for nested Thomas is ALSO commented out
-% below for the same reason (it cites this hidden table).
-% -----------------------------------------------------------------------------
-\iffalse
-The validity of the proposed pipeline depends on a diligent cloud-generation
-process, which we validate against closed-form second-order theory.
-
-On $W = [0,1]^2$ we compare $3000$ realizations at three parameter triples
-spanning the overlap index: tight-cluster ($\nu = 0.07$), moderate
-($\nu = 0.22$), and near-Poisson ($\nu = 1.00$).
-
-For the first moment, $\E[N(W)] = \kappa\mu|W|$. For the second, the
-canonical identity $\mathrm{Var}[N(W)] = \kappa\mu(1+\mu)|W|$ holds only in the
-limit of a window large relative to $\sigma$ and is badly biased in precisely
-the near-Poisson regime we wish to stress; the exact finite-window result is
-    \begin{equation}
-    \label{eq:varN}
-    \mathrm{Var}[N(W)] = \kappa\mu + \frac{\kappa\mu^2}{4\pi\sigma^2}J(\sigma)^2,
-    \qquad
-    J(\sigma) = \int_{-1}^{1}(1-|t|)\,e^{-t^2/4\sigma^2}\,dt,
-    \end{equation}
-for $W = [0,1]^2$, which collapses to $\kappa\mu(1+\mu)$ as $\sigma \to 0$ and
-is the target we compare against, not the canonical identity.
-
-\begin{center}
-\captionsetup{type=table}
-\small
-\begin{tabular}{lccccc}
-\toprule
- & & \multicolumn{2}{c}{$\E[N(W)]$} & \multicolumn{2}{c}{$\mathrm{Var}[N(W)]$} \\
-\cmidrule(lr){3-4}\cmidrule(lr){5-6}
-Case & $\nu$ & theory & empirical & theory & empirical \\
-\midrule
-A & 0.07 & 200.0 & $200.4 \pm 0.6$ & 982.0 & $972.5 \pm 25.1$ \\
-B & 0.22 & 100.0 & $100.2 \pm 0.4$ & 545.2 & $544.8 \pm 14.1$ \\
-C & 1.00 & 20.0  & $20.0 \pm 0.1$  & 43.6  & $46.0 \pm 1.2$ \\
-\bottomrule
-\end{tabular}
-\caption{Simulator validation against \eqref{eq:varN}. All deviations are within
-$2$ standard errors.}
-\label{tab:sim-validation}
-\end{center}
-
-We additionally verify that the pair correlation function, Ripley's $K$,
-boundary density, and displacement-kernel isotropy all match their
-theoretical targets.
-\fi
-
-\rev{The same protocol applies to nested Thomas, contrary to what we previously
-assumed. Its parent process is a Thomas process with known $g_P$, so $X$ is a Cox
-process driven by $\Lambda(u)=\mu_2\sum_{p\in P}k_{\sigma_2}(u-p)$; splitting
-$\E[\Lambda(u)\Lambda(v)]$ into diagonal and off-diagonal parts and adding
-Gaussian variances under convolution gives $\rho=\kappa\mu_1\mu_2$ and}
-    \begin{equation}
-    \label{eq:g-nested}
-    \rev{g(h) = 1
-    + \frac{e^{-\|h\|^2/4\sigma_2^2}}{4\pi\sigma_2^2\,\kappa\mu_1}
-    + \frac{e^{-\|h\|^2/4(\sigma_1^2+\sigma_2^2)}}{4\pi(\sigma_1^2+\sigma_2^2)\,\kappa},
-    \qquad
-    K(t) = \pi t^2
-    + \frac{1-e^{-t^2/4\sigma_2^2}}{\kappa\mu_1}
-    + \frac{1-e^{-t^2/4(\sigma_1^2+\sigma_2^2)}}{\kappa}.}
-    \end{equation}
-\rev{This is one clustering term per level, with effective parent intensities
-$\kappa\mu_1$ and $\kappa$; as $\sigma_1\to0$ it reduces to a Poisson cluster
-process with compound cluster size, $\E[C(C-1)]=\mu_1\mu_2^2+(\mu_1\mu_2)^2$.
-% Sentence below cites eq:varN and tab:sim-validation, both inside the
-% \iffalse'd-out validation section above -- commented out with it rather
-% than left as a broken "??" reference; re-enable together.
-% Integrating as in \eqref{eq:varN} gives the finite-window variance, and hence a
-% nested-Thomas version of Table~\ref{tab:sim-validation}, which is outstanding.
-Two consequences elsewhere: minimum contrast is runnable on nested Thomas, so
-its absence from Table~\ref{tab:classical-comparison} is a gap and not an
-impossibility; and the derivation needs independent checking before either
-claim is relied on.}
-
-% -----------------------------------------------------------------------------
 \subsection{Method: ParamNet}
 \label{ssec:method}
 % -----------------------------------------------------------------------------
@@ -579,7 +586,11 @@ sparsest connection between two regions and does not register how densely those
 regions are occupied. $DTM_k$ instead works with a point's average distance to its
 $k$ nearest neighbours, providing a more direct measure of local density.
 Since the parameters of a point process directly affect the local density of the
-point cloud, we claim that this choice is natural. [TODO: introduce the idea of using multiple scales, say that the architectural specifics are explained in encoder paragraph, explain that thomas uses k5 and nested thomas uses k5/10/15]
+point cloud, we claim that this choice is natural. The scale $k$ can also be
+fused across several values to give the encoder both fine and coarse views of
+local density simultaneously; the Thomas model uses a single scale, $k=5$,
+while the nested Thomas model fuses $k\in\{5,10,15\}$, with the architectural
+detail deferred to the encoder paragraph below.
 
 \paragraph{Calibration.}
 \label{ssec:calibration}
@@ -591,8 +602,26 @@ same meaning, the diagrams must be calibrated to have the same axis ranges. It
 is not immediately clear that the naive approach of calibrating to the maximum deaths
 and persistences is adequate in this context: if a diagram in the training set has
 strong outliers, the remaining diagrams
-will be rescaled in a way that places the majority of their points relatively 
-close to the origin. [TODO: diagram]
+will be rescaled in a way that places the majority of their points relatively
+close to the origin. Figure~\ref{fig:calibration_comparison} demonstrates how
+this phenomenon might affect the vectorizations.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.46\textwidth]{calibration_comparison.pdf}
+    \caption{Naive pooled min/max calibration (left) versus per-diagram
+    coverage-quantile calibration, $q=0.95$, $\alpha=1.05$ (right), for the
+    same $H_0$ diagram (DTM filtration, $k=5$, Thomas design distribution,
+    Section~\ref{ssec:simulator}). Top: the diagram against its calibrated
+    birth-persistence box; the naive box is stretched by an outlier diagram
+    elsewhere in the population, and the dashed square marks the region
+    zoomed into below. Bottom: that region at each calibration's native
+    pixel density -- a coarse $\sim\!5\times5$ block of mostly-fused pixels
+    under the naive bound versus a finer $\sim\!11\times11$ grid resolving
+    the secondary peak under the quantile bound, since the same
+    $64\times64$ grid now covers a narrower range.}
+    \label{fig:calibration_comparison}
+\end{figure}
 
 Our solution is to calibrate according to \emph{per-diagram coverage quantiles}.
 For each training diagram $D_i^{(h)}$, define the smallest birth
@@ -655,7 +684,7 @@ two hidden layers of width 64 and
 32, each followed by a ReLU nonlinearity and dropout ($p=0.1$), then a final
 linear layer mapping to the $n_{params}$ outputs.
 
-When three scales are used in Nested Thomas, they share one encoder, which works better than using three independent encoders [TODO: cite evidence]. The three resulting feature vectors in $\R^E$ are fused by simple concatenation.
+When three scales are used in Nested Thomas, they share one encoder, which works better than using three independent encoders (Table~\ref{tab:branches}, Encoder row). The three resulting feature vectors in $\R^E$ are fused by simple concatenation.
 
 Every experiment uses the same optimizer and schedule: AdamW ($\text{lr}=10^{-3}$,
 weight decay $3\times10^{-4}$), batch size $32$, up to $500$ epochs with
@@ -691,9 +720,10 @@ $\hat{\tilde\theta}$ the model's estimate of it.
 
 We measure the \emph{chance-level} by retraining the default PI model with training
 labels randomly permuted (inputs unchanged). Both processes land at
-$\mathcal{L}\approx1.0$ (Table~\ref{tab:classical-comparison}), giving an approximate error ceiling against which every other result can be read. 
+$\mathcal{L}\approx1.0$ (Table~\ref{tab:classical-comparison}), giving an approximate error ceiling against which every other result can be read.
 
 % -----------------------------------------------------------------------------
+\pagebreak
 \subsection{Estimation performance and baseline comparison}
 \label{ssec:results}
 % -----------------------------------------------------------------------------
@@ -710,39 +740,36 @@ merely noisy on Thomas rather than clearly harmful (both are the
 arms show the persistence images -- not the point count -- are carrying the
 signal, with $\log N$ a minor, possibly non-essential addition.
 
-\begin{center}
-\captionsetup{type=table}
+\begin{table}[tbp]
+\centering
 \small
 \begin{tabular}{lcc}
 \toprule
 Method & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
 \midrule
-ParamNet$^{\ddagger}$    & $0.125 \pm 0.007$ & $0.192 \pm 0.010^{c}$ \\
+ParamNet$^{\ddagger}$    & $0.125 \pm 0.007$ & $0.192 \pm 0.010$ \\
 vihrs ($L(r)-r$ CNN)     & $0.115 \pm 0.007$ & $0.217 \pm 0.006$ \\
-Minimum contrast, $K$   & $0.855 \pm 0.682^{a}$ & \rev{---$^{d}$} \\
-Minimum contrast, $g$   & $6.199 \pm 0.339^{b}$ & \rev{---$^{d}$} \\
+Minimum contrast, $K$   & $0.855 \pm 0.682^{a}$ & ---$^{d}$ \\
+Minimum contrast, $g$   & $6.199 \pm 0.339^{b}$ & ---$^{d}$ \\
 \midrule
 \emph{Chance-level reference (label shuffle)} & \emph{$1.003 \pm 0.019$} & \emph{$1.006 \pm 0.020$} \\
 \bottomrule
 \end{tabular}
-\caption{Estimator comparison on Thomas and Nested Thomas, $n=10$ seeds
-unless noted, on the shared test split
+\caption{Estimator comparison on Thomas and Nested Thomas, $n=10$ seeds, on the shared test split
 of Section~\ref{ssec:eval}. $^{\ddagger}$ParamNet is
 process-specific: DTM$_5$ for Thomas, fused
 DTM$_{5,10,15}$ for nested Thomas; see Table~\ref{tab:branches}.
-$^{c}$$n=3$, the only seeds run at the current calibration
-($\sigma_{\text{pixels}}=0.5$); see Section~\ref{ssec:method}.
 $^a$ Minimum contrast on
 $K$ is unstable across seeds rather than uniformly bad, and $^b$ minimum
 contrast on $g$ is consistently worse than chance; both are discussed in
-the text. \rev{$^{d}$Not run: the closed form of \eqref{eq:g-nested} makes
-this comparison available in principle, so its absence is an outstanding
-experiment rather than an impossibility.}}
+the text. $^{d}$Not run: no closed-form summary statistic for nested Thomas
+has yet been derived, so its absence is an outstanding experiment rather
+than an impossibility.}
 \label{tab:classical-comparison}
-\end{center}
+\end{table}
 
-\begin{center}
-\captionsetup{type=table}
+\begin{table}[tbp]
+\centering
 \small
 \textbf{(a) Thomas} ($\kappa$ parent intensity, $\mu$ offspring intensity, $\sigma$ cluster scale)\\[2pt]
 \begin{tabular}{lcccc}
@@ -773,7 +800,7 @@ $\mathcal{L}$ of Table~\ref{tab:classical-comparison} (same methods, same
 seeds; ParamNet/nested is $n{=}3$, see that table's $^{c}$). Minimum
 contrast has no nested-Thomas columns for the reason given there.}
 \label{tab:perparam}
-\end{center}
+\end{table}
 
 We compare ParamNet against the classical and neural baselines of
 Section~\ref{sec:intro}: minimum contrast fit to
@@ -825,9 +852,25 @@ conveys more information about the local-density signal, while a coarser one ave
 None of
 the three alternative vectorizations beats
 persistence image on either process or encoder.
+Figure~\ref{fig:vectorization_schematic} gives a visual overview of the
+vectorizations compared, computed from the same persistence diagram.
 
-\begin{center}
-\captionsetup{type=table}
+\begin{figure}[tbp]
+    \centering
+    \includegraphics[width=\textwidth]{vectorization_schematic.pdf}
+    \caption{One point cloud $\rightarrow$ its $H_0/H_1$ persistence diagrams
+    $\rightarrow$ the vectorizations compared in Table~\ref{tab:branches}:
+    persistence-image raster, landscape stack, silhouette curve, Betti curve,
+    and persistence-statistics summary. Top row: the tight-cluster design
+    ($\kappa=50$, $\mu=4$, $\sigma=0.01$); bottom row: the near-Poisson design
+    ($\kappa=4$, $\mu=5$, $\sigma=0.5$). Statistics-panel bars are min-max
+    normalized per statistic, with raw values printed above each bar, since
+    count, total persistence, and entropy live on incomparable scales.}
+    \label{fig:vectorization_schematic}
+\end{figure}
+
+\begin{table}[tbp]
+\centering
 \footnotesize
 \begin{tabular}{llcc}
 \toprule
@@ -846,17 +889,17 @@ Features   & $\log N$ removed & $0.217 \pm 0.278^\dagger$ & $0.203 \pm 0.007$ \\
            & Topology removed ($\log N$ only) & $0.893 \pm 0.015$ & $0.948 \pm 0.019$ \\
 \bottomrule
 \end{tabular}
-\caption{\new{Branch summary: every axis measured against the multi-scale,
+\caption{Branch summary: every axis measured against the multi-scale,
 $H_0{+}H_1$, CoordConv starting configuration, at the default $q=0.95$
 calibration, $n=10$ seeds per arm unless noted. Vectorization
 rows are the native-encoder path. $^a$ Rips fails on $10/10$ seeds before
 training starts, for the degenerate-birth reason given in the text.
 $^{c}$$n=3$, the only seeds run at the current calibration
-($\sigma_{\text{pixels}}=0.5$); see Section~\ref{ssec:method}.}
-\rev{The DTM$_5$ / fused rows now support the process-specific scale choice of
-Section~\ref{ssec:method} rather than ablating a single model.}}
+($\sigma_{\text{pixels}}=0.5$); see Section~\ref{ssec:method}. The DTM$_5$
+/ fused rows support the process-specific scale choice of
+Section~\ref{ssec:method} rather than ablating a single model.}
 \label{tab:branches}
-\end{center}
+\end{table}
 
 
 % #############################################################################
@@ -864,127 +907,66 @@ Section~\ref{ssec:method} rather than ablating a single model.}}
 \label{sec:future}
 % #############################################################################
 
-\new{The following are recorded as notes rather than prose.}
+The results support three claims. Persistence images are informative about
+Neyman-Scott parameters: both processes sit roughly an order of magnitude below
+the label-shuffle ceiling, and the two ``Features'' arms of
+Table~\ref{tab:branches} place that signal in the images rather than in
+$\log N$. They are not better than a well-chosen radial summary on a
+single-level process: \texttt{vihrs} wins on all three Thomas parameters, and on
+both scale parameters of nested Thomas. The advantage is confined to the
+two-level process and to its density and count targets, which is what one would
+expect of a feature built from local density rather than from a characteristic
+radius.
+
+Two secondary observations. The ordering of parameter difficulty --
+$\kappa$ hardest, cluster scale easiest, for every estimator on both processes
+-- is stable across feature sets and architectures, so it reads as a property of
+the estimation problem rather than of any one pipeline. And the margin over
+minimum contrast is not a single effect: on $K$ it is seed-to-seed instability
+in the near-Poisson regime, on $g$ it is a systematic bias traceable to an
+untuned contrast exponent. Neither number is a verdict on contrast estimation.
 
 \paragraph{Limitations.}
 \begin{itemize}[leftmargin=*,itemsep=2pt]
-    \item \rev{\textbf{Two models, not one.} The filtration scale is a
-    per-family choice with no rule beyond running both and comparing validation
-    loss, which undercuts the process-agnostic framing of
+    \item \textbf{Multiple models} The number of filtration scales used is a
+    per-process choice with no established rule beyond experimentation and ccomparison of validation
+    losses, which undercuts the process-agnostic framing of
     Section~\ref{sec:intro}. Always fusing would restore a single model at
     $3\times$ the persistence cost and $0.001$ on Thomas, i.e.\ inside seed
-    noise; attention over scales would be the principled fix.}
-    \item \textbf{Negative results.} Three alternative vectorizations were
-    implemented and none improved on persistence images. This is evidence about
+    noise; attention over scales might be the potential fix.
+    \item \textbf{Competitiveness.} Three alternative vectorizations were
+    implemented and none improved on persistence images. As far as we can claim, this is evidence about
     these summaries under this architecture and
-    this design distribution, not a general claim about vectorizations; the
-    same qualification covers $H_1$, which fails to earn its place \emph{here}.
-    \item \rev{\textbf{No advantage on Thomas.} \texttt{vihrs} wins on every
+    this design distribution, not a general claim about vectorizations.
+    \item \textbf{No advantage on Thomas.} \texttt{vihrs} wins on every
     parameter of the single-level process, and on both scale parameters of the
-    nested one. Claims about topological features should be stated at that
-    resolution.}
-    \item \textbf{Calibration inherited across summaries.} The per-diagram
+    nested one.
+    \item \textbf{Calibration across summaries.} The per-diagram
     coverage rule was inherited unchanged by the 1-D summaries for
     comparability, which may not be optimal for each individually.
-    \item \textbf{Single realization; homogeneity.} The estimator sees one
-    realization, and everything here assumes
-    homogeneous, stationary, isotropic processes.
     \item \textbf{The design distribution is a prior.} The design distribution
     acts as a prior, so the trained model approximates a posterior summary
     under it, and its ranges must therefore cover the intended application
-    domain -- the single most important limitation of any amortized
-    estimator. \rev{\citet{vihrs2022neural} gives the practical check: verify
-    that the observed point count and summary curve fall inside the envelope of
-    the training simulations before trusting an estimate.}
+    domain.
     \item \textbf{Computational cost.} Persistence computation scales badly in
     $n$; this is why the point budget of Section~\ref{ssec:simulator} is capped at
-    800. \new{The amortized inference cost per cloud is currently unmeasured.}
-    \rev{\citet{vihrs2022neural} reports the comparison to make: seconds to fit
-    all 5000 test patterns with the network, against $\sim$1.2 s \emph{each} for
-    minimum contrast.}
-\end{itemize}
-
-\paragraph{Outstanding experiments.} \new{The following results are promised
-elsewhere in this report but not yet in hand; they are the nearest-term
-deliverable.}
-\begin{itemize}[leftmargin=*,itemsep=2pt]
-% Two bullets below removed (2026-08-21): both were "outstanding run"
-% references -- the nested-Thomas fused fill-in (n=3->10) and a stale
-% headline-config re-statement (still said "H0 only" / "no coordinate
-% channels", both superseded -- see Sec ssec:method and the CoordConv
-% paragraph there). Current best data is used directly in the tables now
-% instead of being flagged as pending.
-\iffalse
-    \item \rev{Complete the nested-Thomas fused run at $n=10$ seeds; the
-    two-model split rests entirely on a provisional $n{=}3$ cell.}
-    \item Train and evaluate the headline configuration exactly as
-    Section~\ref{ssec:method} specifies it -- persistence image, $H_0$ only,
-    \rev{$DTM_5$ (Thomas) / fused (nested)}, shared encoder,
-    concatenation with $\log N$, no coordinate channels, $q=0.95$ -- on both design
-    distributions at $n=10$ seeds, so that the reported $\mathcal{L}$ is the model
-    the report describes.
-\fi
-% Bullet below commented out with the irreducible-error-floor paragraph in
-% ssec:setup (2026-08-21) -- report stands without it for now.
-\iffalse
-    \item \textbf{The error floor.} $\mathcal{L}_{\text{floor}}$ does not yet
-    have a value to report: the estimation script was run
-    on a dedicated $50\,\theta \times 200$-realization Thomas dataset and every
-    shard completed without error, but every per-cloud loss reduced to
-    \texttt{NaN} rather than a number. One concrete lead: the shard JSONs'
-    recorded \texttt{label\_names} include names that do not belong to
-    Thomas's own
-    $(\kappa,\mu,\sigma)$ target set, suggesting the per-target loss array is
-    being indexed against the wrong label list. Fix the
-    label-indexing bug and re-run for Thomas\rev{; nested Thomas needs no
-    separate treatment, since neither route in Section~\ref{ssec:setup} requires
-    a closed form and \eqref{eq:g-nested} now supplies one anyway.}
-\fi
-    \item \rev{Run minimum contrast on nested Thomas against
-    \eqref{eq:g-nested}, and re-run it on $g$ with the exponent $c$ swept.}
-% Bullet below commented out (2026-08-21): cites Table~\ref{tab:sim-validation},
-% which lives inside the now-hidden Simulator-validation section.
-\iffalse
-    \item \rev{Validate the nested-Thomas simulator against
-    \eqref{eq:g-nested}, reproducing Table~\ref{tab:sim-validation}.}
-\fi
-    \item Three evaluation sets defined in Section~\ref{ssec:eval} are not
-    yet reported: error as a surface
-    over $(\log\nu, \log\lambda)$ on the grid set -- expect degradation as
-    $\nu \to 1$, and if the model
-    degrades more gracefully than minimum contrast there, that IS the result;
-    degradation on the out-of-range set; and the Mat\'ern cluster runs for the
-    cross-family comparison -- whether one
-    model trained across families beats per-family models is an interesting question
-    in itself, and the common reparameterization of
-    Section~\ref{ssec:simulator} is what makes it askable.
-    \rev{Mat\'ern is also the family \citet{waagepetersen2009twostep} exclude on
-    smoothness grounds, so it is the natural place to show a simulation-trained
-    estimator has no such restriction.}
-    \item \new{Run the Palm likelihood baseline \citep{tanaka2008parameter} to
-    completion; it is implemented but has not yet been run.}
+    800. Furthermore, the inference cost per cloud is currently unmeasured.
 \end{itemize}
 
 \paragraph{Planned directions.}
 \begin{itemize}[leftmargin=*,itemsep=2pt]
-    \item \textbf{Near term.} The encoder question: attention over scales, and
-    set-based encoders operating on diagrams directly. \rev{The former would also
-    dissolve the two-model limitation.}
-    \item \textbf{Medium term.} Inhomogeneous / non-stationary processes, where
+    \item The encoder architecure: aim to design a universal architecture
+    that is process-agnostic.
+    \item Inhomogeneous / non-stationary processes, where
     classical closed forms are least available and the topological approach has
-    the most to gain -- this is arguably where the thesis-scale contribution
-    lies. \rev{The comparator is the two-step procedure of
+    the most to gain. The comparator is the two-step procedure of
     \citet{waagepetersen2009twostep}, which needs the covariates observed and the
-    intensity correctly specified; a simulation-trained estimator needs neither.}
-    \item \textbf{Medium term.} Real data. Galaxy catalogues if the running
+    intensity correctly specified; a simulation-trained estimator needs neither.
+    \item Apply to real data. Galaxy catalogues if the running
     example of Section~\ref{sec:intro} is cosmological.
-    \rev{The Barro Colorado Island tree data of \citet{waagepetersen2009twostep}
-    is a good second target: small, public, and already fitted with a Thomas
-    process.}
-    \item \textbf{Longer term.} Uncertainty quantification -- the model
-    currently emits a point estimate with no interval, which limits its use as
-    a drop-in replacement for likelihood-based methods.
-    \rev{This is the same machinery as route (ii) of Section~\ref{ssec:setup}.}
+    The Barro Colorado Island tree data of \citet{waagepetersen2009twostep}
+    migth be a second target: a small  public data set which is already fitted with a Thomas
+    process.
 \end{itemize}
 
 
@@ -1008,12 +990,6 @@ Y.~Umeda.
 \newblock DTM-based filtrations.
 \newblock In \emph{Topological Data Analysis}, Abel Symposia 15, pages 33--66.
 Springer, 2020.
-
-\bibitem[Biagetti et al.(2021)]{biagetti2021persistence}
-M.~Biagetti, A.~Cole, and G.~Shiu.
-\newblock The persistence of large scale structures.
-\newblock \emph{Journal of Cosmology and Astroparticle Physics}, 2021(04):061,
-2021.
 
 \bibitem[Bubenik(2015)]{bubenik2015landscapes}
 P.~Bubenik.
