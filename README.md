@@ -42,12 +42,13 @@ results/                         per-seed results.json behind the report's table
 param_sweeps/                    calibration + encoder sweeps (scripts/ + results/), separate on purpose
 figs/                            calibration_comparison.pdf, vectorization_schematic.pdf
 tests/                           pytest suite (registry smoke + full-CLI e2e)
-_attic/                          superseded code, drafts, notebooks, slurm scripts — kept, not imported
 ```
 
 Anything not needed to read the report lives under an `archive/` subfolder
-(`writeup/archive/`, `scripts/archive/`, `figs/archive/`, `configs/archive/`)
-or under `_attic/`.
+(`writeup/archive/`, `scripts/archive/`, `figs/archive/`, `configs/archive/`).
+Whole superseded areas — older write-ups, exploratory notebooks, cluster job
+scripts, the vendored `multipers` C++ source — are not on this branch; they
+live in full on **`backend/full-history`** (`git show backend/full-history:_attic/...`).
 
 ## How to run
 
