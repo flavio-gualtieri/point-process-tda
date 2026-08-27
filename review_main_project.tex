@@ -1,0 +1,375 @@
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{mathpazo}
+\usepackage{microtype}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+
+\usepackage{graphicx}
+\graphicspath{{../figs/}}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[font=small,labelfont=bf,skip=4pt]{caption}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.0}
+\setlength{\abovedisplayskip}{5pt}
+\setlength{\belowdisplayskip}{5pt}
+\setlength{\abovedisplayshortskip}{3pt}
+\setlength{\belowdisplayshortskip}{3pt}
+
+\usepackage{natbib}
+\usepackage[hidelinks]{hyperref}
+\raggedbottom
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.95}
+\renewcommand{\floatpagefraction}{0.85}
+
+% ----------------------------------------------------------------------------
+% Macros
+% ----------------------------------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\pc}{\mathbf{x}}
+\newcommand{\simpcom}{\Sigma}
+\newcommand{\filt}{\mathcal{F}}
+\newcommand{\kpar}{\kappa}
+\newcommand{\mo}{\mu}
+
+% ----------------------------------------------------------------------------
+\newtheoremstyle{definitioncolon}%
+  {4pt}{4pt}{\normalfont}{}{\bfseries}{}{.5em}%
+  {\thmname{#1}\thmnumber{ #2}\thmnote{: #3}}
+\theoremstyle{definitioncolon}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{claim}[definition]{Claim}
+
+\providecommand{\pmTodo}[1]{\textbf{[TODO: #1]}}
+
+\newtheorem*{note}{Note}
+\newtheorem*{example}{Example}
+\newtheorem*{remark}{Remark}
+
+% ----------------------------------------------------------------------------
+\title{Topological Feature Learning for Parameter Estimation\\
+       in Neyman-Scott Processes\\[4pt]
+       \large First-year progression report}
+\author{Flavio Gualtieri}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+% --- macros: move to preamb
+% --- end macros ---
+
+\section{Topological feature learning for Neyman--Scott process parameters}
+\label{sec:paramnet}
+
+\subsection{Motivation and problem}
+\label{paramnet:sec-motivation}
+
+Spatial point patterns -- the locations of galaxies, cells, epicentres, or
+trees -- appear across the sciences, and are commonly modelled as
+realizations of a spatial point process \citep{moller2004statistical}, whose
+parameters are themselves interpretable scientific quantities rather than
+curve-fitting artefacts. A Neyman--Scott process generates points in two
+stages: unobserved \emph{parent}
+locations at intensity $\kappa$, each producing a Poisson-distributed number
+of \emph{offspring} (mean $\mu$) scattered around it according to a kernel
+with characteristic scale $\sigma$. When such a process models galaxy
+clustering, $\kappa$ is the number density of haloes hosting galaxies,
+$\mu$ the mean galaxy occupancy of a halo, and $\sigma$ the spatial extent
+of the galaxy distribution within a halo -- exactly the quantities a halo
+occupancy model is built to constrain \pmTodo{cite halo occupancy
+reference}. In forest ecology, \citet{waagepetersen2009twostep} fit Thomas
+processes (a Neyman--Scott process with a Gaussian offspring kernel) to
+three tropical tree species and read the cluster scale $\sigma$ directly as
+a summary of seed dispersal tightness, finding that species dispersed by
+exploding capsules, by wind, and by animals separate cleanly along that one
+parameter: recovering $(\kappa,\mu,\sigma)$ well is how the pattern gets
+turned back into an interpretable physical or ecological statement, not an
+end in itself.
+
+We consider the setting a practitioner actually faces: a single observed
+point pattern, and one chance to estimate the parameters that generated it --
+not repeated draws of the same process. Existing estimators for this
+problem -- minimum contrast fits a discrepancy between an empirical and
+theoretical summary curve \citep{diggle2003spatial}, Palm likelihood builds
+a composite likelihood from the Palm intensity \citep{tanaka2008parameter},
+fully Bayesian approaches sample the posterior over the latent parent
+locations by MCMC \citep{moller2004statistical} -- share three limitations
+that motivate this project. First, they need a closed-form summary
+statistic that may not exist at all (the LGCP-Strauss process of
+\citet{vihrs2022neural} has an intractable density) or may exist but fail
+the regularity conditions the theory needs: \citet{waagepetersen2009twostep}
+require their $K$-function to be twice continuously differentiable in the
+parameters, which excludes the Mat\'ern cluster process outright. Second,
+minimum contrast depends on hyperparameters ($r_{max}$, $q$, a
+power-transform exponent) chosen per dataset by rule of thumb, with no
+held-out criterion for whether the choice was good; \citet{waagepetersen2009twostep}
+report Thomas-process estimates of $\kappa$ and $\mu$ that are ``quite
+sensitive'' to $r_{max}$ and $q$, tracing this to a strong negative
+correlation between $\hat\kappa$ and $\hat\mu$ under which the product
+$\hat\kappa\hat\mu$ is stable while the individual estimates are not. Third,
+these methods become unstable near complete spatial randomness: for a
+Thomas process,
+\begin{equation}
+\label{paramnet:eq-kdegen}
+K(t) = \pi t^2 + \frac{1-e^{-t^2/4\sigma^2}}{\kappa},
+\end{equation}
+so as $\sigma$ grows at fixed $t$ the second term vanishes and $K$ tends to
+the Poisson curve \emph{regardless of $\kappa$} \citep{waagepetersen2009twostep}.
+A discrepancy nearly flat along this trade-off yields estimates sensitive to
+the optimizer's starting point; \citet{waagepetersen2009twostep} report
+exactly this failure in their own simulations, weakly clustered patterns
+whose estimated $K$ was indistinguishable from Poisson producing ``rather
+extreme'' clustering estimates. We deliberately retain this near-Poisson
+regime in our design distribution below, rather than restricting to the
+well-separated-cluster case classical methods are comfortable with.
+
+These three limitations motivate features needing no closed form and no
+choice of summary statistic: a multi-scale, process-agnostic description of
+the point cloud, built directly from its geometry.
+
+\subsection{Approach}
+\label{paramnet:sec-approach}
+
+\paragraph{Persistent homology as a process-agnostic feature.}
+A radially averaged statistic such as $K$ or $g$ collapses a point cloud to
+a single curve indexed by scale, discarding \emph{how} density and gaps are
+distributed across space. Persistent homology instead tracks a growing
+family of simplicial complexes on the cloud as a scale $r$ increases: at
+$r=0$ every point is its own component, and as $r$ grows, points connect,
+components merge, and loops open and close. Each such feature's
+\emph{birth} and \emph{death} scale is recorded as a point $(b,d)$ in a
+\emph{persistence diagram} (points with $d\!-\!b$ small are usually treated
+as noise). The $0$-dimensional diagram records when clusters merge; the
+$1$-dimensional diagram records voids and gaps that persist across scales,
+capturing empty or repulsive structure a radially averaged statistic sees
+only indirectly. Neither needs a closed form or an assumption about the
+generating process family. A diagram is a variable-size multiset rather
+than a vector, so it must be \emph{vectorized} before it can feed a neural
+network; we use \emph{persistence images} \citep{adams2017persistence},
+which smooth each diagram point with a Gaussian kernel and integrate onto a
+fixed pixel grid. Betti curves \citep{umeda2017time}, persistence
+landscapes \citep{bubenik2015landscapes}, and persistence silhouettes
+\citep{chazal2014silhouette} are alternative vectorizations we compare
+against directly (Figure~\ref{paramnet:fig-vectorizations}); none improved
+on persistence images under our architecture and design distribution
+(Section~\ref{paramnet:sec-results}).
+
+\begin{figure}[tbp]
+    \centering
+    \includegraphics[width=\textwidth]{vectorization_schematic.pdf}
+    \caption{One point cloud $\rightarrow$ its persistence diagrams
+    $\rightarrow$ the vectorizations compared: persistence-image raster,
+    landscape stack, silhouette curve, Betti curve, and a persistence-statistics
+    summary. Top: a tight-cluster design ($\kappa=50,\mu=4,\sigma=0.01$);
+    bottom: a near-Poisson design ($\kappa=4,\mu=5,\sigma=0.5$) -- the
+    regime Section~\ref{paramnet:sec-motivation} argues classical methods
+    handle badly.}
+    \label{paramnet:fig-vectorizations}
+\end{figure}
+
+\paragraph{Simulator and design distribution.}
+Training data are pairs $(\mathbf{x}_i,\theta_i)$, each a single
+realization: parents form a Poisson process on a slightly expanded window
+(so clusters whose parent lies just outside are not truncated), each parent
+independently produces a Poisson-distributed number of offspring, and each
+offspring is displaced from its parent by a draw from the kernel --
+Gaussian for Thomas, and, for nested Thomas, a second Thomas process
+standing in for the parent layer itself. Sampling $\theta_i$ uniformly over
+$(\kappa,\mu,\sigma)$ is inadequate because these processes separate into
+qualitative regimes occupying curved regions of that space, wasting most of
+the sampled mass on configurations that are near-Poisson or degenerate. We
+instead reparameterize into coordinates carrying the same meaning for every
+Neyman--Scott family member: the expected offspring intensity
+$\lambda=\kappa\mu$, the parent intensity $\kappa$, and a dimensionless
+overlap index
+\begin{equation}
+\label{paramnet:eq-reparam}
+\nu = \sigma\sqrt{\kappa},
+\end{equation}
+the ratio of cluster radius to mean inter-parent spacing, and sample
+log-uniformly in $(\kappa,\lambda,\nu)$ subject to a point budget
+($\lambda\in[150,800]$, since persistence computation scales badly with
+cloud size), a resolvability constraint ($\kappa\in[15,120]$), and an
+overlap range $\nu\in[0.10,0.90]$ whose upper end deliberately keeps the
+near-Poisson regime of Section~\ref{paramnet:sec-motivation} in training
+rather than excluding it.
+
+\paragraph{ParamNet.}
+The model maps a cloud to a parameter estimate by
+\begin{equation}
+\label{paramnet:eq-pipeline}
+\text{cloud} \;\xrightarrow{\;\text{vectorize}\;}\;
+\text{persistence image} \;\xrightarrow{\;\text{encoder}\;}\;
+\text{embedding} \;\xrightarrow{\;\text{FCNN}\;}\;
+\hat\theta,
+\end{equation}
+following the neural-estimator pattern introduced by
+\citet{vihrs2022neural}; our contribution is the feature-extraction and
+calibration stage, its evaluation on a genuinely two-level process (nested
+Thomas), and a direct comparison of vectorizations. Images come from a
+density-sensitive DTM$_k$ filtration rather than the more common
+Vietoris--Rips filtration: Rips uses raw inter-point distances and is
+sensitive only to the sparsest connection between two regions, whereas
+DTM$_k$ uses each point's average distance to its $k$ nearest neighbours
+and so responds directly to local density -- exactly what a Neyman--Scott
+process's parameters govern \citep{anai2020dtm}. The Thomas model uses a
+single scale ($k=5$); nested Thomas fuses three scales ($k\in\{5,10,15\}$)
+through one shared convolutional encoder, which works better than giving
+each scale its own encoder (Section~\ref{paramnet:sec-results}). Before
+rasterizing, each diagram's axes are calibrated to a shared range fit on
+the training diagrams only -- a per-diagram coverage-quantile rule, so one
+outlier diagram cannot compress every other diagram's range toward the
+origin -- then frozen before touching validation or test data. The encoder
+is a small CoordConv
+\citep{liu2018coordconv} convolutional stack: CoordConv appends each
+pixel's normalized coordinates as extra input channels, giving the
+otherwise translation-equivariant convolutions access to absolute position,
+which matters because a persistence image's axes are not arbitrary --
+birth encodes local density, persistence encodes separation -- so a
+pixel's location is informative in its own right. The resulting embedding
+is concatenated with $\log N(\mathbf{x})$ and passed to a small
+feed-forward head producing $\hat\theta$. The model is trained by
+minimizing mean squared error between $\hat\theta$ and $\theta$ in
+log-normalized parameter space (each parameter log-transformed and
+$z$-scored on the training split), so parameters spanning different orders
+of magnitude contribute comparably to the loss. Data are split by
+parameter vector, so no $\theta$ value appears in both training and
+evaluation, and error is reported in those same log-normalized units.
+
+\subsection{Results}
+\label{paramnet:sec-results}
+
+We compare ParamNet against minimum contrast fit separately to $K$ and to
+$g$ \citep{diggle2003spatial}, and against \texttt{vihrs}, our
+re-implementation of the neural estimator of \citet{vihrs2022neural}: the
+same pipeline with the persistence-image feature replaced by a 1-D CNN over
+the classical, edge-corrected $L(r)-r$ curve plus $\log N$. A label-shuffle
+control -- the same model retrained with training labels permuted -- lands
+at $\mathcal{L}\approx1.0$ on both processes and serves as a chance-level
+ceiling in Table~\ref{paramnet:tab-comparison}.
+
+\begin{table}[tbp]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Method & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
+\midrule
+ParamNet                & $0.125 \pm 0.007$ & $0.192 \pm 0.010$ \\
+\texttt{vihrs}           & $0.115 \pm 0.007$ & $0.217 \pm 0.006$ \\
+Minimum contrast, $K$    & $0.855 \pm 0.682$ & ---$^{a}$ \\
+Minimum contrast, $g$    & $6.199 \pm 0.339$ & ---$^{a}$ \\
+\midrule
+\emph{Chance level (label shuffle)} & \emph{$1.003 \pm 0.019$} & \emph{$1.006 \pm 0.020$} \\
+\bottomrule
+\end{tabular}
+\caption{Mean squared error in log-normalized parameter space, $n=10$ seeds,
+shared test split per process. $^{a}$A closed-form $K$/$g$ for nested Thomas
+was derived and fitted, but the derivation has not yet been independently
+validated, so we do not report the resulting numbers as a finding.}
+\label{paramnet:tab-comparison}
+\end{table}
+
+Persistence images carry real signal about Neyman--Scott parameters: both
+processes land roughly an order of magnitude below the label-shuffle
+ceiling, and that signal sits in the images rather than in the point count
+-- training on $\log N$ alone collapses to the same $\approx\!0.9$--$1.0$
+chance level as label-shuffling, while removing $\log N$ from the full
+model costs little on nested Thomas ($0.192\rightarrow0.203$) and is merely
+noisy on Thomas. We report the comparison honestly rather than as an
+unqualified win, though: \texttt{vihrs} beats ParamNet on every Thomas
+parameter ($\mathcal{L}^\kappa=0.192$ vs.\ $0.201$, $\mathcal{L}^\mu=0.122$
+vs.\ $0.134$, $\mathcal{L}^\sigma=0.029$ vs.\ $0.040$), so a hand-built
+radial summary beats our topological pipeline outright on the single-level
+process. On nested Thomas the picture inverts only partially: ParamNet
+gains an advantage on the density and count targets (parent intensity,
+meta-offspring, mean offspring), while \texttt{vihrs} keeps its edge on
+both scale parameters -- $L(r)-r$ is built to resolve a radius directly, a
+density-based topological feature is not, and it is only on the more
+complex two-level process that the trade-off favours our pipeline. A
+second, structural pattern holds regardless of estimator or process: parent
+intensity $\kappa$ is the hardest target by a wide margin and cluster scale
+the easiest, reading as a property of the estimation problem rather than of
+any one feature set.
+
+Both neural methods dominate minimum contrast on Thomas by roughly an order
+of magnitude, but for different reasons. On $K$, six of ten seeds land at
+$0.365$--$0.399$ (close to \texttt{vihrs}) while the other four land at
+$0.903$--$2.056$ -- seed-to-seed instability in the near-Poisson regime of
+Section~\ref{paramnet:sec-motivation}, not a uniformly bad fit. On $g$,
+every seed is worse than chance, pointing to a systematic bias rather than
+scattered non-convergence: our contrast exponent ($c=1$, chosen by analogy
+with the $K$-based rule of thumb) was never tuned against the $c=1/4$ value
+validated for aggregated patterns \citep{diggle2003spatial}; we do not read
+it as a general verdict on contrast estimation. The same comparison was
+attempted for nested Thomas this month, against a closed-form $K$/$g$
+derived for the two-level process, but the derivation has not been checked
+independently and the resulting fits are far outside a plausible range, so
+we treat this baseline as still outstanding rather than report numbers.
+
+We also compared three alternative vectorizations (Betti curves,
+landscapes, silhouettes) against persistence images under an identical
+encoder and design distribution; none improved on either process. Fusing
+the three DTM scales through one shared encoder likewise beats giving each
+scale its own encoder ($0.192$ vs.\ $0.222$ nested-Thomas $\mathcal{L}$),
+which is why ParamNet shares an encoder rather than using independent
+branches.
+
+\subsection{Limitations and future directions}
+\label{paramnet:sec-future}
+
+\paragraph{Limitations.}
+\begin{itemize}[leftmargin=*,itemsep=1pt,topsep=2pt]
+\item \textbf{No advantage on the single-level process.} \texttt{vihrs}
+    wins on every Thomas parameter and on both scale parameters of nested
+    Thomas; our advantage is confined to the two-level process's density
+    and count targets, and to three alternative vectorizations under one
+    architecture and design distribution -- evidence about this setting,
+    not a general claim.
+\item \textbf{Multiple models, and expensive ones.} The number of
+    filtration scales fused is a per-process choice made by comparing
+    validation losses, undercutting the process-agnostic framing behind
+    this work; always fusing three scales costs three times the
+    persistence-computation cost for a Thomas change within seed noise, and
+    persistence computation already scales badly with point count, which is
+    why the design distribution caps the expected count at 800.
+\item \textbf{No irreducible error floor yet.} The natural lower reference
+    for every number above -- the dispersion of the best possible estimator
+    across repeated realizations of the same $\theta$ -- has been attempted
+    but not obtained: the estimation script ran to completion but returned
+    \texttt{NaN} throughout, traced to a suspected label-indexing bug not
+    yet fixed.
+\end{itemize}
+
+\paragraph{Future directions.}
+\begin{itemize}[leftmargin=*,itemsep=1pt,topsep=2pt]
+\item A universal, process-agnostic encoder, rather than a per-process
+    filtration-scale choice; a small three-seed comparison also suggests a
+    multiparameter persistence feature (a joint density--radius
+    bifiltration fused with the \texttt{vihrs} branch) may close part of
+    the Thomas gap, though not yet validated at the scale above.
+\item Inhomogeneous and non-stationary processes, where classical closed
+    forms are least available and a topological approach has the most to
+    gain: the natural comparator, the two-step procedure of
+    \citet{waagepetersen2009twostep}, needs observed covariates and a
+    correctly specified intensity, whereas a simulation-trained estimator
+    needs neither.
+\item Real data: galaxy catalogues, motivated by
+    Section~\ref{paramnet:sec-motivation}, and the Barro Colorado Island
+    tree data of \citet{waagepetersen2009twostep}, already fitted with a
+    Thomas process.
+\end{itemize}
+
+
+\end{document}

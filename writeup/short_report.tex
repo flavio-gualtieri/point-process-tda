@@ -876,8 +876,7 @@ vectorizations compared, computed from the same persistence diagram.
 \toprule
 Axis & Arm & Thomas $\mathcal{L}$ & Nested-Thomas $\mathcal{L}$ \\
 \midrule
-Filtration & Rips & ---$^a$ & ---$^a$ \\
-           & Rips (vec\_multik, landscape) & $0.178 \pm 0.008$ & $0.461 \pm 0.016$ \\
+Filtration & Rips (vec\_multik, landscape) & $0.178 \pm 0.008$ & $0.461 \pm 0.016$ \\
            & DTM$_5$ / DTM$_{15}$ & $0.125 \pm 0.007$ / $0.146 \pm 0.006$ & $0.205 \pm 0.003$ / $0.260 \pm 0.017$ \\
            & DTM$_{\{5,10,15\}}$ (fused) & $0.126 \pm 0.008$ & $0.192 \pm 0.010^{c}$ \\
 Homology   & $H_0$ only / $H_1$ only & $0.125 \pm 0.006$ / $0.900 \pm 0.019$ & $0.280 \pm 0.250^\dagger$ / $0.932 \pm 0.028$ \\
@@ -894,8 +893,7 @@ Calibration & Naive ($q=1.00$) & $0.122 \pm 0.003$ & $0.214 \pm 0.012$ \\
 \caption{Branch summary: every axis measured against the multi-scale,
 $H_0{+}H_1$, CoordConv starting configuration, at the default $q=0.95$
 calibration, $n=10$ seeds per arm unless noted. Vectorization
-rows are the native-encoder path. $^a$ Rips fails on $10/10$ seeds before
-training starts, for the degenerate-birth reason given in the text.
+rows are the native-encoder path.
 $^{c}$$n=3$, the only seeds run at the current calibration
 ($\sigma_{\text{pixels}}=0.5$); see Section~\ref{ssec:method}. The DTM$_5$
 / fused rows support the process-specific scale choice of

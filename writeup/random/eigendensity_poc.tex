@@ -1,0 +1,214 @@
+% Anti-Tech Presentation
+\documentclass[11pt]{beamer}
+\usetheme{metropolis}
+
+
+% -----------------------
+% Packages
+% -----------------------
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  frame=single,
+  breaklines=true
+}
+
+
+% -----------------------
+% Title info
+% -----------------------
+\title{Assessing Architecture Choices Using Hessian Eigndensity}
+\date{\today}
+\author{Flavio D. Gualtieri}
+\begin{document}
+
+
+% =======================
+% Slide 1: Title
+% =======================
+\begin{frame}
+  \titlepage
+\end{frame}
+
+
+% =======================
+% Slide 2: Motivation / Aim (optional but helpful)
+% =======================
+\begin{frame}{Goal}
+    \begin{itemize}
+      \item Objective: test whether tracking the \textbf{evolution of Hessian eigendensity} during training
+      can provide insight into \textbf{architecture/activation choices}.
+      \item Proof-of-concept: small MNIST network, compare activation functions.
+      \item Output: eigendensity spectra snapshots throughout training.
+    \end{itemize}
+\end{frame}
+
+
+% =======================
+% Slide 3: General pseudocode
+% =======================
+\begin{frame}{Estimating Eigendensity (Pseudocode)}
+    \begin{algorithmic}
+        \State Forward pass; compute loss $\ell(\theta)$
+        \State Generate $k$ IID probe vectors $\{v_1, ..., v_k\}$
+        \For{$i \in [1, \dots, k]$}
+            \State Run $m$ - step Lanczos on $H$ with $v_i$
+            \State Obtain $T_m \in \mathbb{R}^{m\times m}$
+            \State Compute $T_m = ULU^\top$
+            \For{$r \in [1,\dots,m]$}
+                \State $w_r \gets (U_{1r})^2$
+                \State $\lambda_r \gets (L_{rr})^m_{r=1}$
+            \EndFor
+            \State $\hat{\phi}^{v_i}(t) \gets \sum_{r=1}^m w_r f(\lambda_r;t,\sigma^2)$
+        \EndFor
+        \State $\hat{\phi}(t) \gets \frac{1}{k}\sum_{i=1}^k \hat{\phi}_i(t)$
+    \end{algorithmic}
+
+    \vspace{0.2em}
+    \footnotesize
+    Note: $f(\lambda; t, \sigma^2) = \frac{1}{\sigma\sqrt{2\pi}}e^{-\frac{(t-\lambda)^2}{2\sigma^2}}$
+\end{frame}
+
+
+% =======================
+% Slide 4: Experimental setup
+% =======================
+\begin{frame}{Experimental Setup}
+    \begin{columns}[T,onlytextwidth]
+      \column{0.52\textwidth}
+      \begin{block}{Model / Data}
+      \begin{itemize}
+        \item Dataset: MNIST
+        \item Architecture: \([784,\,128,\,10]\)
+        \item Activations: \(\{\)sigmoid, ReLU, tanh\(\}\)
+      \end{itemize}
+      \end{block}
+    
+      \column{0.48\textwidth}
+      \begin{block}{Training / Logging}
+      \begin{itemize}
+        \item Optimizer: Adam
+        \item Learning rate: \(10^{-3}\)
+        \item Epochs: 50
+        \item Eigdensity snapshot: every 10 epochs
+      \end{itemize}
+      \end{block}
+    \end{columns}
+    
+    \vspace{0.4em}
+    \footnotesize
+    Epoch budget picked to be as small as possible (within reason) after checking convergence trends, avoiding needless compute.
+\end{frame}
+
+
+% =======================
+% Slide 5: Procedure timeline (optional)
+% =======================
+\begin{frame}{Procedure Summary}
+    \begin{enumerate}
+      \item Choose activation \(\in\{\)sigmoid, ReLU, tanh\(\}\)
+      \item Train for 50 epochs (Adam, lr \(=10^{-3}\))
+      \item At epochs \(\{10,20,30,40,50\}\): estimate Hessian eigendensity
+      \item Plot spectra and compare across activations
+    \end{enumerate}
+    
+    \vspace{0.5em}
+    \begin{block}{Result}
+    A set of eigendensity spectra over training time, enabling qualitative comparison across choices.
+    \end{block}
+\end{frame}
+
+
+% =======================
+% Slide 6: Sigmoid spectra
+% =======================
+\begin{frame}{Eigenvalue Density Spectra — Sigmoid}
+    \centering
+    \begin{tabular}{ccc}
+        \includegraphics[width=0.3\textwidth]{sigmoid_phi_epoch_1.png} &
+        \includegraphics[width=0.3\textwidth]{sigmoid_phi_epoch_10.png} &
+        \includegraphics[width=0.3\textwidth]{sigmoid_phi_epoch_20.png} \\
+        Epoch 1 & Epoch 10 & Epoch 20 \\
+        \vspace{0.2cm} \\
+        \includegraphics[width=0.3\textwidth]{sigmoid_phi_epoch_30.png} &
+        \includegraphics[width=0.3\textwidth]{sigmoid_phi_epoch_40.png} &
+        \includegraphics[width=0.3\textwidth]{sigmoid_phi_epoch_50.png} \\
+        Epoch 30 & Epoch 40 & Epoch 50
+    \end{tabular}
+    
+    \vspace{0.3cm}
+    {\footnotesize Note: test accuracy: 0.9789}
+\end{frame}
+
+
+% =======================
+% Slide 7: ReLU spectra
+% =======================
+\begin{frame}{Eigenvalue Density Spectra — ReLU}
+    \centering
+    \begin{tabular}{ccc}
+        \includegraphics[width=0.3\textwidth]{relu_phi_epoch_1.png} &
+        \includegraphics[width=0.3\textwidth]{relu_phi_epoch_10.png} &
+        \includegraphics[width=0.3\textwidth]{relu_phi_epoch_20.png} \\
+        Epoch 1 & Epoch 10 & Epoch 20 \\
+        \vspace{0.2cm} \\
+        \includegraphics[width=0.3\textwidth]{relu_phi_epoch_30.png} &
+        \includegraphics[width=0.3\textwidth]{relu_phi_epoch_40.png} &
+        \includegraphics[width=0.3\textwidth]{relu_phi_epoch_50.png} \\
+        Epoch 30 & Epoch 40 & Epoch 50
+    \end{tabular}
+
+    \vspace{0.3cm}
+    {\footnotesize Note: test accuracy: 0.9742}
+\end{frame}
+
+
+% =======================
+% Slide 8: Tanh spectra
+% =======================
+\begin{frame}{Eigenvalue Density Spectra — Tanh}
+    \centering
+    \begin{tabular}{ccc}
+        \includegraphics[width=0.3\textwidth]{tanh_phi_epoch_1.png} &
+        \includegraphics[width=0.3\textwidth]{tanh_phi_epoch_10.png} &
+        \includegraphics[width=0.3\textwidth]{tanh_phi_epoch_20.png} \\
+        Epoch 1 & Epoch 10 & Epoch 20 \\
+        \vspace{0.2cm} \\
+        \includegraphics[width=0.3\textwidth]{tanh_phi_epoch_30.png} &
+        \includegraphics[width=0.3\textwidth]{tanh_phi_epoch_40.png} &
+        \includegraphics[width=0.3\textwidth]{tanh_phi_epoch_50.png} \\
+        Epoch 30 & Epoch 40 & Epoch 50
+    \end{tabular}
+
+    \vspace{0.3cm}
+    {\footnotesize Note: test accuracy: 0.9753}
+\end{frame}
+
+
+% =======================
+% Slide 9: Spectral Ratio Evolution
+% =======================
+\begin{frame}{Spectral Ratio Evolution Across Activations}
+    \centering
+    \begin{tabular}{ccc}
+        \includegraphics[width=0.3\textwidth]{sigmoid_kappa_vs_epoch.png} &
+        \includegraphics[width=0.3\textwidth]{relu_kappa_vs_epoch.png} &
+        \includegraphics[width=0.3\textwidth]{tanh_kappa_vs_epoch.png} \\
+        Sigmoid & ReLU & Tanh
+    \end{tabular}
+
+    \vspace{0.3cm}
+    {\footnotesize Evolution during training of 
+    $\lambda_{\max} / \lambda_{\min}$, where $\lambda_{\max}$ is the largest Hessian eigenvalue and 
+    $\lambda_{\min}$ is the smallest positive non-zero eigenvalue.}
+\end{frame}
+
+
+\end{document}

@@ -15,5 +15,3 @@ class Encoder(nn.Module):
     @abstractmethod
     def input_modality(self) -> str:
         ...
-
-        

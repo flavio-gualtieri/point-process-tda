@@ -1,0 +1,76 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{moller2004statistical}
+\citation{waagepetersen2009twostep}
+\citation{diggle2003spatial}
+\citation{tanaka2008parameter}
+\citation{moller2004statistical}
+\citation{vihrs2022neural}
+\citation{waagepetersen2009twostep}
+\citation{waagepetersen2009twostep}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\citation{vihrs2022neural}
+\citation{yip2025learning}
+\citation{adams2017persistence}
+\citation{umeda2017time}
+\citation{bubenik2015landscapes}
+\citation{chazal2014silhouette}
+\citation{reininghaus2015kernel}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Problem setup}{2}{subsection.1.1}\protected@file@percent }
+\newlabel{ssec:setup}{{1.1}{2}{Problem setup}{subsection.1.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{section.2}\protected@file@percent }
+\newlabel{sec:background}{{2}{2}{Background}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Neyman-Scott processes}{2}{subsection.2.1}\protected@file@percent }
+\newlabel{ssec:spp}{{2.1}{2}{Neyman-Scott processes}{subsection.2.1}{}}
+\citation{anai2020dtm}
+\citation{adams2017persistence}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Persistent homology}{3}{subsection.2.2}\protected@file@percent }
+\newlabel{ssec:persistence}{{2.2}{3}{Persistent homology}{subsection.2.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}ParamNet}{3}{section.3}\protected@file@percent }
+\newlabel{sec:progress}{{3}{3}{ParamNet}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Synthetic cloud generation}{3}{subsection.3.1}\protected@file@percent }
+\newlabel{ssec:simulator}{{3.1}{3}{Synthetic cloud generation}{subsection.3.1}{}}
+\citation{vihrs2022neural}
+\citation{yip2025learning}
+\citation{liu2018coordconv}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Method: ParamNet}{4}{subsection.3.2}\protected@file@percent }
+\newlabel{ssec:method}{{3.2}{4}{Method: ParamNet}{subsection.3.2}{}}
+\newlabel{eq:pipeline}{{1}{4}{Method: ParamNet}{equation.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{Filtration.}{4}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Encoder, head, and ablations.}{4}{section*.2}\protected@file@percent }
+\citation{vihrs2022neural}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces One point cloud $\rightarrow $ its $H_0/H_1$ persistence diagrams $\rightarrow $ the vectorizations compared in Table~\ref {tab:branches}: persistence-image raster, landscape stack, silhouette curve, Betti curve, and persistence-statistics summary. Top row: the tight-cluster design ($\kappa =50$, $\mu =4$, $\sigma =0.01$); bottom row: the near-Poisson design ($\kappa =4$, $\mu =5$, $\sigma =0.5$). Statistics-panel bars are min-max normalized per statistic, with raw values printed above each bar, since count, total persistence, and entropy live on incomparable scales.}}{5}{figure.caption.3}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:vectorization_schematic}{{1}{5}{One point cloud $\rightarrow $ its $H_0/H_1$ persistence diagrams $\rightarrow $ the vectorizations compared in Table~\ref {tab:branches}: persistence-image raster, landscape stack, silhouette curve, Betti curve, and persistence-statistics summary. Top row: the tight-cluster design ($\kappa =50$, $\mu =4$, $\sigma =0.01$); bottom row: the near-Poisson design ($\kappa =4$, $\mu =5$, $\sigma =0.5$). Statistics-panel bars are min-max normalized per statistic, with raw values printed above each bar, since count, total persistence, and entropy live on incomparable scales}{figure.caption.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Branch summary: every axis measured against the multi-scale, $H_0{+}H_1$, CoordConv starting configuration, $n=10$ seeds per arm unless noted. Vectorization rows are the native-encoder path. A dagger ($^\dagger $) marks an arm on which at least one seed failed to converge and collapsed to the chance level, so the mean is dominated by the failed seed(s). $^{c}$$n=3$. The DTM$_5$ / fused rows support the process-specific scale choice rather than ablating a single model.}}{5}{table.caption.4}\protected@file@percent }
+\newlabel{tab:branches}{{1}{5}{Branch summary: every axis measured against the multi-scale, $H_0{+}H_1$, CoordConv starting configuration, $n=10$ seeds per arm unless noted. Vectorization rows are the native-encoder path. A dagger ($^\dagger $) marks an arm on which at least one seed failed to converge and collapsed to the chance level, so the mean is dominated by the failed seed(s). $^{c}$$n=3$. The DTM$_5$ / fused rows support the process-specific scale choice rather than ablating a single model}{table.caption.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Estimation performance and baseline comparison}{5}{subsection.3.3}\protected@file@percent }
+\newlabel{ssec:results}{{3.3}{5}{Estimation performance and baseline comparison}{subsection.3.3}{}}
+\citation{diggle2003spatial}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Estimator comparison on Thomas and Nested Thomas, $n=10$ seeds, on the shared test split. $^{\ddagger }$ParamNet is process-specific: DTM$_5$ for Thomas, fused DTM$_{5,10,15}$ for nested Thomas. $^a$ Minimum contrast on $K$ is unstable across seeds rather than uniformly bad, and $^b$ minimum contrast on $g$ is consistently worse than chance; both are discussed in the text. $^{d}$Not run: no closed-form summary statistic for nested Thomas has yet been derived, so its absence is an outstanding experiment rather than an impossibility.}}{6}{table.caption.5}\protected@file@percent }
+\newlabel{tab:classical-comparison}{{2}{6}{Estimator comparison on Thomas and Nested Thomas, $n=10$ seeds, on the shared test split. $^{\ddagger }$ParamNet is process-specific: DTM$_5$ for Thomas, fused DTM$_{5,10,15}$ for nested Thomas. $^a$ Minimum contrast on $K$ is unstable across seeds rather than uniformly bad, and $^b$ minimum contrast on $g$ is consistently worse than chance; both are discussed in the text. $^{d}$Not run: no closed-form summary statistic for nested Thomas has yet been derived, so its absence is an outstanding experiment rather than an impossibility}{table.caption.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Per-parameter loss $\mathcal  {L}^j$ underlying the aggregate $\mathcal  {L}$ of Table~\ref {tab:classical-comparison} (same methods, same seeds; ParamNet/nested is $n{=}3$). Minimum contrast has no nested-Thomas columns for the reason given there.}}{6}{table.caption.6}\protected@file@percent }
+\newlabel{tab:perparam}{{3}{6}{Per-parameter loss $\mathcal {L}^j$ underlying the aggregate $\mathcal {L}$ of Table~\ref {tab:classical-comparison} (same methods, same seeds; ParamNet/nested is $n{=}3$). Minimum contrast has no nested-Thomas columns for the reason given there}{table.caption.6}{}}
+\citation{waagepetersen2009twostep}
+\citation{waagepetersen2009twostep}
+\bibcite{adams2017persistence}{{1}{2017}{{Adams et al.}}{{}}}
+\bibcite{anai2020dtm}{{2}{2020}{{Anai et al.}}{{}}}
+\bibcite{bubenik2015landscapes}{{3}{2015}{{Bubenik}}{{}}}
+\bibcite{chazal2014silhouette}{{4}{2014}{{Chazal et al.}}{{}}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Discussion, limitations and future work}{7}{section.4}\protected@file@percent }
+\newlabel{sec:future}{{4}{7}{Discussion, limitations and future work}{section.4}{}}
+\@writefile{toc}{\contentsline {paragraph}{Limitations.}{7}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Planned directions.}{7}{section*.8}\protected@file@percent }
+\bibcite{diggle2003spatial}{{5}{2003}{{Diggle}}{{}}}
+\bibcite{liu2018coordconv}{{6}{2018}{{Liu et al.}}{{}}}
+\bibcite{moller2004statistical}{{7}{2004}{{M\o ller and Waagepetersen}}{{}}}
+\bibcite{reininghaus2015kernel}{{8}{2015}{{Reininghaus et al.}}{{}}}
+\bibcite{tanaka2008parameter}{{9}{2008}{{Tanaka et al.}}{{}}}
+\bibcite{umeda2017time}{{10}{2017}{{Umeda}}{{}}}
+\bibcite{vihrs2022neural}{{11}{2022}{{Vihrs}}{{}}}
+\bibcite{waagepetersen2009twostep}{{12}{2009}{{Waagepetersen and Guan}}{{}}}
+\bibcite{yip2025learning}{{13}{2025}{{Yip et al.}}{{}}}
+\gdef \@abspage@last{8}

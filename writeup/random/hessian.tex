@@ -1,0 +1,734 @@
+%% init_baseline_report.tex
+%% Phase 2: Hessian-at-Initialization — Exhaustive Technical Report
+%% Pilot results: L=3, W=16, sigma=1.0, 100 seeds
+\documentclass[12pt,a4paper]{article}
+
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{caption}
+\usepackage{subcaption}
+% enumitem and mdframed unavailable in this TeX installation; using alternatives
+
+\graphicspath{{runs/init_baseline/figures/}{arch_analysis/}}
+
+\geometry{margin=2.5cm}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  citecolor=green!50!black,
+}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{note}{Note}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\erank}{\operatorname{erank}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\abs}[1]{\left\lvert #1 \right\rvert}
+\newcommand{\btheta}{\boldsymbol{\theta}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\bJ}{\mathbf{J}}
+\newcommand{\bH}{\mathbf{H}}
+\newcommand{\bG}{\mathbf{G}}
+\newcommand{\bF}{\mathbf{F}}
+\newcommand{\bD}{\mathbf{D}}
+\newcommand{\sigmoid}{\sigma}
+
+\title{%
+  \textbf{Hessian Eigenvalue Spectrum Analysis}\\[0.5em]
+}
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Overview and Motivation}
+\label{sec:overview}
+
+We aim to characterise the full Hessian $\bH$ of the loss. We begin by analysing $\bH$ \emph{at step zero}, before any gradient update has been applied, as a function of architecture (depth $L$, width $W$) and initialisation scale $\sigma$.
+
+The main questions are:
+\begin{enumerate}
+  \item What does the eigenvalue spectrum of $\bH$ look like at a random
+        initialisation?
+  \item How does it decompose into the \emph{Gauss--Newton} component $\bG$ and the
+        \emph{residual} component $\bF = \bH - \bG$
+        (which depends on how wrong the network's predictions are)?
+  \item How do $\lambda_{\max}$, $\lambda_{\min}$, and the sign structure of
+        the spectrum vary?
+  \item How much randomness (seed-to-seed variability) is present after fixing
+        the data?
+\end{enumerate}
+
+The results presented here are a \textbf{pilot study}: one architecture
+($L=3$, $W=16$) at one initialisation scale ($\sigma=1.0$) over 100
+independent random seeds. The sweep is designed to isolate initialization randomness
+from data randomness by fixing a single canonical data batch across all seeds.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+\subsection{Network architecture}
+\label{ssec:arch}
+
+We construct an MLP $f(\bx_i; \btheta): \mathbb{R}^2 \rightarrow \mathbb{R}$  with the function
+\texttt{build\_mlp} in \texttt{model/model.py}.
+Given depth $L \geq 2$ and width $W$, the network computes
+\begin{align}
+  h^{(0)} &= \bx \in \R^2, \notag\\
+  h^{(\ell)} &= \tanh\!\bigl(W^{(\ell)} h^{(\ell-1)} + b^{(\ell)}\bigr),
+    \quad \ell = 1, \ldots, L-1, \notag\\
+  z &= W^{(L)} h^{(L-1)} + b^{(L)} \in \R, \notag
+\end{align}
+where the input dimension is fixed at $d_{\mathrm{in}}=2$ and the output is a
+single scalar logit $z$ (one-dimensional). The activation \textbf{tanh} is used throughout.  No batch normalisation, dropout, or skip connections are implemented.
+
+The total parameter count for depth $L$ and width $W$ is
+\begin{equation}
+  P(L, W) = (d_{\mathrm{in}} \cdot W + W)
+           + (L-2)(W^2 + W)
+           + (W \cdot 1 + 1)
+           = 4W + (L-2)(W^2 + W) + 1.
+  \label{eq:param_count}
+\end{equation}
+
+\begin{table}[H]
+  \centering
+  \caption{Parameter counts $P(L,W)$ for all sweep architectures
+           (those with $P \leq 2000$ shown; depth~4, width~32 is excluded).}
+  \label{tab:params}
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    & $W=8$ & $W=16$ & $W=32$ \\
+    \midrule
+    $L=2$ & 33 & 65 & 129 \\
+    $L=3$ & 105 & \textbf{337} & 1{,}185 \\
+    $L=4$ & 177 & 609 & $2{,}241\dagger$ \\
+    \bottomrule
+    \multicolumn{4}{l}{$\dagger$ Excluded ($P > 2{,}000$).}
+  \end{tabular}
+\end{table}
+
+\subsection{Initialisation}
+\label{ssec:init}
+
+PyTorch's default Kaiming uniform initialisation is applied to all linear
+layers, then \emph{every} parameter (weights \emph{and} biases) is multiplied by the initialisation scale $\sigma$:
+\begin{equation}
+  \theta \;\leftarrow\; \sigma \cdot \theta_{init}.
+  \label{eq:init_scale}
+\end{equation}
+At $\sigma=1$ the network uses the default initialisation exactly. At $\sigma < 1$ the network is ``small-weight'' (logits near zero, sigmoid near 0.5); at $\sigma > 1$ the logits are large in magnitude, and the sigmoid
+saturates. The model seed controls the random draw of $\theta_{init}$.
+
+\subsection{Dataset: two-spirals}
+\label{ssec:data}
+
+The task is binary classification on the \textbf{two-spirals} dataset,
+a standard non-linearly separable benchmark.
+Two interleaved spiral arms of $n=100$ points each are generated:
+\begin{align}
+  \theta_j &\sim \sqrt{U[0,1]} \cdot 420^\circ, \quad j=1,\ldots,100, \notag\\
+  \text{Class 0:}\quad
+    \bx_j &= (\theta_j \cos\theta_j,\; \theta_j \sin\theta_j)
+             + \varepsilon_j, \notag\\
+  \text{Class 1:}\quad
+    \bx_j &= (-\theta_j \cos\theta_j,\; -\theta_j \sin\theta_j)
+             + \varepsilon_j, \notag
+\end{align}
+where $\varepsilon_j \sim \mathcal{N}(0, 0.1^2 I_2)$ is isotropic Gaussian
+noise.  The full dataset is $N = 200$ points.
+
+\begin{note}
+\textbf{Fixed canonical batch.}
+The data is generated \emph{once} with a fixed data seed (937) and
+reused across all 100 model seeds. This is important: it decouples
+data randomness from initialisation randomness, so seed-to-seed differences in the Hessian are attributable solely to the random draw of $\btheta$.
+\end{note}
+
+\subsection{Loss function}
+\label{ssec:loss}
+
+The loss is \textbf{Binary Cross-Entropy with Logits}
+(\texttt{BCEWithLogitsLoss} in PyTorch), evaluated on the full canonical batch:
+\begin{equation}
+  \mathcal{L}(\btheta)
+  = \frac{1}{N} \sum_{i=1}^{N}
+    \bigl[ -y_i z_i + \log(1 + e^{z_i}) \bigr],
+  \label{eq:bce}
+\end{equation}
+where $z_i = f(\bx_i; \btheta) \in \R$ is the network's scalar logit for
+sample $i$ and $y_i \in \{0,1\}$ is the binary label.
+
+\subsection{Sweep configurations}
+\label{ssec:sweep}
+
+The full sweep covers:
+\begin{center}
+\label{tab:sweep}
+  \begin{tabular}{ll}
+    \toprule
+    Axis & Values \\
+    \midrule
+    Depth $L$ & 2, 3, 4 \\
+    Width $W$ & 8, 16, 32 \\
+    Initialization scale $\sigma$ & 0.5, 1.0, 2.0, 4.0, 8.0 \\
+    Seeds & $0, 1, \ldots, 99$ \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+The 8 valid $(L,W)$ pairs (after applying the $P \leq 2{,}000$ cap) yield
+$8 \times 5 \times 100 = 4{,}000$ configurations in total.
+Before studying the full sweep, we consider the single slice $L=3, W=16, \sigma=1.0$, 100 seeds.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+
+\section{The Hessian}
+\label{sec:hessian}
+
+\subsection{Definition}
+\label{ssec:hessian_def}
+
+The \textbf{Hessian} of $\mathcal{L}$ at $\btheta \in \R^P$ is a symmetric matrix $\bH \in \mathbb{R}^P \times \mathbb{R}^P$.
+\begin{equation}
+  (H)_{kl} = \frac{\partial^2 \mathcal{L}}{\partial \theta_k \partial \theta_l},
+  \quad k,l = 1,\ldots,P.
+  \label{eq:hessian_def}
+\end{equation}
+The \emph{Hessian eigenvalue spectrum} (HES) $\lambda_1 \geq \lambda_2 \geq \cdots \geq \lambda_P$ encodes the local curvature
+of the loss landscape:
+\begin{itemize}
+  \item $\lambda_i > 0$: positive curvature along the $i$-th eigendirection
+    (``uphill'', locally a minimum along that direction).
+  \item $\lambda_i < 0$: negative curvature (saddle direction).
+  \item $\lambda_i = 0$: flat direction (neither uphill nor downhill).
+\end{itemize}
+At a random initialisation the Hessian is generally \emph{indefinite}, reflecting that the parameter point is not at any
+extremum of $\mathcal{L}$.
+
+\subsection{Numerical computation}
+\label{ssec:hessian_comp}
+
+The full Hessian is assembled row by row using PyTorch's automatic
+differentiation as follows:
+\begin{enumerate}
+  \item Compute the loss $\mathcal{L}$ in a forward pass with
+        \texttt{create\_graph=True} to build the second-order computational
+        graph.
+  \item Compute the gradient vector
+        $g \in \R^P$ with respect to all parameters, keeping the
+        graph alive.
+  \item For each index $k = 1, \ldots, P$, compute
+        $\mathbf{H}[k, \cdot] = \nabla_{\btheta} g_k$ by a second backward
+        pass.  This yields one row of $\bH$ (at a cost of one additional
+        backward pass.)
+  \item Symmetrise: $\bH \leftarrow \tfrac{1}{2}(\bH + \bH^\top)$ to
+        eliminate floating-point asymmetry.
+\end{enumerate}
+The total cost is $P$ backward passes (one per row), so the computation is
+$O(P^2)$ in time and $O(P^2)$ in memory for the dense matrix.
+All computations are performed in \textbf{float64} to
+ensure that the Gauss-Newton invariant $\norm{\bG + \bF - \bH}_F /
+\norm{\bH}_F < 10^{-6}$ is achievable numerically.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+
+\section{Gauss-Newton Decomposition}
+\label{sec:gn}
+
+\subsection{Motivation}
+\label{ssec:gn_motivation}
+
+We may use Gauss-Newton decomposition to split the Hessian into
+two structurally distinct parts:
+\begin{equation}
+  \bH = \bG + \bF.
+  \label{eq:decomp}
+\end{equation}
+$\bG$ describes how the logits change as a function of parameters, and $\bF$ depends on the residuals (i.e.\ how wrong the model's current predictions are). Separating these two contributions reveals different aspects of the loss landscape.
+
+\subsection{Derivation for BCEWithLogitsLoss}
+\label{ssec:gn_derivation}
+
+Write the loss as $\mathcal{L}(\btheta) = \frac{1}{N}\sum_i \ell(z_i, y_i)$
+where $\ell(z,y) = -yz + \log(1+e^z)$ and $z_i = f(\bx_i;\btheta)$.
+By the chain rule, the $(k,l)$ entry of the Hessian is
+\begin{equation}
+  (H)_{kl}
+  = \frac{1}{N}\sum_{i=1}^N \left[
+      \underbrace{\frac{\partial^2 \ell}{\partial z^2}\bigg|_{z_i}}_{=\;\sigmoid'(z_i)}
+      \cdot
+      \frac{\partial z_i}{\partial \theta_k}
+      \frac{\partial z_i}{\partial \theta_l}
+      \;+\;
+      \underbrace{\frac{\partial \ell}{\partial z}\bigg|_{z_i,y_i}}_{=\;\sigmoid(z_i)-y_i}
+      \cdot
+      \frac{\partial^2 z_i}{\partial \theta_k \partial \theta_l}
+    \right],
+  \label{eq:hessian_split}
+\end{equation}
+where $\sigmoid(z) = (1+e^{-z})^{-1}$ is the sigmoid and
+$\sigmoid'(z) = \sigmoid(z)(1-\sigmoid(z)) \in (0,\tfrac{1}{4}]$.
+
+\paragraph{The Gauss--Newton matrix $\bG$.}
+The \emph{first} term in \eqref{eq:hessian_split} is the Gauss--Newton
+matrix:
+\begin{equation}
+  \boxed{
+    (G)_{kl}
+    = \frac{1}{N}\sum_{i=1}^N
+      \sigmoid'(z_i)\,
+      \frac{\partial z_i}{\partial \theta_k}
+      \frac{\partial z_i}{\partial \theta_l}.
+  }
+  \label{eq:G_elementwise}
+\end{equation}
+Defining the Jacobian matrix $\bJ \in \R^{N \times P}$ with
+$J_{ik} = \partial z_i / \partial \theta_k$, and the diagonal weight matrix
+$\mathbf{D} = \diag\!\bigl(\sigmoid'(z_1), \ldots, \sigmoid'(z_N)\bigr)$, this
+becomes
+\begin{equation}
+  \bG = \frac{1}{N}\bJ^\top \mathbf{D}\, \bJ.
+  \label{eq:G_matrix}
+\end{equation}
+
+The second term is the residual:
+\begin{equation}
+  F_{kl}
+  = \frac{1}{N}\sum_{i=1}^N
+    r_i\,
+    \frac{\partial^2 z_i}{\partial \theta_k \partial \theta_l},
+  \label{eq:F_elementwise}
+\end{equation}
+where $r_i = \sigmoid(z_i) - y_i$ is the residual for sample $i$
+(the signed prediction error after the sigmoid).
+
+\subsection{$\bG$ is positive semidefinite}
+\label{ssec:gn_psd}
+
+\begin{proposition}
+  $\bG \succeq 0$ for all $\btheta$.
+\end{proposition}
+
+\begin{proof}
+For any $v \in \R^P$,
+\begin{equation}
+  v^\top \bG\, v
+  = \frac{1}{N}\sum_{i=1}^N \sigmoid'(z_i)\, (J_i v)^2
+  \geq 0,
+\end{equation}
+because $\sigmoid'(z_i) > 0$ for all $z_i \in \R$ (the sigmoid derivative is
+strictly positive everywhere), and $(J_i v)^2 \geq 0$ is a square.
+Hence every term in the sum is non-negative, so the quadratic form is
+non-negative for all $v$.
+\end{proof}
+
+Since $\bG$ is a Gram matrix formed from $N$ rank-1 updates, its rank is at
+most $\min(N, P)$.
+For the pilot architecture, $N = 200 < P = 337$, so
+$\rank(\bG) \leq 200$: at least $P - N = 137$ eigenvalues of $\bG$ are
+\emph{exactly zero}.
+In practice (see Section~\ref{ssec:plot3}), the effective rank is far lower
+still: only $\sim\!33$ eigenvalues of $\bG$ exceed the numerical zero
+threshold, and the top 3 eigenvalues account for 93.6\% of the spectral mass.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+
+\section{Summary Statistics}
+\label{sec:stats}
+
+For each of the three matrices $M \in \{\bH, \bG, \bF\}$ the following statistics are
+computed.
+
+\paragraph{Extrema.}
+$\lambda_{\max}$ and $\lambda_{\min}$.
+
+\paragraph{Moments.}
+Mean, standard deviation, skewness, and (excess) kurtosis of the eigenvalue
+distribution.  Skewness measures asymmetry.
+
+\paragraph{Mass on negatives.}
+\begin{equation}
+  m_-(M)
+  = \frac{\sum_{i:\,\lambda_i < 0} \abs{\lambda_i}}
+         {\sum_{i=1}^P \abs{\lambda_i}}.
+  \label{eq:mass_neg}
+\end{equation}
+This is the fraction of spectral \emph{weight} (absolute eigenvalue) that
+lies on negative eigenvalues.  It ranges from 0 (PSD) to 1 (negative
+semidefinite).  For $\bG$, $m_-(\bG) = 0$ exactly (PSD).
+For $\bH$ at random initialisation, $m_- \approx 0.46$ (nearly equal
+positive and negative mass).
+
+\paragraph{Effective rank.}
+\begin{equation}
+  \erank(M)
+  = \frac{\bigl(\sum_{i=1}^P \abs{\lambda_i}\bigr)^2}
+         {\sum_{i=1}^P \lambda_i^2}.
+  \label{eq:erank}
+\end{equation}
+This is the number of eigenvalues that ``effectively'' contribute to the
+spectral mass, penalising heavy concentration in a few modes.
+$\erank = 1$ if all mass is in one eigenvalue; $\erank = P$ if all
+eigenvalues are equal.
+
+\paragraph{Sign counts.}
+Using a zero threshold $\tau = 10^{-5} \cdot \abs{\lambda_{\max}}$,
+eigenvalue $\lambda_i$ is classified as:
+\begin{itemize}
+  \item \emph{positive}: $\lambda_i > \tau$,
+  \item \emph{negative}: $\lambda_i < -\tau$,
+  \item \emph{near-zero}: $\abs{\lambda_i} \leq \tau$.
+\end{itemize}
+The threshold is relative to $\lambda_{\max}$ so that it scales with the
+overall magnitude of the spectrum across different configurations.
+
+\paragraph{Outlier count.}
+The number of eigenvalues exceeding $5\times$ the median of the top half of
+the spectrum.  This identifies eigenvalues that are anomalously
+large relative to the bulk.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+
+\section{Pilot Results: L=3 W=16}
+\label{sec:results}
+
+We run 100 model seeds at $L=3$, $W=16$, $\sigma=1.0$.  This architecture has $337$ parameters. The objective of this small fixed-architecture experiment is to build intuition, and establish a baseline understanding of (1) how seed randomization affects the eigenvalue spectrum, and (2) study the Gauss-Newton decomposition in depth for a simple example before considering a breadth of architectures.
+
+\subsection{Eigenvalue spectrum and sign counts}
+\label{ssec:plot1}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{plot1_spectrum_hist_pilot.png}
+  \caption{Overlaid histograms of eigenvalues for $\bH$ (blue), $\bG$ (green),
+    and $\bF$ (red) across 100 random seeds.
+    Each red/blue/green line is one seed; the thick yellow is the mean histogram.
+    Bin width: uniform over the $[p_{0.5}, p_{99.5}]$ eigenvalue range per matrix,
+    60 bins.}
+  \label{fig:plot1}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{plot3_count_breakdown_pilot.png}
+  \caption{Stacked area chart of the number of positive (green), negative
+    (magenta), and near-zero (pink) eigenvalues per seed, for $\bH$, $\bG$,
+    and $\bF$.  Each column corresponds to one seed ($x$-axis = seed index). The total bar height is $337$ for every seed.}
+  \label{fig:plot3}
+\end{figure}
+
+\paragraph{Observations.}
+The spectrum of $\bH$ spans approximately $[-0.65, +0.70]$ with the bulk concentrated near zero and a visible peak at $\lambda \approx 0$. The distribution is roughly symmetric about zero, with positive and negative bands each occupying roughly half of the $337$ eigenvalues ($n_+ \approx 151$, $n_- \approx 152$ on average) and a small but variable near-zero band ($n_0 \approx 34$, $\sigma \approx 10$). The slight asymmetry (skewness $\approx 1.01$ on average; see Table~\ref{tab:pilot_stats}) comes from a few positive outliers ($\lambda_{\max} \approx 0.9$) that shift the right tail.
+
+The spectrum of $\bG$ is, as expected, entirely non-negative and exhibits an extreme spike at $\lambda \approx 0$. The $n_+$ band is thin ($\approx 33$ eigenvalues) and the $n_0$ band is massive ($\approx 304$ eigenvalues), with \emph{zero} negative eigenvalues ($n_- = 0$ for every seed).
+
+The spectrum of $\bF$ is also centred near zero, slightly wider than $\bH$'s bulk, and has slightly heavier negative tails (mass on negatives $\approx 50.8\%$ vs $\approx 46.2\%$ for $\bH$). The skewness of $\bF$ is approximately zero ($-0.07$ on average), making it more symmetric than $\bH$. Its sign-count bands mirror $\bH$'s behaviour almost exactly: $n_+ \approx n_- \approx 150$, $n_0 \approx 34$.
+
+The curves from 100 seeds overlap closely across all three matrices, indicating that the shape of the spectrum is generally reproducible across seeds.
+
+\emph{Note}: the threshold $\tau = 10^{-5} \cdot \lambda_{\max}$ adapts to the scale of the spectrum, so a seed with a larger $\lambda_{\max}$ uses a larger threshold and thus absorbs more eigenvalues into the near-zero category.
+
+\paragraph{Explanation via GN decomposition.}
+The PSD constraint on $\bG$ forces $n_- = 0$ exactly, and the rank ceiling $\rank(\bG) \leq \min(N, P) = 200$ guarantees that at least $P - N = 137$ eigenvalues are exactly zero. The remaining concentration is structural: only $\approx 33$ eigenvalues exceed the numerical threshold ($\tau \approx 8.6 \times 10^{-6}$), and the top 3 account for 93.6\% of the spectral mass. This reflects the low effective rank of the Jacobian ($\approx 3$) -- the network's sensitivity to its parameters in the direction of fitting the data is concentrated in $\approx 3$ directions in the $337$-dimensional parameter space, because at initialisation the per-sample Jacobians are overwhelmingly aligned and generally point along 3 principal directions.
+
+Because $\bG$ is PSD with low effective rank, it contributes primarily positive mass but relatively little of it. The bulk of $\bH$'s spectrum is therefore inherited from $\bF$: the bands of $\bF$ track those of $\bH$ almost exactly, and the slight extra negative mass in $\bF$ ($50.8\%$ vs $46.2\%$) is exactly compensated by the positive contribution of $\bG$. The near-symmetry of the bulk is consistent with a Wigner-like picture: at random initialisation with a symmetric activation and balanced data (100 points per class), there is no reason for the Hessian to prefer a particular sign, and the random fluctuations in the parameters produce an approximately semicircular bulk. RANDOM MATRIX THEORY
+
+\paragraph{Key takeaways.}
+\begin{enumerate}
+  \item $\bH$ is indefinite at initialisation, with $n_+ \approx n_-$ and $\approx 46\%$ of spectral weight on negative eigenvalues, consistent across all 100 seeds.
+  \item $\bG$ is severely rank-deficient: only $\approx 33$ of 337 eigenvalues exceed the numerical threshold, and the top 3 carry the vast majority of the spectral mass.
+  \item All negative curvature in $\bH$ originates from $\bF$, which is itself nearly symmetric about zero and dominates the shape of $\bH$'s bulk.
+\end{enumerate}
+
+\begin{table}[H]
+  \centering
+  \caption{Summary statistics for the pilot slice
+           ($L=3$, $W=16$, $\sigma=1.0$, 100 seeds).}
+  \label{tab:pilot_stats}
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Statistic & Mean & Std & Min & Max \\
+    \midrule
+    $\lambda_{\max}(H)$           & 0.904 & 0.140 & 0.655 & 1.231 \\
+    $\lambda_{\min}(H)$           & $-0.582$ & 0.139 & $-1.200$ & $-0.303$ \\
+    Mass neg.\ $(H)$              & 0.462 & 0.030 & 0.390 & 0.545 \\
+    Eff.\ rank $(H)$              & 49.94 & 2.84 & 40.66 & 59.87 \\
+    $n_+$ $(H)$                   & 151.2 & 8.8 & 131 & 170 \\
+    $n_-$ $(H)$                   & 151.6 & 9.7 & 127 & 180 \\
+    $n_0$ $(H)$                   & 34.1 & 10.3 & 8 & 58 \\
+    Skewness $(H)$                & 1.007 & 0.571 & $-0.290$ & 2.785 \\
+    Kurtosis $(H)$                & 11.16 & 3.55 & 6.95 & 27.58 \\
+    \midrule
+    $\lambda_{\max}(G)$           & 0.750 & 0.137 & 0.460 & 1.139 \\
+    $\lambda_{\min}(G)$           & $\approx 0$ & --- & --- & --- \\
+    Mass neg.\ $(G)$              & 0 (exact) & --- & --- & --- \\
+    Eff.\ rank $(G)$              & 3.10 & 0.23 & 2.35 & 3.47 \\
+    $n_+$ $(G)$                   & 32.7 & 2.1 & 28 & 38 \\
+    $n_0$ $(G)$                   & 304.3 & 2.1 & 299 & 309 \\
+    Skewness $(G)$                & 12.07 & 0.97 & 10.66 & 15.12 \\
+    \midrule
+    $\lambda_{\max}(F)$           & 0.582 & 0.107 & 0.339 & 0.842 \\
+    $\lambda_{\min}(F)$           & $-0.594$ & 0.140 & $-1.208$ & $-0.309$ \\
+    Mass neg.\ $(F)$              & 0.508 & 0.024 & 0.451 & 0.579 \\
+    Eff.\ rank $(F)$              & 52.49 & 3.16 & 44.21 & 61.12 \\
+    Skewness $(F)$                & $-0.066$ & 0.223 & $-0.876$ & 0.367 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\newpage
+\section{Architecture Sweep at Initialisation}
+\label{sec:archsweep}
+
+Now that a baseline has been established, we aim to understand what effect the architecture (and by proxy the size of $\bH$) has on the spectrum. We are especially interested in understanding if symmetry is maintained, and whether the extremal eigenvalues are well-behaved. We run the sweep from Table~\ref{tab:sweep}, measuring the Hessian before any gradient update.
+
+\subsection{Extremal Asymmetry vs.\ Bulk Symmetry}
+\label{ssec:archsymm}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{plot7_arch_symmetry_scatter.png}
+    \caption{$\lambda_{\max}(\bH)$ vs.\ $|\lambda_{\min}(\bH)|$. Points above the dashed diagonal $y = x$ have $\lambda_{\max} > |\lambda_{\min}|$.}
+    \label{fig:plot7}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{plot8_arch_eigencount_scatter.png}
+    \caption{$n_+$ vs.\ $n_-$ eigenvalue counts. The dashed diagonal $y = x$ marks perfect sign balance; different architectures occupy distinct regions of the diagonal as $n_+ + n_-$ grows with $P$.}
+    \label{fig:plot8}
+  \end{subfigure}
+  \caption{Extremal eigenvalues (left) and bulk sign counts (right) of $\bH$ at initialisation across all $(L, W, \sigma, \text{seed})$ configurations. Primary colour encodes $\sigma$; shade encodes parameter count (darker = more parameters).}
+  \label{fig:arch_scatter}
+\end{figure}
+
+\paragraph{Observations.}
+The two panels of Figure~\ref{fig:arch_scatter} tell qualitatively different stories. In the extremal panel (left), almost all points (87.2\%) lie above the diagonal $y = x$, indicating that $\lambda_{\max}(\bH) > |\lambda_{\min}(\bH)|$ across a significant number of architectures and initialization scales. Numerically, the ratio $\lambda_{\max}/|\lambda_{\min}|$ is typically in $[1.1, 2.0]$, with extreme outliers at large $\sigma$ pushing it further. The initialization scale $\sigma$ spreads the point cloud along both axes roughly proportionally: doubling $\sigma$ doubles the typical eigenvalue magnitude (visible as the shift from the red $\sigma=0.5$ cluster near the origin to the yellow/purple clusters at larger values). Crucially, the ratio $\lambda_{\max}/|\lambda_{\min}|$ does not seem to depend strongly on $\sigma$.
+
+In contrast, the bulk count panel (right) exhibits near-perfect symmetry: $n_+ \approx n_-$ across every architecture and every $\sigma$. Numerically, the ratio $n_+/n_-$ lies in $[0.997, 1.131]$ across all $(L, W, \sigma=1.0)$ configurations (Table~\ref{tab:archcounts}), with the small deviation at $(L,W)=(2,8)$ arising from the very small total count ($P=33$). The placement along the diagonal is determined by the total count $P$ (larger architectures occupy higher values on the $n_+ \approx n_-$ line) and does \emph{not} depend on $\sigma$.
+
+\begin{table}[H]
+  \centering
+  \caption{Sign-count ratio $n_+/n_-$ and near-zero count $n_0$ at initialisation
+           ($\sigma=1.0$, medians over 100 seeds).}
+  \label{tab:archcounts}
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Architecture & $P$ & $n_+$ & $n_-$ & $n_+/n_-$ \\
+    \midrule
+    $L=2,\;W=8$  &  33 & 17.5 & 15.5 & 1.131 \\
+    $L=2,\;W=16$ &  65 & 33.0 & 31.8 & 1.037 \\
+    $L=2,\;W=32$ & 129 & 65.2 & 63.0 & 1.035 \\
+    $L=3,\;W=8$  & 105 & 52.0 & 51.1 & 1.018 \\
+    $L=3,\;W=16$ & 337 & 151.2 & 151.6 & 0.997 \\
+    $L=3,\;W=32$ & 1185 & 394.6 & 392.4 & 1.005 \\
+    $L=4,\;W=8$  & 177 & 85.1 & 85.4 & 0.997 \\
+    $L=4,\;W=16$ & 609 & 270.0 & 267.5 & 1.009 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Explanation via GN decomposition.}
+Both phenomena are consequences of the Gauss-Newton decomposition $\bH = \bG + \bF$, viewed through the lens of random matrix theory.
+
+The bulk symmetry arises because the residual term $\bF$ approximates a Wigner-class random matrix at random initialisation. Recall that
+\begin{equation*}
+  F_{kl} = \frac{1}{N}\sum_{i=1}^N r_i\, \frac{\partial^2 z_i}{\partial \theta_k \partial \theta_l},
+\end{equation*}
+where the residuals $r_i = \sigmoid(z_i) - y_i$ are approximately mean-zero (since $\sigmoid(z_i) \approx 0.5$ at random init and $y_i \in \{0,1\}$ is balanced) and uncorrelated with the second-derivative tensor of the logit. The entries of $\bF$ are therefore sums of approximately mean-zero terms, and $\bF$ inherits the approximate symmetry of the underlying random ensemble: under the assumptions of zero-mean i.i.d.\ off-diagonal entries (Wigner's theorem), the empirical spectral density converges to a semicircle centred at zero as $P \to \infty$. The semicircle is symmetric about zero, so $n_+(\bF) \approx n_-(\bF)$ asymptotically.
+
+The Gauss-Newton term $\bG$ provides a finite-rank positive perturbation: $\rank(\bG) \leq N = 200$, but in practice $\erank(\bG) \approx 3$ regardless of architecture. By the Cauchy interlacing theorem generalised to rank-$r$ perturbations, adding $\bG$ to $\bF$ shifts at most $\rank(\bG)$ eigenvalues outside the bulk and leaves the remaining $P - \rank(\bG)$ eigenvalues interleaved with those of $\bF$. Since the perturbation is positive semidefinite, the displaced eigenvalues are pushed to the \emph{right} (toward larger positive values), producing a small set of positive outliers above the bulk while leaving the negative tail of $\bF$ untouched.
+
+This single mechanism explains both behaviours:
+\begin{itemize}
+  \item \textbf{Bulk symmetry:} the $n_+$ and $n_-$ counts are dominated by the bulk, which contains $\sim P - 3$ eigenvalues drawn from the symmetric Wigner-like density of $\bF$. The rank-3 PSD perturbation cannot meaningfully tilt these counts.
+  \item \textbf{Extremal asymmetry:} $\lambda_{\max}(\bH)$ is one of the displaced outliers and is inflated by the positive perturbation, while $\lambda_{\min}(\bH) = \lambda_{\min}(\bF)$ is untouched. The ratio $\lambda_{\max}/|\lambda_{\min}|$ is therefore systematically greater than 1.
+\end{itemize}
+
+The independence of both phenomena from $\sigma$ falls out of this picture as well: multiplying all weights by $\sigma$ rescales both $\bG$ and $\bF$, and although individual eigenvalues change in magnitude, the rank structure of $\bG$ and the sign structure of $\bF$ are preserved.
+
+\paragraph{Key takeaways.}
+\begin{enumerate}
+  \item Across all architectures and initialization scales, $\bH$ exhibits a \emph{structural extremal asymmetry} ($\lambda_{\max}/|\lambda_{\min}| > 1$ for 87.2\% of points), driven by the rank-3 PSD perturbation $\bG$ inflating the top eigenvalue while leaving the negative tail untouched.
+  \item Despite this extremal asymmetry, the \emph{bulk sign counts are essentially symmetric} ($n_+ \approx n_-$, ratio $\in [0.997, 1.131]$), reflecting the Wigner-class behaviour of $\bF$ and the inability of a rank-3 perturbation to tilt the bulk.
+  \item Both effects are independent of $\sigma$: the asymmetry is structural (from the rank deficiency of $\bG$), not a consequence of saturation or scale.
+\end{enumerate}
+
+\subsection{Maximum Eigenvalue and Spectral Symmetry Score}
+\label{ssec:archlmax}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{plot9_arch_lmax.png}
+  \caption{Median $\lambda_{\max}(\bH)$ (taken over 100 seeds) at initialisation, per architecture and initialization scale. Rows correspond to depth $L$ and columns are width $W$. The missing cell ($L=4, W=32$) is excluded due to $P > 2000$.}
+  \label{fig:plot9}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{plot10_arch_symmetry_heatmap.png}
+  \caption{Spectral symmetry score $(\lambda_{\max} + \lambda_{\min})/(\lambda_{\max} - \lambda_{\min})$
+    at initialisation.
+    A value of $0$ indicates perfect extremal symmetry ($\lambda_{\max} = |\lambda_{\min}|$);
+    positive values indicate $\lambda_{\max} > |\lambda_{\min}|$.}
+  \label{fig:plot10}
+\end{figure}
+
+\paragraph{Observations.}
+Figure~\ref{fig:plot9} shows that $\lambda_{\max}$ is always monotone in width but not in depth.
+For all $\sigma$, increasing $W$ from 8 to 16 to 32 consistently raises $\lambda_{\max}$. This is expected from the matrix perspective: a wider network has a larger Jacobian $\bJ \in \R^{N \times P}$, making $\bG = \tfrac{1}{N}\bJ^\top \bD\, \bJ$ a larger-magnitude matrix. The residual $\bF$ also grows with width as more parameters contribute curvature.
+
+Depth, however, does not always increase $\lambda_{\max}$. For $\sigma=1$ and fixed $W=8$, the sequence $L=2, 3, 4$ yields medians $1.02 \to 0.62 \to 0.51$. We see that deeper networks have \emph{smaller} top eigenvalues at initialization. However, for $\sigma \geq 2$ we see $\lambda_{max}$ increases monotonically in depth.
+
+The symmetry score mirrors the behaviour of $\lambda_{\max}$ somewhat.
+Since $\lambda_{\min}$ varies less across architectures than $\lambda_{\max}$ (e.g.\ at $\sigma=1$: $|\lambda_{\min}|$ ranges over $[0.37, 0.78]$ while $\lambda_{\max}$ ranges over $[0.51, 2.96]$), the symmetry score $({\lambda_{\max}+\lambda_{\min}})/({|\lambda_{\max}-\lambda_{\min}|})$ is largely determined by $\lambda_{\max}$.
+
+
+\section{Architecture Sweep After 100 Training Steps}
+\label{sec:step100}
+
+We now repeat the same sweep after training each model for $100$ steps of AdamW ($\text{lr} = 10^{-3}$) on the canonical batch, and compare the Hessian structure to the at-initialization baseline.
+We aim to understand what spectral changes are induced by early training, and how do they depend on architecture and $\sigma$.
+
+\subsection{Shift in Spectral Structure: Pilot Architecture}
+\label{ssec:step100_pilot}
+
+As before, we begin by building some intuition with the pilot architecture ($L=3$, $W=16$, $\sigma=1.0$). The most striking change is a strong break of the near-symmetry observed at initialization:
+
+\begin{table}[H]
+  \centering
+  \caption{Key statistics for $L=3$, $W=16$, $\sigma=1.0$: initialisation vs.\ after 100 steps
+           (means over 100 seeds).}
+  \label{tab:step100_pilot}
+  \begin{tabular}{@{}lrr@{}}
+    \toprule
+    Statistic & At initialization & After 100 steps \\
+    \midrule
+    $\lambda_{\max}(\bH)$     & 0.904 & 1.183 \\
+    $|\lambda_{\min}(\bH)|$   & 0.582 & 0.135 \\
+    Mass neg.\ $(\bH)$        & 0.462 & 0.222 \\
+    Eff.\ rank $(\bH)$        & 49.9  & 26.9 \\
+    $n_+$                      & 151.2 & 182.5 \\
+    $n_-$                      & 151.6 & 121.3 \\
+    $n_+/n_-$                  & 1.00  & 1.50 \\
+    Eff.\ rank $(\bG)$         & 3.10  & 3.26 \\
+    $\lambda_{\max}(\bG)$      & 0.750 & 1.019 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Spectrum tilts positive.}
+Mass on negatives drops from $0.462$ to $0.222$: the spectrum is no longer near-symmetric. Correspondingly, $n_+/n_-$ rises from $1.00$ to $1.50$, and $|\lambda_{\min}|$ shrinks from $0.582$ to $0.135$ while $\lambda_{max}$ rises from $0.904$ to $1.183$. These changes are consistent with gradient descent moving the parameters toward a region of smaller loss, where the residual $\bF = \bH - \bG$ begins to shrink and $\bH$ approaches the PSD matrix $\bG$. After 100 steps, the model is far from fully converged on the two-spirals task, but the spectrum already shows a clear directional signature of the optimisation.
+
+\paragraph{Effective rank halves.}
+$\erank(\bH)$ drops from $\approx 50$ to $\approx 27$. As training proceeds, the loss curvature concentrates into fewer directions: the gradient updates preferentially sharpen the curvature along the directions actually exploited during optimisation, while leaving flat directions unchanged. The Gauss-Newton effective rank is nearly unchanged ($3.10 \to 3.26$), confirming that the Jacobian structure is not dramatically reshaped by 100 steps; the change is primarily in $\bF$.
+
+\paragraph{$\lambda_{\max}(\bG)$ grows.}
+The Gauss-Newton top eigenvalue increases from $0.750$ to $1.019$. This reflects that the network's predictions improve (residuals shrink), but the Jacobian magnitude grows as weights move toward larger-magnitude activations. The GN top eigenvalue is a measure of how sensitive the output is to the most important parameter direction; it grows as the network commits to fitting the data.
+
+\subsection{Effect of Initialization Scale on Post-Training Spectrum}
+\label{ssec:step100_sigma}
+
+\begin{table}[H]
+  \centering
+  \caption{Spectral statistics after 100 steps as a function of $\sigma$
+           (fixing $L=3$, $W=16$, means over 100 seeds).}
+  \label{tab:step100_sigma}
+  \begin{tabular}{@{}lrrrrr@{}}
+    \toprule
+    $\sigma$ & $\lambda_{\max}(\bH)$ & Mass neg.\ $(\bH)$ & Eff.\ rank $(\bH)$ & Eff.\ rank $(\bG)$ \\
+    \midrule
+    0.5 & 1.129 & 0.151 & --- & 2.83 \\
+    1.0 & 1.183 & 0.222 & 26.9 & 3.26 \\
+    2.0 & 1.955 & 0.200 & --- & 3.89 \\
+    4.0 & 2.660 & 0.186 & --- & 5.97 \\
+    8.0 & 3.211 & 0.210 & --- & 8.97 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{$\lambda_{\max}$ grows with $\sigma$.}
+Larger initialization scale translates into larger curvature after training (from $1.13$ at $\sigma=0.5$ to $3.21$ at $\sigma=8.0$). Larger $\sigma$ produces larger-magnitude weights, which maintain larger-magnitude outputs and Jacobians even after 100 gradient steps.
+
+\paragraph{$\erank(\bG)$ grows strongly with $\sigma$.}
+At init, $\erank(\bG) \approx 3$ regardless of $\sigma$.
+After 100 steps, the Gauss-Newton effective rank for $\sigma=8.0$ is $\approx 9.0$ (vs.\ $2.83$ for $\sigma=0.5$).
+This is a qualitative change: large-init-scale models develop a richer Jacobian structure during early training.
+At $\sigma=8.0$ the tanh activations are initially saturated (logits large), causing the sigmoid weights $\sigma'(z_i)$ in $\bD$ to be near zero; the first few gradient steps partially un-saturate some neurons, freeing new Jacobian directions and inflating $\erank(\bG)$.
+
+\paragraph{Mass on negatives does not vary strongly with $\sigma$.}
+After 100 steps, the mass on negatives is in the range $[0.151, 0.222]$ across all $\sigma$ values, with no clear monotone trend. At $\sigma=0.5$ it is lowest ($0.151$), consistent with small-initialization models being nearer to the linear regime and closer to convergence; but the large-$\sigma$ models ($4.0, 8.0$) also have relatively low mass on negatives ($\approx 0.19$--$0.21$), perhaps because their large $\lambda_{\max}$ makes the negative mass fraction small even when the negative eigenvalues themselves are substantial.
+
+\subsection{Sign Count and Extremal Symmetry After 100 Steps}
+\label{ssec:step100_scatter}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.48\textwidth]{step100_plot7_arch_symmetry_scatter.png}
+  \hfill
+  \includegraphics[width=0.48\textwidth]{step100_plot8_arch_eigencount_scatter.png}
+  \caption{Left: $\lambda_{\max}(\bH)$ vs.\ $|\lambda_{\min}(\bH)|$ after 100 steps.
+    Right: $n_+$ vs.\ $n_-$ after 100 steps.
+    Compare to Figures~\ref{fig:plot7} and~\ref{fig:plot8} at initialisation.
+    In both panels the dashed diagonal marks the symmetric baseline.}
+  \label{fig:step100_scatter}
+\end{figure}
+
+The extremal symmetry scatter (left panel) shows the same qualitative picture as at init---points above the diagonal, driven by the positive-definite $\bG$---but the gap from the diagonal is larger.
+The most dramatic change is in the count scatter (right panel): points have moved away from the $y = x$ diagonal and now lie clearly in the region $n_+ > n_-$.
+At init, the median $n_+/n_-$ ratio was $\approx 1.0$ (Table~\ref{tab:archcounts}); after 100 steps it is $\approx 1.5$ for the pilot architecture.
+Larger $\sigma$ configurations show even more pronounced shifts, consistent with the larger $\lambda_{\max}$ values creating a wider positive bulk.
+
+\subsection{Heatmaps: $\lambda_{\max}$ and Spectral Symmetry After 100 Steps}
+\label{ssec:step100_heatmaps}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{step100_arch_lmax.png}
+  \caption{Median $\lambda_{\max}(\bH)$ after 100 training steps, by architecture and initialization scale.
+    Compare to Figure~\ref{fig:plot9} at initialisation.}
+  \label{fig:step100_lmax}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{step100_arch_symmetry_heatmap.png}
+  \caption{Spectral symmetry score $(\lambda_{\max} + \lambda_{\min})/(\lambda_{\max} - \lambda_{\min})$
+    after 100 training steps.
+    A value of $0$ is extremal symmetry; positive values indicate
+    $\lambda_{\max} > |\lambda_{\min}|$.
+    Compare to Figure~\ref{fig:plot10}.}
+  \label{fig:step100_symm}
+\end{figure}
+
+\paragraph{Width still dominates $\lambda_{\max}$.}
+After 100 steps, the heatmap pattern replicates the initialization result: $\lambda_{\max}$ is monotone in $W$ at every fixed $L$ and $\sigma$.
+For $\sigma=1.0$: $L=2$: $W8 \to 1.04$, $W16 \to 1.59$, $W32 \to 2.70$; $L=3$: $W8 \to 0.75$, $W16 \to 1.18$, $W32 \to 2.60$.
+The ordering is preserved from initialization, with training amplifying the differences: the ratio $\lambda_{\max}(W=32)/\lambda_{\max}(W=8)$ grows from $\approx 2.6$ at initialization to $\approx 3.5$ at step 100.
+
+\paragraph{Depth continues to attenuate $\lambda_{\max}$.}
+At fixed $W=8, \sigma=1.0$: $L=2 \to 1.04$, $L=3 \to 0.75$, $L=4 \to 0.83$, consistent with the initialization pattern. The slight non-monotonicity at $L=4$ (larger than $L=3$) may reflect that the extra depth provides more curvature directions once partial un-saturation of tanh occurs during early training.
+
+\paragraph{Symmetry score increases with training.}
+The symmetry score heatmap (Figure~\ref{fig:step100_symm}) shows higher values than at initialization (Figure~\ref{fig:plot10}) across almost all cells. Training amplifies the positive bias in $\lambda_{\max}$ while pushing $\lambda_{\min}$ toward zero, so the numerator $\lambda_{\max} + \lambda_{\min}$ grows. Wide networks ($W=32$) at large $\sigma$ have the largest symmetry scores, combining a large $\lambda_{\max}$ (from width) with large $\sigma$ amplification.
+
+\end{document}

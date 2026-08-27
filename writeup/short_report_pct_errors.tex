@@ -1,0 +1,135 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1.6cm]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[font=small,labelfont=bf,skip=4pt]{caption}
+\usepackage{amsmath}
+
+\begin{document}
+
+% -----------------------------------------------------------------------------
+% Conversion note (kept to a single line so the tables remain the content):
+% loss values are MSE in log-normalized parameter space,
+% L^j = mean[((log(hat theta)-log(theta))/sigma_log)^2]. Approx. relative
+% error is recovered as 100*(exp(sqrt(L^j)*sigma_log) - 1), where sigma_log
+% is the std of log(theta) on the training split (per parameter, per
+% process; averaged across parameters for aggregate L rows). sigma_log,
+% read off saved label_norm stats: Thomas (kappa, mu, sigma) =
+% (0.577, 0.690, 0.688); Nested Thomas (parent, meta-offspring,
+% meta-cluster scale, mean offspring, cluster scale) =
+% (0.492, 0.410, 0.627, 0.518, 0.656).
+% -----------------------------------------------------------------------------
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+Method & Thomas $\mathcal{L}$ & \% err & Nested-Thomas $\mathcal{L}$ & \% err \\
+\midrule
+ParamNet$^{\ddagger}$    & $0.125 \pm 0.007$ & 26\% & $0.192 \pm 0.010$ & 27\% \\
+vihrs ($L(r)-r$ CNN)     & $0.115 \pm 0.007$ & 25\% & $0.217 \pm 0.006$ & 29\% \\
+Minimum contrast, $K$   & $0.855 \pm 0.682^{a}$ & 83\% & ---$^{d}$ & --- \\
+Minimum contrast, $g$   & $6.199 \pm 0.339^{b}$ & 407\% & ---$^{d}$ & --- \\
+\midrule
+\emph{Chance-level reference (label shuffle)} & \emph{$1.003 \pm 0.019$} & \emph{92\%} & \emph{$1.006 \pm 0.020$} & \emph{72\%} \\
+\bottomrule
+\end{tabular}
+\caption{Estimator comparison on Thomas and Nested Thomas, $n=10$ seeds, on the shared test split.
+\% err is the approximate relative error in original parameter space,
+$100(\exp(\sqrt{\mathcal{L}}\,\bar\sigma_{\log}) - 1)$, with $\bar\sigma_{\log}$
+the across-parameter average of the log-std used to normalize each process's
+labels ($\bar\sigma_{\log}^{\text{Thomas}}=0.652$,
+$\bar\sigma_{\log}^{\text{Nested}}=0.541$); since $\mathcal{L}$ aggregates
+parameters of unequal difficulty this is a rough single-number summary, see
+Table~2 for the per-parameter version. $^{\ddagger}$ParamNet is
+process-specific: DTM$_5$ for Thomas, fused
+DTM$_{5,10,15}$ for nested Thomas.
+$^a$ Minimum contrast on
+$K$ is unstable across seeds rather than uniformly bad, and $^b$ minimum
+contrast on $g$ is consistently worse than chance.
+$^{d}$Not run: no closed-form summary statistic for nested Thomas
+has yet been derived.}
+\label{tab:classical-comparison-pct}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\textbf{(a) Thomas} ($\kappa$ parent intensity, $\mu$ offspring intensity, $\sigma$ cluster scale)\\[2pt]
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccc}
+\toprule
+Parameter & ParamNet & \% err & vihrs & \% err & Min.\ contrast, $K$ & \% err & Min.\ contrast, $g$ & \% err \\
+\midrule
+$\mathcal{L}^\kappa$ & $0.201 \pm 0.010$ & 30\% & $0.192 \pm 0.013$ & 29\% & $1.373 \pm 1.087$ & 97\% & $8.825 \pm 0.485$ & 455\% \\
+$\mathcal{L}^\mu$    & $0.134 \pm 0.007$ & 29\% & $0.122 \pm 0.007$ & 27\% & $0.939 \pm 0.758$ & 95\% & $6.334 \pm 0.370$ & 468\% \\
+$\mathcal{L}^\sigma$ & $0.040 \pm 0.004$ & 15\% & $0.029 \pm 0.002$ & 12\% & $0.254 \pm 0.203$ & 41\% & $3.437 \pm 0.170$ & 258\% \\
+\bottomrule
+\end{tabular}%
+}
+
+\vspace{10pt}
+\textbf{(b) Nested Thomas}\\[2pt]
+\begin{tabular}{lcccc}
+\toprule
+Parameter & ParamNet$^{c}$ & \% err & vihrs & \% err \\
+\midrule
+parent intensity      & $0.283 \pm 0.023$ & 30\% & $0.320 \pm 0.010$ & 32\% \\
+meta-offspring        & $0.402 \pm 0.022$ & 30\% & $0.493 \pm 0.022$ & 33\% \\
+meta-cluster scale    & $0.143 \pm 0.006$ & 27\% & $0.132 \pm 0.009$ & 26\% \\
+mean offspring        & $0.086 \pm 0.004$ & 16\% & $0.110 \pm 0.010$ & 19\% \\
+cluster scale         & $0.044 \pm 0.000$ & 15\% & $0.028 \pm 0.003$ & 12\% \\
+\bottomrule
+\end{tabular}
+\caption{Per-parameter loss $\mathcal{L}^j$ underlying the aggregate
+$\mathcal{L}$ of Table~1 (same methods, same
+seeds; ParamNet/nested is $n{=}3$). \% err is
+$100(\exp(\sqrt{\mathcal{L}^j}\,\sigma_{\log}^j) - 1)$ with the
+per-parameter $\sigma_{\log}^j$ read off the saved (train-split) label
+normalization stats: Thomas $(\kappa,\mu,\sigma) = (0.577, 0.690, 0.688)$;
+Nested Thomas (parent, meta-offspring, meta-cluster scale, mean offspring,
+cluster scale) $=(0.492, 0.410, 0.627, 0.518, 0.656)$. Minimum
+contrast has no nested-Thomas columns.}
+\label{tab:perparam-pct}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\scriptsize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+Axis & Arm & Thomas $\mathcal{L}$ & \% err & Nested-Thomas $\mathcal{L}$ & \% err \\
+\midrule
+Filtration & Rips & ---$^a$ & --- & ---$^a$ & --- \\
+           & Rips (vec\_multik, landscape) & $0.178 \pm 0.008$ & 32\% & $0.461 \pm 0.016$ & 44\% \\
+           & DTM$_5$ / DTM$_{15}$ & $0.125 \pm 0.007$ / $0.146 \pm 0.006$ & 26\% / 28\% & $0.205 \pm 0.003$ / $0.260 \pm 0.017$ & 28\% / 32\% \\
+           & DTM$_{\{5,10,15\}}$ (fused) & $0.126 \pm 0.008$ & 26\% & $0.192 \pm 0.010^{c}$ & 27\% \\
+Homology   & $H_0$ only / $H_1$ only & $0.125 \pm 0.006$ / $0.900 \pm 0.019$ & 26\% / 86\% & $0.280 \pm 0.250^\dagger$ / $0.932 \pm 0.028$ & 33\% / 69\% \\
+Encoder    & shared / independent, concat & $0.125 \pm 0.007$ / $0.134 \pm 0.009$ & 26\% / 27\% & $0.201 \pm 0.010$ / $0.222 \pm 0.021$ & 27\% / 29\% \\
+Vectorization & Persistence image & $0.126 \pm 0.008$ & 26\% & $0.192 \pm 0.010^{c}$ & 27\% \\
+           & Landscape & $0.132 \pm 0.008$ & 27\% & $0.250 \pm 0.005$ & 31\% \\
+           & Silhouette ($p=1$) & $0.165 \pm 0.013$ & 30\% & $0.271 \pm 0.012$ & 33\% \\
+           & Betti curve & $0.196 \pm 0.014$ & 33\% & $0.290 \pm 0.005$ & 34\% \\
+Features   & $\log N$ removed & $0.217 \pm 0.278^\dagger$ & 36\% & $0.203 \pm 0.007$ & 28\% \\
+           & Topology removed ($\log N$ only) & $0.893 \pm 0.015$ & 85\% & $0.948 \pm 0.019$ & 69\% \\
+Calibration & Naive ($q=1.00$) & $0.122 \pm 0.003$ & 26\% & $0.214 \pm 0.012$ & 28\% \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Branch summary: every axis measured against the multi-scale,
+$H_0{+}H_1$, CoordConv starting configuration, at the default $q=0.95$
+calibration, $n=10$ seeds per arm unless noted. \% err uses the
+same aggregate, average-$\sigma_{\log}$ approximation as Table~1
+($\bar\sigma_{\log}^{\text{Thomas}}=0.652$,
+$\bar\sigma_{\log}^{\text{Nested}}=0.541$); rows marked $\dagger$ have at
+least one non-converged seed collapsed to chance level, so both the
+$\mathcal{L}$ and the \% err for that arm are dominated by the failed
+seed(s) rather than being representative. $^a$ Rips fails on $10/10$ seeds
+before training starts (native/CNN encoder path); the landscape row is the
+1-D vec\_multik path, which survives. $^{c}$$n=3$.}
+\label{tab:branches-pct}
+\end{table}
+
+\end{document}
