@@ -1,4 +1,4 @@
-## Summary
+## Background
 
 Spatial point processes model clustered natural phenomena — galaxy
 clustering, cell positions, tree stands — and their parameters (parent
@@ -71,21 +71,3 @@ Parameter sweeps (report §3.2–3.3) are driven from `param_sweeps/scripts/`
 `param_sweeps/results/`.
 
 Tests: `pytest tests/` (add `-m slow` for the ~1 min end-to-end CLI test).
-
-## Where the report's numbers come from
-
-| Report element | Code / results |
-|---|---|
-| Simulator (§3.1) | `scripts/generate.py`, `src/cloudforger/data_generation/` |
-| Features | `scripts/featurize.py`, `src/cloudforger/vectorization/`, `.../calibration/diagram_calibration.py` |
-| ParamNet + ablations (Tables 1–3) | `scripts/train.py`, `scripts/evaluate.py`, `src/cloudforger/experiments/pi_multik/`, `results/{thomas,nested_thomas}/` |
-| Vectorization comparison (Table 3) | `scripts/collect_vectorization_results.py`, `results/**/vec_multik_*`, `.../betti_multik*` |
-| Baselines | `src/cloudforger/baselines/{vihrs,mincontrast,mincontrast_g}.py` |
-| Encoder ablation (Table 3, "shared / independent, concat") | `method: pi_multik` with `method.params.encoder_mode ∈ {shared, independent}`, `fusion_mode: concat` |
-| Calibration "Naive (q=1.00)" row | `param_sweeps/results/**/pi_multik/_runs/calib_q100/` |
-
-`src/cloudforger/` is left exactly as on `backend/full-history`; modules for
-bifiltration / multiparameter-persistence experiments
-(`experiments/mph_*`, `data_generation/filtration/bifiltration.py`,
-`core/signed_measure.py`, `vectorization/persistence_images/signed_measure_image.py`)
-are present but are not part of this report.
