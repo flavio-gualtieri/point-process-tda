@@ -1,10 +1,3 @@
-# Topological Feature Learning for Parameter Estimation in Neyman–Scott Processes
-
-First-year progression report — Flavio Gualtieri.
-The report is [`writeup/short_report.tex`](writeup/short_report.tex)
-([compiled PDF](writeup/short_report.pdf)); this repository is the code and
-results behind it.
-
 ## Summary
 
 Spatial point processes model clustered natural phenomena — galaxy
