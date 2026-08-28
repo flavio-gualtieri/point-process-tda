@@ -37,12 +37,6 @@ figs/                            calibration_comparison.pdf, vectorization_schem
 tests/                           pytest suite (registry smoke + full-CLI e2e)
 ```
 
-Anything not needed to read the report lives under an `archive/` subfolder
-(`writeup/archive/`, `scripts/archive/`, `figs/archive/`, `configs/archive/`).
-Whole superseded areas — older write-ups, exploratory notebooks, cluster job
-scripts, the vendored `multipers` C++ source — are not on this branch; they
-live in full on **`backend/full-history`** (`git show backend/full-history:_attic/...`).
-
 ## How to run
 
 ```bash
