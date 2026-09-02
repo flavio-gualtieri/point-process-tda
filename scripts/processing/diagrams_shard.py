@@ -90,6 +90,15 @@ FILTRATIONS: dict[str, tuple[str, dict]] = {
 
 SHARDS_SUBDIR = "_shards"
 
+# GUDHI's DTM / weighted-Rips backend leaks memory per call -- unbounded
+# growth (~80 MB/diagram, measured on job 25035368), not a fixed import
+# cost. There is no in-process fix: a ProcessPoolExecutor worker forked
+# after numpy/GUDHI import deadlocks (job 25038922), and `spawn` re-imports
+# the whole stack every recycle. So instead the shards are kept SMALL
+# (see NSHARDS in slurm/diagrams_compute.sh: ~200 diagrams/task) and each
+# array task is its own fresh OS process -- the leak resets at every task
+# boundary and never gets near the mem cap. Plain sequential loop below.
+
 
 def build_filtration(name: str):
     reg_name, params = FILTRATIONS[name]
@@ -166,7 +175,7 @@ def run_compute(data_paths: DataPaths, filt_name: str, index: int, total: int, f
         records: list[dict] = []
         for i, rec in enumerate(chunk):
             records.append(diagram_to_record(filt.compute(to_pointcloud(rec))))
-            if (i + 1) % 200 == 0 or i + 1 == len(chunk):
+            if (i + 1) % 50 == 0 or i + 1 == len(chunk):
                 print(f"  [{filt_name} shard {index}/{total}] {split} {i + 1}/{len(chunk)}", flush=True)
 
         payload = {

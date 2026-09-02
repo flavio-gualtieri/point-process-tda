@@ -1,0 +1,77 @@
+# python scripts/generate.py  configs/runs/strauss/strauss_pi_multik_k5k10k15.yaml
+# python scripts/featurize.py configs/runs/strauss/strauss_pi_multik_k5k10k15.yaml
+# python scripts/train.py     configs/runs/strauss/strauss_pi_multik_k5k10k15.yaml --seed 9371
+#
+# Strauss process (small-scale inhibition, Vihrs 2022 Sec. 3.2) driven
+# through the same TDA pipeline as the clustered families -- fixed rips +
+# DTM k=5,10,15 persistence images, pi_multik shared-weight encoder + flat
+# concat. This is the pi_multik counterpart of strauss_vihrs.yaml: SAME
+# process/design block (same data/strauss/clouds.pkl is shared by every
+# strauss method config -- mirrors the header comment on
+# matern_cluster_pi_multik_k5k10k15.yaml), only filtration/features/method
+# differ.
+#
+# 3 estimated parameters (beta, gamma, radius) -- vs 5 for
+# nested_thomas / aniso_thomas -- so target_label_names / log_label_names
+# below are the same 3-entry list strauss_vihrs.yaml uses; log-scale only
+# beta (a positive rate), gamma and radius stay linear (bounded
+# interaction parameters, not scales).
+
+process:
+  name: strauss
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        beta:   {low: 200.0, high: 900.0, scale: log}
+        gamma:  {low: 0.05,  high: 0.95,  scale: linear}
+        radius: {low: 0.005, high: 0.05,  scale: linear}
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  # rips deliberately excluded: its H0 birth axis is degenerate (every Rips
+  # H0 feature is born at 0), which build_calibrated_imager rejects
+  # outright; pi_multik's channel format is uniformly 2-D persistence
+  # images, so rips is unusable here regardless. DTM k=5,10,15 only,
+  # matching the k5k10k15 name/request and the sibling configs.
+  - {name: dtm,  params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 15, q: 2.0, maxdim: 1}}
+
+features:
+  - name: persistence_image
+    params: {resolution: 64, sigma_pixels: 0.5, homology_dims: [0, 1], pd_calibration_coverage: 0.95}
+
+method:
+  name: pi_multik
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [beta, gamma, radius]
+log_label_names: [beta]
+use_adversarial: true
