@@ -18,8 +18,8 @@ Created 2026-09-02.
 | **Tagged commit** | the freeze commit that adds this file, `configs/frozen/`, and `requirements.lock`; its parent is `270eb88` |
 | **Numbers of record** | `writeup/short_report.pdf` (sha256 `d30faf5c…836e`), source `writeup/short_report.tex` (sha256 `2ec9f78a…f437`) |
 | **Results ledger** | `results/experiments.jsonl` — 765 rows, sha256 `dbdb3852…ac28`; every row already carries the producing commit hash via `provenance.py` |
-| **Offline history copy** | `legacy-pre-kernel.bundle` (`git bundle`, stored off-repo) |
-| **Exact byte archive of `data/` + `results/`** | `legacy-pre-kernel-data.tar.zst`, stored off-repo — **required** (see reproducibility verdict below); sha256 in `legacy-pre-kernel-data.sha256` |
+| **Offline history copy** | `legacy-pre-kernel.bundle` (`git bundle`) — QMUL OneDrive, `point-process-tda/frozen/legacy-pre-kernel/` |
+| **Exact byte archive of `data/` + `results/`** | `legacy-pre-kernel-data.tar.zst` — 2.3 GB, sha256 `22a9de8b8cd50271a1c46e8156d5845ec944e9aceb67cf02a197ad4daf59c4ee` (also in `legacy-pre-kernel-data.sha256`). **Required** (see verdict below). QMUL OneDrive, `point-process-tda/frozen/legacy-pre-kernel/` — <PASTE SHARE LINK> |
 
 ---
 
@@ -125,8 +125,10 @@ git clone legacy-pre-kernel.bundle point-process-tda && cd point-process-tda && 
 python -m venv .venv-legacy && source .venv-legacy/bin/activate && pip install -e .
 
 # exact data + results the report used
-#   download legacy-pre-kernel-data.tar.zst, verify against legacy-pre-kernel-data.sha256, then:
-tar -I zstd -xf legacy-pre-kernel-data.tar.zst      # restores data/ and results/
+#   from QMUL OneDrive: point-process-tda/frozen/legacy-pre-kernel/
+#   verify, then extract into the repo root:
+shasum -a 256 -c legacy-pre-kernel-data.sha256
+tar --zstd -xf legacy-pre-kernel-data.tar.zst       # restores data/ and results/
 
 # Thomas can instead be regenerated bit-for-bit with the recipe above.
 ```
