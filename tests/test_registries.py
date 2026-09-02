@@ -21,15 +21,31 @@ def _sample_cloud(process_name: str, **params):
 
 
 def test_process_registry_covers_expected_names():
-    assert {"poisson", "matern", "thomas", "nested_thomas", "inhom_thomas", "neyman_scott"} <= set(
-        PROCESS_REGISTRY.names()
-    )
+    assert {
+        "poisson", "matern", "matern_cluster", "thomas", "nested_thomas", "inhom_thomas", "neyman_scott",
+    } <= set(PROCESS_REGISTRY.names())
 
 
 def test_thomas_process_builds_and_samples():
     cloud = _sample_cloud("thomas", parent_intensity=50.0, mean_offspring=8.0, cluster_scale=0.03, edge_buffer=0.1)
     assert cloud.n_points >= 0
     assert cloud.points.shape[1] == 2
+
+
+def test_matern_cluster_process_builds_and_samples():
+    cloud = _sample_cloud("matern_cluster", parent_intensity=50.0, mean_offspring=8.0, cluster_radius=0.05)
+    assert cloud.n_points >= 0
+    assert cloud.points.shape[1] == 2
+
+
+def test_matern_cluster_edge_buffer_is_exact_radius():
+    # BallKernel.support_radius is compact -- no eps tail-mass margin, unlike
+    # GaussianKernel's -- so the derived edge_buffer must equal cluster_radius exactly.
+    proc = PROCESS_REGISTRY.build(
+        "matern_cluster", parent_intensity=50.0, mean_offspring=8.0, cluster_radius=0.05
+    )
+    assert proc.params["edge_buffer"] == 0.05
+    assert proc.params["cluster_radius"] == 0.05
 
 
 def test_filtration_registry_and_path_tag():

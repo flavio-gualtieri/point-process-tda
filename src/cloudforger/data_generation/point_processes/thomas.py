@@ -4,7 +4,8 @@ import math
 
 import numpy as np
 
-from .neyman_scott import NeymanScottProcess, gaussian_displacements, poisson_counts
+from .neyman_scott import NeymanScottProcess, poisson_counts
+from .kernels import GaussianKernel
 
 
 class ThomasProcess(NeymanScottProcess):
@@ -16,18 +17,15 @@ class ThomasProcess(NeymanScottProcess):
         cluster_scale: float,
         edge_buffer: float | None = None,
     ):
-        if edge_buffer is None:
-            edge_buffer = 4.0 * cluster_scale
 
         super().__init__(
             parent_intensity=parent_intensity,
+            kernel=GaussianKernel(cluster_scale),
             offspring_count_sampler=poisson_counts(mean_offspring),
-            displacement_sampler=gaussian_displacements(cluster_scale),
             edge_buffer=edge_buffer,
             process_name="thomas",
             param_dict={
                 "mean_offspring": mean_offspring,
-                "cluster_scale": cluster_scale,
                 "c1": 2.0 * cluster_scale * math.sqrt(parent_intensity),
             },
         )

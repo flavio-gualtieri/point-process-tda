@@ -159,12 +159,11 @@ class InhomThomas(PointProcess):
         base_expected = min(lam_base * region.volume, float(self.max_base_points))
         mean_offspring = max(base_expected / (self.parent_intensity * region.volume), 1e-6)
 
-        eb = self.edge_buffer if self.edge_buffer is not None else 4.0 * self.cluster_scale
         base = ThomasProcess(
             parent_intensity=self.parent_intensity,
             mean_offspring=mean_offspring,
             cluster_scale=self.cluster_scale,
-            edge_buffer=eb,
+            edge_buffer=self.edge_buffer,
         )
         candidates = base._sample_points(None, region, rng)
         if candidates.shape[0] == 0:

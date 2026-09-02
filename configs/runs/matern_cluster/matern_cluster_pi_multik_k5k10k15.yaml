@@ -1,0 +1,77 @@
+# python scripts/generate.py  configs/runs/matern_cluster/matern_cluster_pi_multik_k5k10k15.yaml
+# python scripts/featurize.py configs/runs/matern_cluster/matern_cluster_pi_multik_k5k10k15.yaml
+# python scripts/train.py     configs/runs/matern_cluster/matern_cluster_pi_multik_k5k10k15.yaml --seed 9371
+#
+# Matern *cluster* process (offspring uniform on a disk of radius
+# cluster_radius -- registered as "matern_cluster", NOT "matern": that name
+# is MaternHardCoreProcess, a repulsive process, a different model. See
+# data_generation/point_processes/matern_cluster.py's module docstring.
+#
+# Same reparameterized design as thomas_pi_multik_k5k10k15.yaml
+# (lambda=K*mean_offspring, K=parent_intensity, nu=r*sqrt(K) the overlap
+# index), with r the per-axis RMS offspring displacement. For a uniform
+# disk of radius R, E[X^2] = R^2/4 by symmetry, so r = R/2 here (vs.
+# r = cluster_scale directly for Thomas's Gaussian kernel) -- hence
+# cluster_radius = c / sqrt(K) below (not c / (2*sqrt(K)) as for Thomas),
+# so that nu = c/2 means the same thing across both process families.
+
+process:
+  name: matern_cluster
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_radius:   "c / sqrt(K)"
+        c1:               "cluster_radius * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: dtm,  params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 15, q: 2.0, maxdim: 1}}
+
+features:
+  - name: persistence_image
+    params: {resolution: 64, sigma_pixels: 0.5, homology_dims: [0, 1], pd_calibration_coverage: 0.95}
+
+method:
+  name: pi_multik
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_radius]
+log_label_names: [parent_intensity, mean_offspring, cluster_radius]
+use_adversarial: true

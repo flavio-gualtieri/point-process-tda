@@ -5,48 +5,13 @@ from __future__ import annotations
 from typing import Any, Callable
 import numpy as np
 
+from .kernels import Kernel
 from ...core.base import PointProcess
 from ...core.region import Region
 
 
-DisplacementSampler = Callable[[int, int, np.random.Generator], np.ndarray]
 CountSampler = Callable[[int, np.random.Generator], np.ndarray]
 ParentSampler = Callable[[Region, np.random.Generator], np.ndarray]
-
-
-def gaussian_displacements(scale: float) -> DisplacementSampler:
-    if scale <= 0:
-        raise ValueError("scale must be positive")
-
-    def sampler(n: int, dimension: int, rng: np.random.Generator) -> np.ndarray:
-        return rng.normal(scale=scale, size=(n, dimension))
-
-    return sampler
-
-
-def uniform_ball_displacements(radius: float) -> DisplacementSampler:
-    if radius <= 0:
-        raise ValueError("radius must be positive")
-
-    def sampler(n: int, dimension: int, rng: np.random.Generator) -> np.ndarray:
-        if n == 0:
-            return np.empty((0, dimension))
-
-        directions = rng.normal(size=(n, dimension))
-        norms = np.linalg.norm(directions, axis=1)
-
-        zero = norms == 0
-        while np.any(zero):
-            directions[zero] = rng.normal(size=(int(zero.sum()), dimension))
-            norms = np.linalg.norm(directions, axis=1)
-            zero = norms == 0
-
-        directions = directions / norms[:, None]
-        radii = radius * rng.random(n) ** (1.0 / dimension)
-
-        return directions * radii[:, None]
-
-    return sampler
 
 
 def poisson_counts(mean: float) -> CountSampler:
@@ -61,7 +26,7 @@ def poisson_counts(mean: float) -> CountSampler:
 
 class NeymanScottProcess(PointProcess):
     """
-    Generic Neyman–Scott cluster process.
+    General Neyman–Scott cluster process.
 
     Algorithm:
     1. Sample parent points in an expanded region -- uniform-Poisson by
@@ -75,27 +40,27 @@ class NeymanScottProcess(PointProcess):
     def __init__(
         self,
         parent_intensity: float,
+        kernel: Kernel,
         offspring_count_sampler: CountSampler,
-        displacement_sampler: DisplacementSampler,
-        edge_buffer: float,
+        edge_buffer: float | None = None,
+        buffer_eps: float = 1e-4,
         process_name: str = "neyman_scott",
         param_dict: dict[str, Any] | None = None,
         parent_sampler: ParentSampler | None = None,
     ):
         if parent_intensity <= 0:
             raise ValueError("parent_intensity must be positive")
-        if edge_buffer < 0:
-            raise ValueError("edge_buffer must be non-negative")
+        if edge_buffer is None:
+            edge_buffer = kernel.support_radius(buffer_eps)
+        if not (np.isfinite(edge_buffer) and edge_buffer >= 0):
+            raise ValueError("edge_buffer must be finite and non-negative")
 
         self.parent_intensity = parent_intensity
+        self.kernel = kernel
         self.offspring_count_sampler = offspring_count_sampler
-        self.displacement_sampler = displacement_sampler
         self.edge_buffer = edge_buffer
         self.process_name = process_name
         self.param_dict = param_dict or {}
-        # None -> the default uniform-Poisson parents below. Set by
-        # subclasses that want their "parents" to come from another process
-        # (e.g. a coarser cluster process) instead -- see ParentSampler.
         self.parent_sampler = parent_sampler
 
     @property
@@ -107,6 +72,7 @@ class NeymanScottProcess(PointProcess):
         return {
             "parent_intensity": self.parent_intensity,
             "edge_buffer": self.edge_buffer,
+            **self.kernel.params,
             **self.param_dict,
         }
 
@@ -151,12 +117,12 @@ class NeymanScottProcess(PointProcess):
         parent_idx = np.repeat(np.arange(n_parents), offspring_counts)
 
         offsets = np.asarray(
-            self.displacement_sampler(total, region.dimension, rng),
+            self.kernel.sample(total, region.dimension, rng),
             dtype=float,
         )
 
         if offsets.shape != (total, region.dimension):
-            raise ValueError("displacement_sampler must return shape (total, dimension)")
+            raise ValueError("kernel.sample must return shape (total, dimension)")
 
         offspring = parents[parent_idx] + offsets
 

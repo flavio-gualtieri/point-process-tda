@@ -1,0 +1,44 @@
+# matern_cluster counterpart of thomas_vihrs.yaml -- vihrs reads clouds.pkl
+# directly and computes L(r)-r itself, no filtration/features needed.
+#
+# process.design must match matern_cluster_pi_multik_k5k10k15.yaml exactly
+# (same data/matern_cluster/clouds.pkl is shared by every method config for
+# this process -- see that file's header comment).
+
+process:
+  name: matern_cluster
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_radius:   "c / sqrt(K)"
+        c1:               "cluster_radius * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+method:
+  name: vihrs
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    checkpoint_best: true
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_radius]
+log_label_names: [parent_intensity, mean_offspring, cluster_radius]
+use_adversarial: true
