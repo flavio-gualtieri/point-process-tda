@@ -1,0 +1,49 @@
+# aniso_thomas counterpart of thomas/thomas_vihrs.yaml -- vihrs reads
+# clouds.pkl directly and computes L(r)-r itself, no filtration/features.
+#
+# Same process/design block as aniso_thomas_pi_multik_k5k10k15.yaml. This
+# is the intended contrast for the anisotropy claim: the radially-averaged
+# L(r)-r that vihrs consumes is (near-)blind to cluster_aspect and
+# cluster_theta, so vihrs should recover parent_intensity / mean_offspring /
+# cluster_scale about as well as on isotropic Thomas but fail on the two
+# new axes -- while the 2-D persistence images retain the elongation.
+
+process:
+  name: aniso_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+        cluster_aspect: {low: 1.0, high: 4.0,               scale: linear}
+        cluster_theta:  {low: 0.0, high: 3.141592653589793, scale: linear}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+method:
+  name: vihrs
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    checkpoint_best: true
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale, cluster_aspect, cluster_theta]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale, cluster_aspect]
+use_adversarial: true

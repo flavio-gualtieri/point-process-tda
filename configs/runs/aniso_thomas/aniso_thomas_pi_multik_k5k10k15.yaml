@@ -1,0 +1,93 @@
+# python scripts/generate.py  configs/runs/aniso_thomas/aniso_thomas_pi_multik_k5k10k15.yaml
+# python scripts/featurize.py configs/runs/aniso_thomas/aniso_thomas_pi_multik_k5k10k15.yaml
+# python scripts/train.py     configs/runs/aniso_thomas/aniso_thomas_pi_multik_k5k10k15.yaml --seed 9371
+#
+# Anisotropic Thomas: homogeneous Poisson parents (unchanged from
+# thomas_pi_multik_k5k10k15.yaml) but an elliptical Gaussian offspring
+# kernel -- AnisotropicGaussianKernel, registered process "aniso_thomas".
+# See data_generation/point_processes/aniso_thomas.py.
+#
+# Design delta vs. thomas_pi_multik_k5k10k15.yaml:
+#   * K / EN / c ranges + the parent_intensity / mean_offspring /
+#     cluster_scale / c1 derivations are byte-for-byte the same. cluster_scale
+#     is now the GEOMETRIC-MEAN per-axis scale sqrt(sigma_1 sigma_2); the
+#     kernel splits it as sigma_1 = cluster_scale*sqrt(aspect),
+#     sigma_2 = cluster_scale/sqrt(aspect), so the marginal cluster-size
+#     distribution and the overlap index nu = c are preserved and the DTM
+#     k=5,10,15 / persistence-image settings need no retuning.
+#   * two NEW sampled axes, drawn directly under their constructor names
+#     (no reparam, no `derived` entry):
+#       cluster_aspect  in [1, 4]      -- elongation sigma_1/sigma_2; 1.0 is
+#                                         in-distribution, so this family
+#                                         nests the isotropic Thomas.
+#       cluster_theta   in [0, pi)     -- ellipse orientation (pi-periodic).
+#   * target_label_names / log_label_names gain cluster_aspect (log:
+#     positive ratio) and cluster_theta (LINEAR: an angle, may be ~0, and
+#     it is circular -- a plain MSE head has a wraparound seam at 0/pi;
+#     revisit with a (cos 2theta, sin 2theta) target if theta recovery
+#     matters).
+# Everything downstream (filtration / features / method / seeds / adversarial
+# protocol) is identical to the isotropic Thomas config.
+
+process:
+  name: aniso_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+        cluster_aspect: {low: 1.0, high: 4.0,               scale: linear}
+        cluster_theta:  {low: 0.0, high: 3.141592653589793, scale: linear}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: dtm,  params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm,  params: {k: 15, q: 2.0, maxdim: 1}}
+
+features:
+  - name: persistence_image
+    params: {resolution: 64, sigma_pixels: 0.5, homology_dims: [0, 1], pd_calibration_coverage: 0.95}
+
+method:
+  name: pi_multik
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale, cluster_aspect, cluster_theta]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale, cluster_aspect]
+use_adversarial: true

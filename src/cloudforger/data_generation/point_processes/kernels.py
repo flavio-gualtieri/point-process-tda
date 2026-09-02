@@ -54,8 +54,8 @@ class Kernel(ABC):
 class GaussianKernel(Kernel):
     """Isotropic Gaussian displacement, N(0, sigma^2 I_d). Dimension-agnostic:
     the same sigma applies on every axis of whatever dimension `sample` is
-    called with. Per-axis / rotated covariance belongs in a separate
-    AnisotropicGaussianKernel, added when anisotropy is actually needed."""
+    called with. Per-axis / rotated covariance is AnisotropicGaussianKernel
+    below (2-D only)."""
 
     def __init__(self, sigma: float):
         sigma = float(sigma)
@@ -76,6 +76,62 @@ class GaussianKernel(Kernel):
         # eps=1e-4 gives ~3.72 sigma; the historical hardcoded 4 sigma is
         # eps ~ 3.2e-5 -- see the ThomasProcess migration note.
         return float(self.sigma * norm.isf(eps))
+
+
+class AnisotropicGaussianKernel(Kernel):
+    """Zero-mean Gaussian displacement with a full 2-D covariance: an
+    axis-aligned (sigma_1, sigma_2) spread rotated by `theta` radians,
+
+        Sigma = R(theta) @ diag(sigma_1**2, sigma_2**2) @ R(theta).T,
+
+    with R(theta) rotating the axis-1 direction anticlockwise from +x.
+    Sampling: z ~ N(0, I_2), scale the axes by (sigma_1, sigma_2), rotate.
+    `sigma_1 == sigma_2` recovers the isotropic GaussianKernel and `theta`
+    then has no effect.
+
+    2-D only -- rotation is a planar notion -- so `sample` raises for
+    dimension != 2. Parameter degeneracies to resolve at the config / label
+    layer (not here, so the kernel stays a plain building block):
+        (sigma_1, sigma_2, theta) ~ (sigma_2, sigma_1, theta +- pi/2)
+        theta ~ theta + pi
+    e.g. constrain sigma_1 >= sigma_2 and theta in [0, pi).
+    """
+
+    def __init__(self, sigma_1: float, sigma_2: float, theta: float = 0.0):
+        sigma_1 = float(sigma_1)
+        sigma_2 = float(sigma_2)
+        theta = float(theta)
+        if sigma_1 <= 0 or sigma_2 <= 0:
+            raise ValueError("sigma_1 and sigma_2 must be positive")
+        if not np.isfinite(theta):
+            raise ValueError("theta must be finite")
+        self.sigma_1 = sigma_1
+        self.sigma_2 = sigma_2
+        self.theta = theta
+
+    @property
+    def params(self) -> dict[str, Any]:
+        return {
+            "cluster_sigma_1": float(self.sigma_1),
+            "cluster_sigma_2": float(self.sigma_2),
+            "cluster_theta": float(self.theta),
+        }
+
+    def sample(self, n: int, dimension: int, rng: np.random.Generator) -> np.ndarray:
+        if dimension != 2:
+            raise ValueError(
+                f"AnisotropicGaussianKernel is 2-D only, got dimension={dimension}"
+            )
+        z = rng.normal(size=(n, 2)) * np.array([self.sigma_1, self.sigma_2])
+        c, s = np.cos(self.theta), np.sin(self.theta)
+        rot = np.array([[c, -s], [s, c]])
+        return z @ rot.T
+
+    def support_radius(self, eps: float = 1e-4) -> float:
+        # Rotation only reorients the ellipse, so the widest per-axis std in
+        # the ambient frame is max(sigma_1, sigma_2); reuse GaussianKernel's
+        # per-axis tail-mass convention r = sigma * Phi^{-1}(1 - eps).
+        return float(max(self.sigma_1, self.sigma_2) * norm.isf(eps))
 
 
 class BallKernel(Kernel):
