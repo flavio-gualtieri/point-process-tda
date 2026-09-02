@@ -23,7 +23,26 @@ def _sample_cloud(process_name: str, **params):
 def test_process_registry_covers_expected_names():
     assert {
         "poisson", "matern", "matern_cluster", "thomas", "nested_thomas", "inhom_thomas", "neyman_scott",
+        "lgcp", "strauss", "lgcp_strauss",
     } <= set(PROCESS_REGISTRY.names())
+
+
+def test_lgcp_process_builds_and_samples():
+    cloud = _sample_cloud("lgcp", mu=5.0, sigma2=1.0, s=0.1)
+    assert cloud.n_points >= 0
+    assert cloud.points.shape[1] == 2
+
+
+def test_strauss_process_builds_and_samples():
+    cloud = _sample_cloud("strauss", beta=250.0, gamma=0.3, radius=0.05, n_steps=3000)
+    assert cloud.n_points >= 0
+    assert cloud.points.shape[1] == 2
+
+
+def test_lgcp_strauss_process_builds_and_samples():
+    cloud = _sample_cloud("lgcp_strauss", mu=5.0, sigma2=1.0, s=0.1, gamma=0.3, radius=0.05, n_steps=3000)
+    assert cloud.n_points >= 0
+    assert cloud.points.shape[1] == 2
 
 
 def test_thomas_process_builds_and_samples():

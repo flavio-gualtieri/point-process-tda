@@ -1,0 +1,46 @@
+# Strauss process (small-scale inhibition), parametrized as in Vihrs (2022)
+# Sec. 3.2: density proportional to beta^n(x) * gamma^{S_R(x)}, labels
+# (beta, gamma, radius). Simulated by birth-death Metropolis-Hastings on the
+# window grown by 2*radius, then clipped.
+#
+# Cloud count = 8000 (7000 train_test + 1000 adversarial), matching thomas /
+# nested_thomas and holding the training budget constant across the
+# degradation table. (Vihrs used only 5000 for Strauss, so this already
+# exceeds him.)
+#
+# Ranges follow Vihrs -- beta in (200,900), gamma in (0,1), R in (0,0.05) --
+# with the degenerate limits trimmed off: gamma in [0.05,0.95] and radius in
+# [0.005,0.05] (gamma=1 or radius=0 both collapse to Poisson). beta is sampled
+# log-uniform (positive rate spanning ~4.5x, matching this repo's house style);
+# gamma and radius stay linear, being bounded interaction parameters, not scales.
+
+process:
+  name: strauss
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        beta:   {low: 200.0, high: 900.0, scale: log}
+        gamma:  {low: 0.05,  high: 0.95,  scale: linear}
+        radius: {low: 0.005, high: 0.05,  scale: linear}
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+method:
+  name: vihrs
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    checkpoint_best: true
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [beta, gamma, radius]
+log_label_names: [beta]
+use_adversarial: true

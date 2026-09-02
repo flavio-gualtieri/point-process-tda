@@ -1,0 +1,49 @@
+# LGCP (log-Gaussian Cox process), parametrized as in Vihrs (2022) Sec. 3.1:
+# constant log-intensity mean `mu`, exponential-covariance Gaussian random
+# field of marginal variance `sigma2` and correlation length `s`. Labels
+# (mu, sigma2, s).
+#
+# Cloud count = 8000 (7000 train_test + 1000 adversarial), matching thomas /
+# nested_thomas rather than Vihrs' 15k: a per-process degradation table wants
+# the training budget held constant across processes, and LGCP has 3 params
+# like thomas. Bump this if an MSE-vs-n check shows it hasn't plateaued.
+#
+# Ranges follow Vihrs -- mu in (4,6), sigma2 in (0,4), s in (0.001,0.1) --
+# except: s is floored at 0.02 (the random-Fourier-feature field cannot
+# resolve a correlation length far below the mode count, and Vihrs' own
+# estimators already fail for s that small), and a mild E[N] = exp(mu +
+# sigma2/2) <= ~1100 cap keeps clouds inside a sane featurization budget
+# (drop the constraint / widen mu for a literal Vihrs match).
+
+process:
+  name: lgcp
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        mu:     {low: 4.0,  high: 6.0,  scale: linear}
+        sigma2: {low: 0.05, high: 4.0,  scale: linear}
+        s:      {low: 0.02, high: 0.10, scale: log}
+      constraints:
+        - "mu + 0.5 * sigma2 <= 7.0"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+method:
+  name: vihrs
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    checkpoint_best: true
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [mu, sigma2, s]
+log_label_names: [s]
+use_adversarial: true
