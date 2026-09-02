@@ -1,0 +1,69 @@
+# Nested Thomas process -> vihrs baseline (L(r)-r + n(x) 1D-CNN, Vihrs 2022).
+# Same data as nested_thomas_pi_multik.yaml (data/nested_thomas/,
+# built via scripts/generate_nested_thomas_v2.py -- see
+# docs/nested_thomas_v2_data_report.md). No filtration/features needed: vihrs
+# reads clouds.pkl directly and computes L(r)-r itself.
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 4
+    random:
+      n_param_vectors: 2000
+      ranges:
+        meta_parent_intensity: {low: 8.0,   high: 13.0,  scale: log}
+        meta_offspring:        {low: 2.5,   high: 4.0,   scale: log}
+        meta_cluster_scale:    {low: 0.05,  high: 0.15,  scale: log}
+        mean_offspring:        {low: 7.0,   high: 12.0,  scale: log}
+        cluster_scale:         {low: 0.003, high: 0.008, scale: log}
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+method:
+  name: vihrs
+  params:
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    # checkpoint_best: true reloads the best-val-loss state before the final
+    # evaluation, same as pi_multik/pi_multik_fusion/betti_multik already do
+    # unconditionally -- needed for a fair comparison at this epoch budget
+    # (the paper's own recipe is fixed-20-epoch/no-checkpointing, which is
+    # what you get with checkpoint_best: false or omitted).
+    checkpoint_best: true
+    # Only takes effect when checkpoint_best: true (the paper-faithful,
+    # non-checkpointed "vihrs" recipe ignores it, matching its fixed-epoch
+    # design). vihrs_500 hit its best val at epoch 15/500 with val_last up
+    # 117% by epoch 500 -- this reclaims that wasted budget.
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+# Explicit here so vihrs trains against all 5 nested-Thomas params, in this
+# order, matching nested_thomas_pi_multik.yaml -- omitting
+# target_label_names/log_label_names entirely would adapt to every label
+# the process produced instead (see vihrs.prepare_data), but pinning them
+# keeps column order/count stable across reruns.
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+use_adversarial: true
+
+# Try it:
+#   python scripts/train.py configs/runs/nested_thomas_vihrs.yaml --seed 9371
+#   python scripts/train.py configs/runs/nested_thomas_vihrs.yaml
+#
+# This writes to results/nested_thomas/<no-filtration-tag>/vihrs_checkpointed/
+# (subdir name follows checkpoint_best, method.name stays "vihrs" -- see
+# run_vihrs_method in scripts/train.py). To also get the paper-faithful
+# fixed-epoch/no-checkpointing variant used in nested_thomas_pi_multik.yaml's
+# comparison, run once more with checkpointing off, e.g.:
+#   python scripts/train.py configs/runs/nested_thomas_vihrs.yaml \
+#       --set method.params.checkpoint_best=false --set method.params.n_epochs=20
+# which writes to results/nested_thomas/<no-filtration-tag>/vihrs/ instead.
+#
+# Then evaluate alongside pi_multik/pi_multik_fusion:
+#   python scripts/evaluate.py configs/runs/nested_thomas_pi_multik.yaml \
+#       --methods pi_multik pi_multik_fusion vihrs vihrs_checkpointed

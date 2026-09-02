@@ -1,0 +1,64 @@
+# python scripts/train.py configs/runs/nested_thomas/mincontrast_g.yaml --seed 9371
+#
+# "min contrast on G" classical baseline, nested Thomas -- edge-corrected
+# kernel pair-correlation contrast fit against the closed form derived in
+# the writeup (\eqref{eq:g-nested}, ssec:validation):
+#   g(h) = 1 + exp(-h^2/4*sigma2^2)/(4*pi*sigma2^2*kappa*mu1)
+#            + exp(-h^2/4*(sigma1^2+sigma2^2))/(4*pi*(sigma1^2+sigma2^2)*kappa)
+# (src/cloudforger/baselines/mincontrast_g_nested.py). Sibling of
+# nested_thomas/mincontrast.yaml (K-based) and thomas/mincontrast_g.yaml;
+# dispatches to method name "mincontrast_g_nested" -- see that module's
+# docstring. Fills Table~\ref{tab:classical-comparison}'s footnote $^d$ gap
+# and the matching "Outstanding experiments" bullet ("... and re-run it on
+# g with the exponent c swept" -- this config runs the default c=1.0 first;
+# override with `--set method.params.c=<value> --run-tag c<label>` for the
+# sweep (scripts/train.py's run_classical_baseline threads method.params.c
+# through to fit_multistart when present), no new config file needed. Give
+# each swept value its own --run-tag or later values will overwrite the
+# unswept c=1.0 results at the same path.
+#
+# No filtration/features needed -- reads data/nested_thomas/clouds.pkl
+# directly, same run_classical_baseline dispatch and seed-paired
+# test-partition convention as mincontrast.yaml.
+#
+# Results land under results/nested_thomas/raw/mincontrast_g_nested/seed_<seed>/.
+#
+# process.design below is copied from nested_thomas_mph.yaml, same
+# documentation-only role as in mincontrast.yaml.
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+method:
+  name: mincontrast_g_nested
+  params:
+    n_starts: 10
+
+seeds: [9371, 9372, 9373, 9374, 9375]
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]

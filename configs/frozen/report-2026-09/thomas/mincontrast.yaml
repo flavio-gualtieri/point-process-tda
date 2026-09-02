@@ -1,0 +1,47 @@
+# python scripts/train.py configs/runs/thomas/mincontrast.yaml --seed 9371
+#
+# "min contrast on K" classical baseline -- Waagpetersen-style
+# power-transformed K-function contrast fit for the stationary Thomas
+# process (src/cloudforger/baselines/mincontrast.py). Thomas-only: the
+# closed-form K(t) = pi*t^2 + (1 - exp(-t^2/4*sigma^2))/kappa is specific
+# to the (non-nested) Thomas process -- there is no nested_thomas
+# counterpart of this config (see mincontrast_g.yaml's header for why).
+#
+# No filtration/features needed -- reads data/thomas/clouds.pkl directly
+# (scripts/train.py's run_classical_baseline, dispatched via
+# CLASSICAL_BASELINE_NAMES, not the generic experiment path). Fits
+# per-cloud on that seed's TEST partition only (train_val_test_indices(n,
+# seed)), same split every trained method uses, so results are seed-paired
+# comparable -- see scripts/train.py's module docstring.
+#
+# Results land under results/thomas/raw/mincontrast/seed_<seed>/ (no
+# filtration tag: classical baselines pass filtrations=[] to
+# ResultsPaths.seed_dir).
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+
+method:
+  name: mincontrast
+  params:
+    n_starts: 10
+
+seeds: [9371, 9372, 9373, 9374, 9375]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]

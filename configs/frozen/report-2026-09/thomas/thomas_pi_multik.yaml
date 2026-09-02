@@ -1,0 +1,53 @@
+# configs/runs/thomas/thomas_pi_multik.yaml
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}    # same as nested
+        EN: {low: 150.0, high: 800.0, scale: log}    # same as nested
+        c:  {low: 0.10,  high: 0.90,  scale: log}    # same as nested c1
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration: []
+
+features:
+  - name: persistence_image
+    params: {resolution: 64, sigma_pixels: 0.5, homology_dims: [0, 1], pd_calibration_coverage: 0.95}
+
+method:
+  name: pi_multik
+  params:
+    m_values: [0.01, 0.04, 0.10, 0.20, 0.45]
+    homology_dims: [0, 1]
+    include_entropy: false
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true
