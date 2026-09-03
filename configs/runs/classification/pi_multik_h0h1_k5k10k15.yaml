@@ -1,0 +1,70 @@
+# python scripts/train.py configs/runs/classification/pi_multik_h0h1_k5k10k15.yaml --seed 9371
+#
+# Process CLASSIFICATION with pi_multik: late-fusion multi-k persistence
+# images (H0 + H1, DTM k = 5/10/15) -> 5-way softmax over the point-process
+# family. Same encoder/fusion stack as the regression pi_multik runs
+# (slurm/pi_multik_h0h1_all.sh), only the head (ClassificationHead) and the
+# loss (cross-entropy) change -- selected by method.params.task: classify.
+#
+# Classes (index == position below, matching data/classification/*'s
+# `label_names` / `labels`):
+#   0 aniso_thomas   1 matern_cluster   2 nested_thomas   3 strauss   4 thomas
+# lgcp and lgcp_strauss are deliberately excluded (Vihrs LGCP-family pair --
+# see data/classification/classification_manifest.yaml).
+#
+# Data layout consumed (process.name == "classification"):
+#   data/classification/clouds.pkl, adversarial_clouds.pkl
+#   data/classification/dtm_k{5,10,15}/{,adversarial_}diagrams.pkl
+# pi_multik reads the per-k diagrams directly and calibrates persistence
+# images per seed on that seed's own train split -- no scripts/featurize.py
+# step. clouds.pkl is only touched if include_log_n is set true below.
+#
+# Results path (no --run-tag): results/classification/dtm_k5+10+15/pi_multik/seed_<seed>/
+
+process:
+  name: classification
+  seed: 0
+
+filtration:
+  # H0 birth axis is non-degenerate for DTM (unlike Rips), so both homology
+  # dims are usable as 2-D persistence-image channels.
+  - {name: dtm, params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm, params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm, params: {k: 15, q: 2.0, maxdim: 1}}
+
+method:
+  name: pi_multik
+  params:
+    task: classify            # -> ClassificationHead + CrossEntropyLoss
+    homology_dims: [0, 1]      # H0 + H1 -> in_channels = 2
+    include_entropy: false
+    include_log_n: false       # topology-only baseline; set true to add log n(x)
+
+    # Persistence-image calibration (fit per seed on that seed's train split).
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    encoder_mode: shared
+    fusion_mode: concat
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 128            # 35k train clouds (5 x 7k) -- larger than the 7k-cloud regression runs
+    n_epochs: 200
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375]
+
+# For task: classify these are the ordered CLASS names (index i == class i),
+# asserted equal to the diagram bundle's own label_names.
+target_label_names: [aniso_thomas, matern_cluster, nested_thomas, strauss, thomas]
+
+use_adversarial: true

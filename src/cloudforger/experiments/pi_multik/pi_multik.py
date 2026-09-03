@@ -27,6 +27,7 @@ from cloudforger.experiments.common import (
     prepare_device,
     save_results,
 )
+from cloudforger.models.heads.classifier import ClassificationHead
 from cloudforger.models.heads.paramest import ParameterEstimator
 from cloudforger.training.train import evaluate, evaluate_per_target, train_one_epoch
 from cloudforger.vectorization.persistence_images.calibrated import build_calibrated_imager
@@ -39,6 +40,47 @@ def _load_pickle(path: Path) -> Any:
         return pickle.load(f)
 
 
+def _classification_n_points(
+    clouds_path: Path, ref_bundle: dict[str, Any], common_seeds: np.ndarray
+) -> np.ndarray:
+    """Join n(x) for the classification task, where load_multik_split's plain
+    {seed -> n_points} join needs care: the per-k diagram bundles carry
+    GLOBALLY-unique seeds (class_index * seed_offset + original_seed, so the
+    five per-process seed ranges don't collide). The sibling classification
+    clouds.pkl is a {"clouds": [PointCloud], "labels": [...]} bundle that has
+    shipped with EITHER seed convention -- cloud.seed already global (== the
+    diagram seed), or cloud.seed the original per-process seed (unique only
+    within a class, disambiguated by the parallel `labels` array). Handle
+    both: direct seed lookup when clouds.pkl's seeds are globally unique,
+    else a (class_index, original_seed) decode via the bundle's seed_offset."""
+    payload = _load_pickle(clouds_path)
+    clouds = payload["clouds"] if isinstance(payload, dict) else payload
+    cloud_labels = (
+        np.asarray(payload["labels"]).reshape(-1)
+        if isinstance(payload, dict) and "labels" in payload else None
+    )
+    seed_offset = int(ref_bundle.get("config", {}).get("seed_offset", 0))
+
+    seeds = [int(c["seed"] if isinstance(c, dict) else c.seed) for c in clouds]
+    n_pts = [int(c["n_points"] if isinstance(c, dict) else c.n_points) for c in clouds]
+    globally_unique = len(set(seeds)) == len(seeds)
+
+    if globally_unique:
+        by_seed = dict(zip(seeds, n_pts))
+        return np.asarray([by_seed[int(s)] for s in common_seeds], dtype=np.float64)
+
+    if cloud_labels is None or not seed_offset:
+        raise KeyError(
+            f"{clouds_path} has non-unique cloud seeds but no `labels`/seed_offset to "
+            "disambiguate them against the globally-unique diagram seeds."
+        )
+    by_cls_orig = {(int(cloud_labels[i]), seeds[i]): n_pts[i] for i in range(len(seeds))}
+    return np.asarray(
+        [by_cls_orig[(int(s) // seed_offset, int(s) % seed_offset)] for s in common_seeds],
+        dtype=np.float64,
+    )
+
+
 def load_multik_split(
     k_values: list[int],
     diagram_paths: list[Path],
@@ -46,13 +88,22 @@ def load_multik_split(
     label_names: tuple[str, ...] | None,
     tag: str,
     homology_dims: tuple[int, ...] = (0, 1),
+    task: str = "params",
 ) -> dict[str, Any] | None:
     """Load and seed-align each k's diagrams.pkl (NOT a precomputed image
     file -- see module docstring). Persistence entropy is computed here,
     directly from the diagrams (calibration-free, so no leakage concern);
     persistence IMAGES are deliberately not built here -- that's
     build_pi_tensor's job, once a train/val/test split exists to calibrate
-    against."""
+    against.
+
+    task="params" (default): targets are the log-normalizable regression
+    columns selected from the bundle's (N, n_labels) `labels` matrix by name.
+    task="classify": the bundle's `labels` is instead a 1-D integer
+    class-index vector (see scripts building data/classification/), carried
+    through verbatim; label_names must equal the bundle's class-name list in
+    class-index order, and n(x) is joined via _classification_n_points."""
+    is_classify = task == "classify"
     bundles = []
     for k, path in zip(k_values, diagram_paths):
         if not Path(path).exists():
@@ -73,17 +124,33 @@ def load_multik_split(
     tda_label_names = list(bundles[0][1]["label_names"])
     if label_names is None:
         label_names = tuple(tda_label_names)
-    missing = [name for name in label_names if name not in tda_label_names]
-    if missing:
-        raise KeyError(f"[{tag}] label_names {tda_label_names} is missing {missing} from {label_names}")
-    col_idx = [tda_label_names.index(name) for name in label_names]
 
-    targets = np.asarray(bundles[0][1]["labels"], dtype=float)[np.ix_(idx_per_k[0], col_idx)]
-    for k, (_, bundle), idx in zip(k_values[1:], bundles[1:], idx_per_k[1:]):
-        targets_k = np.asarray(bundle["labels"], dtype=float)[np.ix_(idx, col_idx)]
-        assert np.allclose(targets, targets_k), (
-            f"[{tag}] target mismatch between k={k_values[0]} and k={k} after seed alignment -- alignment bug."
-        )
+    if is_classify:
+        # `labels` is a 1-D class-index vector; label_names is the ordered
+        # class-name list (index i names class i). No column selection.
+        if list(label_names) != tda_label_names:
+            raise ValueError(
+                f"[{tag}] classification target_label_names {list(label_names)} must equal the bundle's "
+                f"class list {tda_label_names} exactly (position i == class label i)."
+            )
+        targets = np.asarray(bundles[0][1]["labels"]).reshape(-1)[idx_per_k[0]].astype(np.int64)
+        for k, (_, bundle), idx in zip(k_values[1:], bundles[1:], idx_per_k[1:]):
+            targets_k = np.asarray(bundle["labels"]).reshape(-1)[idx].astype(np.int64)
+            assert np.array_equal(targets, targets_k), (
+                f"[{tag}] class-label mismatch between k={k_values[0]} and k={k} after seed alignment -- alignment bug."
+            )
+    else:
+        missing = [name for name in label_names if name not in tda_label_names]
+        if missing:
+            raise KeyError(f"[{tag}] label_names {tda_label_names} is missing {missing} from {label_names}")
+        col_idx = [tda_label_names.index(name) for name in label_names]
+
+        targets = np.asarray(bundles[0][1]["labels"], dtype=float)[np.ix_(idx_per_k[0], col_idx)]
+        for k, (_, bundle), idx in zip(k_values[1:], bundles[1:], idx_per_k[1:]):
+            targets_k = np.asarray(bundle["labels"], dtype=float)[np.ix_(idx, col_idx)]
+            assert np.allclose(targets, targets_k), (
+                f"[{tag}] target mismatch between k={k_values[0]} and k={k} after seed alignment -- alignment bug."
+            )
 
     entropy_feature = FEATURE_REGISTRY.build("persistence_entropy", homology_dims=homology_dims)
     diagrams_per_k: dict[int, list[PersistenceDiagram]] = {}
@@ -97,9 +164,12 @@ def load_multik_split(
 
     # n(x) doesn't depend on k (same underlying cloud) -- joined once from
     # the sibling clouds.pkl by seed.
-    clouds = _load_pickle(clouds_path)
-    n_points_by_seed = {int(c["seed"]): c["n_points"] for c in clouds}
-    n_points = np.array([n_points_by_seed[int(s)] for s in common_seeds], dtype=np.float64)
+    if is_classify:
+        n_points = _classification_n_points(clouds_path, bundles[0][1], common_seeds)
+    else:
+        clouds = _load_pickle(clouds_path)
+        n_points_by_seed = {int(c["seed"]): c["n_points"] for c in clouds}
+        n_points = np.array([n_points_by_seed[int(s)] for s in common_seeds], dtype=np.float64)
 
     return {
         "diagrams_per_k": diagrams_per_k,
@@ -245,6 +315,7 @@ class PIMultiK(nn.Module):
         scale_fusion_dropout: float = 0.0,
         pool_type: str = "max",
         use_coords: bool = True,
+        task: str = "params",
     ):
         super().__init__()
         self.n_k = n_k
@@ -270,10 +341,21 @@ class PIMultiK(nn.Module):
         # nn.Dropout); promoted here so it's available to any combination.
         self.fusion_dropout = nn.Dropout(fusion_dropout) if fusion_dropout > 0 else nn.Identity()
 
-        self.head = ParameterEstimator(
-            embedding_dim=fused_dim + n_extra, n_params=n_targets,
-            hidden_dims=head_hidden_dims, dropout=head_dropout,
-        )
+        # n_targets is the regression target count for task="params", or the
+        # class count for task="classify" -- the fused embedding -> output MLP
+        # is structurally the same either way (ParameterEstimator and
+        # ClassificationHead are both plain MLPs), only the loss and the
+        # output semantics differ (see PIMultiKExperiment.run).
+        if task == "classify":
+            self.head = ClassificationHead(
+                embedding_dim=fused_dim + n_extra, n_classes=n_targets,
+                hidden_dims=head_hidden_dims, dropout=head_dropout,
+            )
+        else:
+            self.head = ParameterEstimator(
+                embedding_dim=fused_dim + n_extra, n_params=n_targets,
+                hidden_dims=head_hidden_dims, dropout=head_dropout,
+            )
 
     def forward(self, pi_imgs, extra):
         seq = self.bank(pi_imgs)  # (B, K, C)
@@ -306,6 +388,30 @@ def _resolve_fusion_kwargs(cfg: dict) -> dict[str, Any]:
     return kwargs
 
 
+@torch.no_grad()
+def _per_class_accuracy(
+    model: nn.Module, loader: DataLoader, device: str, n_classes: int, class_names: tuple[str, ...]
+) -> dict[str, float]:
+    """Recall per class over `loader` (batches are the (pi_imgs, extra,
+    labels) 3-tuples this experiment builds). Classification-only companion
+    to training.train.evaluate_per_target, which is MSE-shaped and does not
+    apply here."""
+    model.eval()
+    correct = np.zeros(n_classes, dtype=np.int64)
+    total = np.zeros(n_classes, dtype=np.int64)
+    for pi_imgs, extra, labels in loader:
+        preds = model(pi_imgs.to(device), extra.to(device)).argmax(dim=-1).cpu().numpy()
+        labels = labels.cpu().numpy()
+        for c in range(n_classes):
+            mask = labels == c
+            total[c] += int(mask.sum())
+            correct[c] += int((preds[mask] == c).sum())
+    return {
+        class_names[c]: (float(correct[c] / total[c]) if total[c] else float("nan"))
+        for c in range(n_classes)
+    }
+
+
 @register("pi_multik")
 class PIMultiKExperiment(MultiSourceExperiment):
     file_keys = ("clouds", "images")
@@ -331,11 +437,16 @@ class PIMultiKExperiment(MultiSourceExperiment):
         adversarial_paths: dict[str, Any] | None = None,
     ) -> dict:
         # fetch configs
+        task = str(self.cfg.get("task", "params"))
+        is_classify = task == "classify"
         label_names = tuple(self.cfg.get("target_label_names"))
         k_values = list(self.cfg["k_values"])
         homology_dims = tuple(self.cfg.get("homology_dims", (0, 1)))
         include_entropy = bool(self.cfg.get("include_entropy", False))
-        include_log_n = bool(self.cfg.get("include_log_n", True))
+        # n(x) side-channel: on by default for parameter estimation (Vihrs
+        # 2022), off by default for classification -- a topology-only
+        # baseline. Override with method.params.include_log_n either way.
+        include_log_n = bool(self.cfg.get("include_log_n", not is_classify))
         resolution = int(self.cfg.get("resolution", 64))
         sigma_pixels = float(self.cfg.get("sigma_pixels", 0.5))
         coverage = float(self.cfg.get("pd_calibration_coverage", 0.95))
@@ -346,7 +457,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         # load and align diagrams and clouds by seed
         train_split = load_multik_split(
             k_values, list(dataset_paths["images"]), Path(dataset_paths["clouds"]), label_names, tag="train_test",
-            homology_dims=homology_dims,
+            homology_dims=homology_dims, task=task,
         )
         if train_split is None:
             raise FileNotFoundError(f"diagrams missing for some k in {k_values} under {dataset_paths['images']}.")
@@ -371,14 +482,31 @@ class PIMultiKExperiment(MultiSourceExperiment):
         if adversarial_paths is not None:
             adv_split = load_multik_split(
                 k_values, list(adversarial_paths["images"]), Path(adversarial_paths["clouds"]),
-                label_names, tag="adversarial", homology_dims=homology_dims,
+                label_names, tag="adversarial", homology_dims=homology_dims, task=task,
             )
 
         n = len(train_split["targets"])
         train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
 
-        label_norm = vihrs.fit_log_zscore(train_split["targets"][train_idx])
-        targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
+        if is_classify:
+            # Class indices pass through verbatim (CrossEntropyLoss wants raw
+            # int64 targets, no standardization). label_norm mirrors
+            # experiments/base.py's classification stub so save_results and
+            # any downstream reader see a consistent shape.
+            classes = sorted(int(c) for c in np.unique(train_split["targets"]))
+            if classes != list(range(len(label_names))):
+                raise ValueError(
+                    f"[{self.tag} seed={seed}] expected contiguous class labels 0..{len(label_names) - 1}, "
+                    f"got {classes}."
+                )
+            label_norm = {
+                "kind": "classification", "classes": classes, "mean": None, "std": None,
+                "transforms": ["class_index"] * len(label_names),
+            }
+            targets_std = train_split["targets"].astype(np.int64)
+        else:
+            label_norm = vihrs.fit_log_zscore(train_split["targets"][train_idx])
+            targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
         pi_img, imagers = build_pi_tensor(
             train_split, k_values, homology_dims=homology_dims, resolution=resolution,
             sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, train_idx=train_idx,
@@ -416,23 +544,32 @@ class PIMultiKExperiment(MultiSourceExperiment):
             fusion_dropout=self.cfg.get("fusion_dropout", 0.0),
             pool_type=str(self.cfg.get("pool_type", "max")),
             use_coords=bool(self.cfg.get("coordconv", True)),
+            task=task,
             **_resolve_fusion_kwargs(self.cfg),
         ).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
         # optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
-        loss_fn = nn.MSELoss()
+        loss_fn = nn.CrossEntropyLoss() if is_classify else nn.MSELoss()
 
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
+        if is_classify:
+            history["train_acc"], history["val_acc"] = [], []
         best_val_loss, best_state = float("inf"), None
         n_epochs = self.cfg["n_epochs"]
         patience = self.cfg.get("early_stopping_patience")
         epochs_no_improve = 0
 
         for epoch in range(1, n_epochs + 1):
-            train_loss, _ = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
-            val_loss, _ = evaluate(model, val_loader, loss_fn, device)
+            train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
+            val_loss, val_acc = evaluate(model, val_loader, loss_fn, device)
             history["train_loss"].append(train_loss)
             history["val_loss"].append(val_loss)
+            if is_classify:
+                history["train_acc"].append(train_acc)
+                history["val_acc"].append(val_acc)
+            # Checkpoint/early-stop on val loss for both tasks (lower is
+            # better: MSE for params, cross-entropy for classify) -- one
+            # code path, matching every other experiment in the repo.
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -440,20 +577,38 @@ class PIMultiKExperiment(MultiSourceExperiment):
             else:
                 epochs_no_improve += 1
             if epoch == 1 or epoch % 25 == 0 or epoch == n_epochs:
-                print(f"[{self.tag} seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}")
+                msg = f"[{self.tag} seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}"
+                if is_classify:
+                    msg += f" | train_acc {train_acc:.4f} | val_acc {val_acc:.4f}"
+                print(msg)
             if patience is not None and epochs_no_improve >= patience:
                 print(f"[{self.tag} seed={seed}] early stopping at epoch {epoch} (no val improvement for {patience} epochs)")
                 break
 
         model.load_state_dict(best_state)
-        test_loss, _ = evaluate(model, test_loader, loss_fn, device)
-        test_loss_per_target = dict(zip(label_names, evaluate_per_target(model, test_loader, device).tolist()))
-        print(f"\n[{self.tag} seed={seed}] test loss {test_loss:.4f}")
+        test_loss, test_acc = evaluate(model, test_loader, loss_fn, device)
+        if is_classify:
+            test_loss_per_target = None
+            test_acc_per_class = _per_class_accuracy(model, test_loader, device, len(label_names), label_names)
+            print(
+                f"\n[{self.tag} seed={seed}] test cross-entropy {test_loss:.4f} | test accuracy {test_acc:.4f}\n"
+                f"  per-class accuracy: "
+                + ", ".join(f"{name}={acc:.3f}" for name, acc in test_acc_per_class.items())
+            )
+        else:
+            test_loss_per_target = dict(zip(label_names, evaluate_per_target(model, test_loader, device).tolist()))
+            test_acc_per_class = None
+            print(f"\n[{self.tag} seed={seed}] test loss {test_loss:.4f}")
 
         adversarial_loss = None
         adversarial_loss_per_target = None
+        adversarial_acc = None
+        adversarial_acc_per_class = None
         if adv_split is not None:
-            adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
+            if is_classify:
+                adv_targets_std = adv_split["targets"].astype(np.int64)
+            else:
+                adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
             adv_pi_img, _ = build_pi_tensor(
                 adv_split, k_values, homology_dims=homology_dims, resolution=resolution,
                 sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, imagers=imagers,
@@ -466,11 +621,20 @@ class PIMultiKExperiment(MultiSourceExperiment):
                 torch.from_numpy(adv_pi_img), torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
             )
             adv_loader = DataLoader(adv_ds, batch_size=self.cfg["batch_size"], shuffle=False)
-            adversarial_loss, _ = evaluate(model, adv_loader, loss_fn, device)
-            adversarial_loss_per_target = dict(
-                zip(label_names, evaluate_per_target(model, adv_loader, device).tolist())
-            )
-            print(f"[{self.tag} seed={seed}] adversarial loss {adversarial_loss:.4f}")
+            adversarial_loss, adversarial_acc = evaluate(model, adv_loader, loss_fn, device)
+            if is_classify:
+                adversarial_acc_per_class = _per_class_accuracy(
+                    model, adv_loader, device, len(label_names), label_names
+                )
+                print(
+                    f"[{self.tag} seed={seed}] adversarial cross-entropy {adversarial_loss:.4f} | "
+                    f"adversarial accuracy {adversarial_acc:.4f}"
+                )
+            else:
+                adversarial_loss_per_target = dict(
+                    zip(label_names, evaluate_per_target(model, adv_loader, device).tolist())
+                )
+                print(f"[{self.tag} seed={seed}] adversarial loss {adversarial_loss:.4f}")
 
         cfg_meta = {
             **self.cfg,
@@ -480,16 +644,33 @@ class PIMultiKExperiment(MultiSourceExperiment):
             # module docstring) is recoverable from results.json alone.
             "imager_params": {k: imager.params for k, imager in zip(k_values, imagers)},
         }
+        extra_meta = None
+        if is_classify:
+            extra_meta = {
+                "task": "classify",
+                "class_names": list(label_names),
+                "test_accuracy": test_acc,
+                "test_accuracy_per_class": test_acc_per_class,
+                "adversarial_accuracy": adversarial_acc,
+                "adversarial_accuracy_per_class": adversarial_acc_per_class,
+            }
         save_results(
             output_dir, model=model, best_state=best_state, history=history, cfg=cfg_meta,
             test_loss=test_loss, label_names=list(label_names), label_norm=label_norm,
             test_loss_per_target=test_loss_per_target, adversarial_loss=adversarial_loss,
             adversarial_loss_per_target=adversarial_loss_per_target,
             adversarial_path=adversarial_paths.get("clouds") if adversarial_paths else None,
+            extra_meta=extra_meta,
         )
 
         result: dict[str, Any] = {"seed": seed, "test_loss": test_loss, "test_loss_per_target": test_loss_per_target}
+        if is_classify:
+            result["test_accuracy"] = test_acc
+            result["test_accuracy_per_class"] = test_acc_per_class
         if adversarial_loss is not None:
             result["adversarial_loss"] = adversarial_loss
             result["adversarial_loss_per_target"] = adversarial_loss_per_target
+            if is_classify:
+                result["adversarial_accuracy"] = adversarial_acc
+                result["adversarial_accuracy_per_class"] = adversarial_acc_per_class
         return result
