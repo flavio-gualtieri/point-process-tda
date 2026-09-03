@@ -203,15 +203,95 @@ def run_experiment_method(
         exp.run(dataset_path, output_dir, adversarial_path=adversarial_path)
 
 
+def run_vihrs_classify_method(
+    cfg: RunConfig,
+    seed: int,
+    data_paths: DataPaths,
+    results_paths: ResultsPaths,
+    filtrations: list[Filtration],
+    force: bool,
+    run_tag: str | None = None,
+) -> None:
+    """vihrs adapted to the classification task (method.params.task: classify).
+
+    vihrs itself needs no filtration/diagrams -- it computes L(r)-r straight
+    from clouds.pkl. The per-k diagram bundles are read ONLY for their
+    `seeds`/`labels`, to reproduce pi_multik's exact train/val/test split
+    (the intersection of seeds common to every k, in the first k's order),
+    so the two methods train and test on precisely the same clouds. The
+    config's `filtration:` block must therefore match the pi_multik classify
+    config's."""
+    params = cfg.method.params
+    subdir = params.get("results_subdir", "vihrs")
+    output_dir = results_paths.seed_dir([], subdir, seed, run_tag=run_tag)
+    if is_done(output_dir) and not force:
+        print(f"[{subdir} seed={seed}] already done, skipping ({output_dir}).")
+        return
+
+    if not cfg.target_label_names:
+        raise ValueError(
+            "classification vihrs needs `target_label_names` set to the ordered class-name list "
+            "(index i == class i), matching the diagram bundle's own label_names."
+        )
+    if not filtrations:
+        raise ValueError(
+            "classification vihrs reads the per-k diagram bundles only to reproduce pi_multik's "
+            "train/val/test split -- set the same `filtration:` block the pi_multik classify config uses."
+        )
+
+    label_names = tuple(cfg.target_label_names)
+    k_values = [f.params.get("k") for f in filtrations]
+    diagram_paths = [data_paths.diagrams([f]) for f in filtrations]
+    adversarial_clouds_path = data_paths.clouds(adversarial=True)
+    adversarial_diagram_paths = [data_paths.diagrams([f], adversarial=True) for f in filtrations]
+    use_adv = (
+        cfg.use_adversarial
+        and adversarial_clouds_path.exists()
+        and all(p.exists() for p in adversarial_diagram_paths)
+    )
+
+    data = baselines.vihrs.prepare_data_classify(
+        data_paths.clouds(),
+        adversarial_clouds_path if use_adv else None,
+        diagram_paths=diagram_paths,
+        adversarial_diagram_paths=adversarial_diagram_paths if use_adv else None,
+        k_values=k_values,
+        label_names=label_names,
+        r_max=params.get("r_max", baselines.vihrs.R_MAX),
+        n_r=params.get("n_r", baselines.vihrs.N_R),
+        force=bool(params.get("recompute_features", False)),
+    )
+    baselines.vihrs.run_one_seed_classify(
+        seed,
+        train_features=data["train_features"],
+        adversarial_features=data["adversarial_features"],
+        adversarial_path=data["adversarial_path"],
+        r_grid=data["r_grid"],
+        output_root=output_dir.parent,
+        class_names=data["class_names"],
+        n_epochs=params.get("n_epochs", 200),
+        batch_size=params.get("batch_size", 128),
+        lr=params.get("lr", 1e-3),
+        weight_decay=params.get("weight_decay", 0.0),
+        early_stopping_patience=params.get("early_stopping_patience", 30),
+        results_root=results_paths.root,
+        run_tag=run_tag,
+    )
+
+
 def run_vihrs_method(
     cfg: RunConfig,
     seed: int,
     data_paths: DataPaths,
     results_paths: ResultsPaths,
+    filtrations: list[Filtration],
     force: bool,
     run_tag: str | None = None,
 ) -> None:
     params = cfg.method.params
+    if str(params.get("task", "params")) == "classify":
+        run_vihrs_classify_method(cfg, seed, data_paths, results_paths, filtrations, force, run_tag=run_tag)
+        return
     checkpoint_best = bool(params.get("checkpoint_best", False))
     subdir = "vihrs_checkpointed" if checkpoint_best else "vihrs"
     # Explicit override for off-paper exploratory runs (e.g. a longer epoch
@@ -370,7 +450,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"\n{'#' * 90}\n### {cfg.method.name} | {cfg.process.name} | seed {seed}\n{'#' * 90}")
         try:
             if cfg.method.name == "vihrs":
-                run_vihrs_method(cfg, seed, data_paths, results_paths, args.force, run_tag=args.run_tag)
+                run_vihrs_method(cfg, seed, data_paths, results_paths, filtrations, args.force, run_tag=args.run_tag)
             elif cfg.method.name in CLASSICAL_BASELINE_NAMES:
                 run_classical_baseline(cfg.method.name, cfg, seed, data_paths, results_paths, args.force, run_tag=args.run_tag)
             else:
