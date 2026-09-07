@@ -1,16 +1,20 @@
 # python scripts/train.py configs/runs/classification/pi_multik_h0h1_k5k10k15.yaml --seed 9371
 #
 # Process CLASSIFICATION with pi_multik: late-fusion multi-k persistence
-# images (H0 + H1, DTM k = 5/10/15) -> 5-way softmax over the point-process
+# images (H0 + H1, DTM k = 5/10/15) -> 4-way softmax over the point-process
 # family. Same encoder/fusion stack as the regression pi_multik runs
 # (slurm/pi_multik_h0h1_all.sh), only the head (ClassificationHead) and the
 # loss (cross-entropy) change -- selected by method.params.task: classify.
 #
 # Classes (index == position below, matching data/classification/*'s
 # `label_names` / `labels`):
-#   0 aniso_thomas   1 matern_cluster   2 nested_thomas   3 strauss   4 thomas
-# lgcp and lgcp_strauss are deliberately excluded (Vihrs LGCP-family pair --
-# see data/classification/classification_manifest.yaml).
+#   0 matern_cluster   1 nested_thomas   2 strauss   3 thomas
+# aniso_thomas is FOLDED INTO thomas (manifest merged_labels: {aniso_thomas:
+# thomas}), so class 3 carries 14000 train / 2000 adversarial clouds vs 7000
+# / 1000 for classes 0-2 -- the split stays random (unstratified) and the
+# loss unweighted, so read test_accuracy_per_class (per-class recall), not
+# just the imbalance-inflated overall test_accuracy. lgcp / lgcp_strauss
+# remain excluded.
 #
 # Data layout consumed (process.name == "classification"):
 #   data/classification/clouds.pkl, adversarial_clouds.pkl
@@ -55,7 +59,7 @@ method:
     head_hidden_dims: [64, 32]
     head_dropout: 0.1
 
-    batch_size: 128            # 35k train clouds (5 x 7k) -- larger than the 7k-cloud regression runs
+    batch_size: 128            # 35k train clouds (7k+7k+7k+14k) -- larger than the 7k-cloud regression runs
     n_epochs: 200
     lr: 0.001
     weight_decay: 0.0003
@@ -65,6 +69,6 @@ seeds: [9371, 9372, 9373, 9374, 9375]
 
 # For task: classify these are the ordered CLASS names (index i == class i),
 # asserted equal to the diagram bundle's own label_names.
-target_label_names: [aniso_thomas, matern_cluster, nested_thomas, strauss, thomas]
+target_label_names: [matern_cluster, nested_thomas, strauss, thomas]
 
 use_adversarial: true

@@ -2,7 +2,7 @@
 #
 # Process CLASSIFICATION with the vihrs baseline adapted to classification:
 # Ripley's isotropic-edge-corrected L(r)-r curve + point count n(x)
-# -> Vihrs (2022) 1-D CNN (Figure 1) -> 5-way softmax over the point-process
+# -> Vihrs (2022) 1-D CNN (Figure 1) -> 4-way softmax over the point-process
 # family. This is the classical-second-order-statistic counterpart of the
 # pi_multik classify run (slurm/pi_multik_classify_h0h1.sh): SAME clouds,
 # SAME 5 seeds, SAME train/val/test split -- only the feature set (a single
@@ -10,8 +10,10 @@
 # the network differ, so the two results.json's compare directly.
 #
 # Classes (index == position below, == data/classification/*'s label_names):
-#   0 aniso_thomas   1 matern_cluster   2 nested_thomas   3 strauss   4 thomas
-# lgcp / lgcp_strauss deliberately excluded (see classification_manifest.yaml).
+#   0 matern_cluster   1 nested_thomas   2 strauss   3 thomas
+# aniso_thomas is FOLDED INTO thomas (manifest merged_labels), so class 3 is
+# 2x the size of classes 0-2; split stays random + loss unweighted, so judge
+# by per-class recall. lgcp / lgcp_strauss remain excluded.
 #
 # vihrs needs NO filtration/diagrams of its own -- it computes L(r)-r
 # straight from clouds.pkl. The `filtration:` block below is consumed ONLY
@@ -62,6 +64,6 @@ seeds: [9371, 9372, 9373, 9374, 9375]
 
 # Ordered CLASS names (index i == class i), asserted equal to the diagram
 # bundle's own label_names.
-target_label_names: [aniso_thomas, matern_cluster, nested_thomas, strauss, thomas]
+target_label_names: [matern_cluster, nested_thomas, strauss, thomas]
 
 use_adversarial: true
