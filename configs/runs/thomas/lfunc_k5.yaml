@@ -1,0 +1,82 @@
+# python scripts/train.py configs/runs/thomas/lfunc_k5.yaml --seed 9371
+#
+# L-REPARAMETERIZED filtration base config for Thomas: DTM k=5 diagrams with
+# (b, d) -> (L(b), L(d)), L the cloud's own empirical Ripley L. Identical in
+# every other respect to configs/runs/thomas/dimsplit_k5.yaml (same design,
+# same 10 seeds, same splits, same encoder/head/optimizer), so results compare
+# directly against the arms already on disk.
+#
+# Used by slurm/lfunc_thomas.sh for arms B and D of the 2x2:
+#
+#   arm  filtration   include_lfunc  run-tag              status
+#   A    dtm_k5       0              dimsplit__shared_e64 ALREADY RUN (L=0.1300 +/- 0.0069)
+#   B    l_dtm_k5     0              lfunc__B_ldtm        this file, include_lfunc=0
+#   C    dtm_k5       8              lfunc__C_dtm_lx      dimsplit_k5.yaml + --set include_lfunc=8
+#   D    l_dtm_k5     8              lfunc__D_ldtm_lx     this file + --set include_lfunc=8
+#
+# D vs C is the question. A vs B alone is expected to LOOK BAD: the transform
+# moves the second-order trend out of the diagram, so without the L side-channel
+# the representation is strictly weaker. See
+# src/cloudforger/data_generation/filtration/lfunc.py.
+#
+# Reads data/thomas/l_dtm_k5/{,adversarial_}diagrams.pkl -- build these first
+# with slurm/lfunc_transform.sh (transforms the existing dtm_k5 bundles; no
+# persistence recompute).
+
+process:
+  name: thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_scale:    "c / (2 * sqrt(K))"
+        c1:               "2 * cluster_scale * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  # l_dtm == DTM k=5 reparameterized by empirical L; path tag l_dtm_k5.
+  - {name: l_dtm, params: {k: 5, q: 2.0, maxdim: 1}}
+
+method:
+  name: pi_multik
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+    include_lfunc: 0            # overridden to 8 for arm D
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    encoder_mode: shared
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, mean_offspring, cluster_scale]
+use_adversarial: true

@@ -59,7 +59,7 @@ from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths
 
 MULTI_K_METHODS = {
     "pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers", "pi_multik_earlyfusion",
-    "betti_multik", "vec_multik",
+    "pi_multik_dimsplit", "betti_multik", "vec_multik",
 }
 CLASSICAL_BASELINE_NAMES = {"mincontrast", "mincontrast_g", "mincontrast_nested", "mincontrast_g_nested", "palm"}
 FILE_KEY_TO_FEATURE_NAME = {"pi": "persistence_image", "images": "persistence_image"}

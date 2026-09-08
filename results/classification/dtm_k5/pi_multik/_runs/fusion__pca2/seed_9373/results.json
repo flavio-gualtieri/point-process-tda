@@ -1,0 +1,119 @@
+{
+  "task": "classify",
+  "method": "pi_multik",
+  "test_loss": 0.2740422596931458,
+  "test_loss_per_target": null,
+  "seed": 9373,
+  "git_commit": "61354c524291c839fbee045cd802dce57494ecde",
+  "git_dirty": true,
+  "timestamp": "2026-09-07T16:35:09.166734+00:00",
+  "run_tag": "fusion__pca2",
+  "config": {
+    "task": "classify",
+    "method": "pi_multik",
+    "seed": 9373,
+    "homology_dims": [
+      0,
+      1
+    ],
+    "include_entropy": false,
+    "include_log_n": false,
+    "include_lfunc": 16,
+    "lfunc_pca": 2,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "encoder_mode": "shared",
+    "fusion_mode": "concat",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 128,
+    "n_epochs": 200,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 30,
+    "target_label_names": [
+      "matern_cluster",
+      "nested_thomas",
+      "strauss",
+      "thomas"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "run_tag": "fusion__pca2",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0",
+      "k5_h1"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.002424333974470744,
+            0.4347554304976526
+          ],
+          "pers_range": [
+            0.0,
+            0.3714697449302073
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.0033775866915873583,
+          "sigma_pers": 0.0029021073822672445,
+          "weight_fn": "linear_weight"
+        },
+        "1": {
+          "birth_range": [
+            0.0074089735066253,
+            0.48049936654839615
+          ],
+          "pers_range": [
+            0.0,
+            0.17257962414444866
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.003696018695638835,
+          "sigma_pers": 0.0013482783136285052,
+          "weight_fn": "linear_weight"
+        }
+      }
+    }
+  },
+  "class_names": [
+    "matern_cluster",
+    "nested_thomas",
+    "strauss",
+    "thomas"
+  ],
+  "test_accuracy": 0.878095238095238,
+  "test_accuracy_per_class": {
+    "matern_cluster": 0.6553352219074599,
+    "nested_thomas": 0.9154795821462488,
+    "strauss": 0.9990583804143126,
+    "thomas": 0.9108863198458574
+  },
+  "adversarial_accuracy": 0.8782,
+  "adversarial_accuracy_per_class": {
+    "matern_cluster": 0.651,
+    "nested_thomas": 0.91,
+    "strauss": 1.0,
+    "thomas": 0.915
+  },
+  "adversarial_loss": 0.2760426224032417,
+  "adversarial_loss_per_target": null,
+  "adversarial_path": "/gpfs/scratch/qp252676/globus/point-process-tda/data/classification/adversarial_clouds.pkl"
+}

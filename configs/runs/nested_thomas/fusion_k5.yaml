@@ -1,0 +1,88 @@
+# python scripts/train.py configs/runs/nested_thomas/fusion_k5.yaml --seed 9371
+#
+# PH + L(r) FUSION SWEEP -- NESTED THOMAS, plain DTM k=5 (NOT L-reparameterized).
+#
+# Chases the one clearly positive result from the L-reparameterization 2x2:
+# adding L(r)-r columns to the scalar side-vector took Thomas from 0.1300 to
+# 0.1110 (p=0.002), which ties the vihrs baseline (0.1123) on the process
+# where persistence images alone clearly lost. This config sweeps how that L
+# information is encoded.
+#
+# The raw columns are 16 samples of one smooth curve and are severely
+# collinear (correlation-matrix condition number ~2.8e4 at 16 radii; top two
+# eigenvalues carry ~95% of the variance). That bad conditioning produced
+# bimodal seed outcomes on classification (3 seeds ~0.88, 2 seeds ~0.80), so
+# the sweep is over PCA components of the curve, with the raw arm kept as the
+# "before".
+#
+#   arm    include_lfunc  lfunc_pca  run-tag        note
+#   Loff   0              0          fusion__Loff   PH only, baseline
+#   raw8   8              0          fusion__raw8   raw collinear columns ("before")
+#   pca2   16             2          fusion__pca2   95.4% of L-curve variance
+#   pca3   16             3          fusion__pca3   98.7%
+#   pca4   16             4          fusion__pca4   99.5%
+#
+# All five arms run at the SAME 10 seeds, and slurm/vihrs_topup.sh extends the
+# vihrs baseline to those same 10 seeds, so every comparison is paired.
+#
+# Driven by slurm/fusion_nested_thomas.sh; arms are --set overrides on this file.
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: dtm, params: {k: 5, q: 2.0, maxdim: 1}}
+
+method:
+  name: pi_multik
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+    include_lfunc: 0
+    lfunc_pca: 0
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    encoder_mode: shared
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+use_adversarial: true

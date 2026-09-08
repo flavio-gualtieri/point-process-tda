@@ -69,6 +69,7 @@ from .pi_multik import (
 )
 from .pi_multik_scaleconv import PIMultiKScaleConvExperiment
 from .pi_multik_towers import PIMultiKTowersExperiment
+from .pi_multik_dimsplit import DimSplitPIMultiK, DimSplitPIMultiKExperiment
 from .pi_multik_earlyfusion import PIMultiKEarlyFusion, PIMultiKEarlyFusionExperiment
 from .pi_multik_fusion import VihrsPIMultiKFusion, PIMultiKFusionExperiment
 from .betti_multik import BettiMultiK, BettiMultiKExperiment, build_betti_tensor
@@ -88,6 +89,8 @@ __all__ = [
     "load_multik_split",
     "PIMultiKScaleConvExperiment",
     "PIMultiKTowersExperiment",
+    "DimSplitPIMultiK",
+    "DimSplitPIMultiKExperiment",
     "PIMultiKEarlyFusion",
     "PIMultiKEarlyFusionExperiment",
     "VihrsPIMultiKFusion",

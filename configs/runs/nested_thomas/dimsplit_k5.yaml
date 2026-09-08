@@ -1,0 +1,91 @@
+# python scripts/train.py configs/runs/nested_thomas/dimsplit_k5.yaml --seed 9371
+#
+# SHARED BASE CONFIG for the H0/H1 per-dimension-encoder ablation ("check A")
+# on nested-Thomas parameter estimation. slurm/dimsplit_nested_thomas.sh
+# sweeps 5 arms x 10 seeds; each arm is CLI overrides on top of this base:
+#
+#   arm            method.name           embedding_dim  conv_channels   --run-tag
+#   shared_e64     pi_multik             64             [32,64,128]     dimsplit__shared_e64     (control -- the k5 baseline)
+#   shared_e128    pi_multik             128            [32,64,128]     dimsplit__shared_e128
+#   split_e32      pi_multik_dimsplit    32             [32,64,128]     dimsplit__split_e32
+#   split_e64      pi_multik_dimsplit    64             [32,64,128]     dimsplit__split_e64
+#   split_e32_c24  pi_multik_dimsplit    32             [24,48,96]      dimsplit__split_e32_c24
+#
+# Same process/design/targets as configs/runs/nested_thomas/pi_multik_k5.yaml
+# (this is its dim-split-base sibling). Nested clusters produce H1 void
+# structure, so this is where a per-dim H1 encoder is most likely to help on
+# a parameter target. NOTE: k5-only nested-Thomas is expected ~1 seed-sigma
+# above the paper's fused DTM{5,10,15} number -- compare arms against the
+# shared_e64 arm here, not against the fused-k paper table.
+#
+# Results at
+#   results/nested_thomas/dtm_k5/{pi_multik,pi_multik_dimsplit}/_runs/<run-tag>/seed_<seed>/
+
+process:
+  name: nested_thomas
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:   {low: 15.0,  high: 120.0, scale: log}
+        mu1: {low: 1.5,   high: 7.0,   scale: log}
+        EN:  {low: 150.0, high: 800.0, scale: log}
+        c1:  {low: 0.10,  high: 0.90,  scale: log}
+        c2:  {low: 0.03,  high: 0.35,  scale: log}
+      derived:
+        meta_parent_intensity: "K"
+        meta_offspring:        "mu1"
+        mean_offspring:        "EN / (K * mu1)"
+        meta_cluster_scale:    "c1 / (2 * sqrt(K))"
+        cluster_scale:         "c2 / (2 * sqrt(K * mu1))"
+      constraints:
+        - "mean_offspring >= 2.5"
+        - "meta_cluster_scale / cluster_scale >= 3"
+        - "meta_cluster_scale / cluster_scale <= 12"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: dtm, params: {k: 5, q: 2.0, maxdim: 1}}
+
+features:
+  - name: persistence_image
+    params:
+      resolution: 64
+      sigma_pixels: 0.5
+      homology_dims: [0, 1]
+      pd_calibration_coverage: 0.95
+
+method:
+  name: pi_multik              # overridden to pi_multik_dimsplit for the split arms
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64           # overridden per arm (64 / 128 / 32)
+    conv_channels: [32, 64, 128]  # overridden to [24,48,96] for the split_e32_c24 arm
+    dropout: 0.2
+    pool_type: avg
+    encoder_mode: shared
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+log_label_names: [parent_intensity, meta_offspring, meta_cluster_scale, mean_offspring, cluster_scale]
+use_adversarial: true

@@ -1,0 +1,67 @@
+# python scripts/train.py configs/runs/classification/dimsplit_k5.yaml --seed 9371
+#
+# SHARED BASE CONFIG for the H0/H1 per-dimension-encoder ablation ("check A").
+# Do not run this file's arms by hand -- slurm/dimsplit_classification.sh
+# sweeps the 5 arms x 5 seeds, each arm selected by CLI overrides on top of
+# this base:
+#
+#   arm            method.name           embedding_dim  conv_channels   --run-tag
+#   shared_e64     pi_multik             64             [32,64,128]     dimsplit__shared_e64     (control)
+#   shared_e128    pi_multik             128            [32,64,128]     dimsplit__shared_e128    (capacity added to shared wiring)
+#   split_e32      pi_multik_dimsplit    32             [32,64,128]     dimsplit__split_e32      (head width matched to shared_e64)
+#   split_e64      pi_multik_dimsplit    64             [32,64,128]     dimsplit__split_e64      (unconstrained)
+#   split_e32_c24  pi_multik_dimsplit    32             [24,48,96]      dimsplit__split_e32_c24  (total conv params ~ shared_e64)
+#
+# The ONE thing that varies is whether the H0 and H1 persistence images
+# share one CoordConvPIEncoder (fed as 2 channels, mixed at conv-1 --
+# method: pi_multik) or get a separate encoder each, concatenated before the
+# head (method: pi_multik_dimsplit). k-fusion is flat concat throughout; k
+# is fixed to DTM k=5 ONLY (this file's whole point -- isolates the dim
+# axis, and drops the per-process single-k-vs-fused-k choice). Calibration,
+# split, seeds, optimiser, loss and eval are identical across arms.
+#
+# This is the k=5-only, dim-split-base counterpart of
+# configs/runs/classification/pi_multik_h0h1_k5k10k15.yaml -- same clouds,
+# same 5 seeds, same 4 classes, same train/val/test split. Results at
+#   results/classification/dtm_k5/{pi_multik,pi_multik_dimsplit}/_runs/<run-tag>/seed_<seed>/
+
+process:
+  name: classification
+  seed: 0
+
+filtration:
+  - {name: dtm, params: {k: 5, q: 2.0, maxdim: 1}}
+
+method:
+  name: pi_multik              # overridden to pi_multik_dimsplit for the split arms
+  params:
+    task: classify             # -> ClassificationHead + CrossEntropyLoss
+    homology_dims: [0, 1]      # H0 + H1
+    include_entropy: false
+    include_log_n: false       # topology-only, matching the paper's classify baseline
+
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64           # overridden per arm (64 / 128 / 32)
+    conv_channels: [32, 64, 128]  # overridden to [24,48,96] for the split_e32_c24 arm
+    dropout: 0.2
+    pool_type: avg
+    encoder_mode: shared        # honoured by both methods (shared- vs independent-weight across k)
+    fusion_mode: concat         # pi_multik only; pi_multik_dimsplit ignores it (k-fusion is always concat)
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 128
+    n_epochs: 200
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375]
+
+target_label_names: [matern_cluster, nested_thomas, strauss, thomas]
+
+use_adversarial: true

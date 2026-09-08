@@ -1,0 +1,65 @@
+# python scripts/train.py configs/runs/classification/lfunc_k5.yaml --seed 9371
+#
+# L-REPARAMETERIZED filtration base config for the 4-way process-family
+# classification: DTM k=5 diagrams with (b, d) -> (L(b), L(d)). Identical in
+# every other respect to configs/runs/classification/dimsplit_k5.yaml (same
+# clouds, same 5 seeds, same splits, same encoder/head/optimizer).
+#
+# Used by slurm/lfunc_classification.sh for arms B and D of the 2x2:
+#
+#   arm  filtration   include_lfunc  run-tag              status
+#   A    dtm_k5       0              dimsplit__shared_e64 ALREADY RUN (acc=0.8729 +/- 0.0023)
+#   B    l_dtm_k5     0              lfunc__B_ldtm        this file, include_lfunc=0
+#   C    dtm_k5       8              lfunc__C_dtm_lx      dimsplit_k5.yaml + --set include_lfunc=8
+#   D    l_dtm_k5     8              lfunc__D_ldtm_lx     this file + --set include_lfunc=8
+#
+# include_log_n stays false in ALL FOUR arms, so the only thing that differs
+# between C/D and A/B is the 8 L(r)-r columns -- otherwise the point count
+# would confound the comparison. Note this makes C and D no longer
+# "topology-only"; that is the point of the fusion arms.
+#
+# Reads data/classification/l_dtm_k5/{,adversarial_}diagrams.pkl -- build these
+# first with slurm/lfunc_transform.sh. The L columns come from
+# data/classification/{,adversarial_}clouds.lfunc_classify_cache.npz.
+
+process:
+  name: classification
+  seed: 0
+
+filtration:
+  - {name: l_dtm, params: {k: 5, q: 2.0, maxdim: 1}}
+
+method:
+  name: pi_multik
+  params:
+    task: classify
+    homology_dims: [0, 1]
+    include_entropy: false
+    include_log_n: false        # held false across all four arms
+    include_lfunc: 0            # overridden to 8 for arm D
+
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    encoder_mode: shared
+    fusion_mode: concat
+
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+
+    batch_size: 128
+    n_epochs: 200
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375]
+
+target_label_names: [matern_cluster, nested_thomas, strauss, thomas]
+
+use_adversarial: true

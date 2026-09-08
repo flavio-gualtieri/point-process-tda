@@ -81,6 +81,96 @@ def _classification_n_points(
     )
 
 
+# L(r)-r side-channel radii start at 0.01, not 0: K_hat counts very few pairs
+# at tiny r, so L is noisiest exactly there. Upper end is the r_max the vihrs
+# baseline uses (spatstat's side/4 default for the unit square).
+_LFUNC_R_MIN = 0.01
+# Basenames baselines/vihrs.py caches L(r)-r under: the parameter-estimation
+# path uses the first, the classification path the second.
+_LFUNC_CACHE_SUFFIXES = (".lfunc_cache.npz", ".lfunc_classify_cache.npz")
+
+
+def _load_lfunc_cols(
+    clouds_path: Path, common_seeds: np.ndarray, n_radii: int
+) -> dict[str, np.ndarray]:
+    """{column name -> (N,) array} of L(r)-r sampled at `n_radii` log-spaced
+    radii, joined to `common_seeds` from the vihrs L cache.
+
+    This is the side-channel that makes the L-reparameterized filtration
+    (data_generation/filtration/lfunc.py) testable: that transform moves the
+    second-order trend OUT of the diagram, so the trend has to be fed back in
+    somewhere or the representation is strictly weaker. Column names are
+    index-numbered (lfunc_r00..) so `sorted()` orders them by radius, giving a
+    stable column order between the train and adversarial calls."""
+    cache_path = None
+    for suffix in _LFUNC_CACHE_SUFFIXES:
+        candidate = clouds_path.parent / (clouds_path.stem + suffix)
+        if candidate.exists():
+            cache_path = candidate
+            break
+    if cache_path is None:
+        raise FileNotFoundError(
+            f"include_lfunc is set but no L cache next to {clouds_path} (looked for "
+            + ", ".join(clouds_path.stem + s for s in _LFUNC_CACHE_SUFFIXES)
+            + "). Run the vihrs baseline on this process once to build it."
+        )
+
+    z = np.load(cache_path)
+    r_grid = np.asarray(z["r_grid"], dtype=np.float64)
+    l_minus_r = np.asarray(z["l_minus_r"], dtype=np.float64)
+    by_seed = {int(s): i for i, s in enumerate(np.asarray(z["cloud_seeds"], dtype=np.int64))}
+    missing = [int(s) for s in common_seeds if int(s) not in by_seed]
+    if missing:
+        raise KeyError(
+            f"{len(missing)}/{len(common_seeds)} seeds absent from {cache_path} "
+            f"(first few: {missing[:5]}) -- L cache and diagram bundle disagree on the seed convention."
+        )
+
+    rows = np.array([by_seed[int(s)] for s in common_seeds], dtype=np.int64)
+    radii = np.geomspace(_LFUNC_R_MIN, float(r_grid[-1]), n_radii)
+    sampled = np.stack([np.interp(radii, r_grid, l_minus_r[i]) for i in rows])  # (N, n_radii)
+    return {f"lfunc_r{j:02d}": sampled[:, j] for j in range(n_radii)}
+
+
+# Reserved key under which the fitted L-curve PCA basis is stashed in the
+# per-column norm dict, so it is fit on train rows and applied frozen to the
+# adversarial population like every other normalization here.
+_LFUNC_PCA_KEY = "__lfunc_pca__"
+
+
+def _fit_lfunc_pca(train_matrix: np.ndarray, n_components: int) -> dict[str, Any]:
+    """Centre + SVD + whiten the L(r)-r columns on the TRAIN rows only.
+
+    The columns are samples of one smooth curve, so they are severely
+    collinear: over the design distribution the correlation matrix has
+    condition number ~5e3 and its top two eigenvalues carry ~93% of the
+    variance, leaving six near-null directions. Feeding those raw to a linear
+    head under weight decay is badly conditioned, and did in fact produce
+    bimodal seed outcomes on classification (3 seeds ~0.88, 2 seeds ~0.80).
+    Projecting onto the leading whitened components fixes the conditioning
+    while keeping the interpretable content -- for a Neyman-Scott design the
+    leading components are essentially clustering amplitude and clustering
+    scale."""
+    mu = train_matrix.mean(axis=0)
+    centred = train_matrix - mu
+    k = int(min(n_components, centred.shape[1], max(centred.shape[0] - 1, 1)))
+    _, sv, vt = np.linalg.svd(centred, full_matrices=False)
+    scale = sv[:k] / np.sqrt(max(centred.shape[0] - 1, 1))
+    total = float((sv ** 2).sum())
+    return {
+        "mean": mu.tolist(),
+        "components": vt[:k].tolist(),
+        "scale": np.where(scale > 1e-12, scale, 1.0).tolist(),
+        "explained_variance_ratio": ((sv[:k] ** 2) / total).tolist() if total > 0 else [],
+    }
+
+
+def _apply_lfunc_pca(matrix: np.ndarray, pca: dict[str, Any]) -> list[np.ndarray]:
+    proj = (matrix - np.asarray(pca["mean"])) @ np.asarray(pca["components"]).T
+    proj = proj / np.asarray(pca["scale"])
+    return [proj[:, j].astype(np.float32) for j in range(proj.shape[1])]
+
+
 def load_multik_split(
     k_values: list[int],
     diagram_paths: list[Path],
@@ -89,6 +179,7 @@ def load_multik_split(
     tag: str,
     homology_dims: tuple[int, ...] = (0, 1),
     task: str = "params",
+    lfunc_n_radii: int = 0,
 ) -> dict[str, Any] | None:
     """Load and seed-align each k's diagrams.pkl (NOT a precomputed image
     file -- see module docstring). Persistence entropy is computed here,
@@ -171,9 +262,12 @@ def load_multik_split(
         n_points_by_seed = {int(c["seed"]): c["n_points"] for c in clouds}
         n_points = np.array([n_points_by_seed[int(s)] for s in common_seeds], dtype=np.float64)
 
+    lfunc_cols = _load_lfunc_cols(clouds_path, common_seeds, lfunc_n_radii) if lfunc_n_radii else {}
+
     return {
         "diagrams_per_k": diagrams_per_k,
         "entropy_cols": entropy_cols,
+        "lfunc_cols": lfunc_cols,
         "n_points": n_points,
         "targets": targets,
         "seeds": common_seeds,
@@ -229,6 +323,8 @@ def build_extra(
     entropy_norms: dict[str, dict[str, float]] | None = None,
     include_entropy: bool = False,
     include_log_n: bool = True,
+    include_lfunc: bool = False,
+    lfunc_pca: int = 0,
 ) -> tuple[np.ndarray, dict, dict[str, dict[str, float]]]:
     """(N, include_log_n + (n_entropy_cols if include_entropy else 0))
     side-vector, concatenated onto the per-k embeddings before the fusion
@@ -248,27 +344,53 @@ def build_extra(
     entropy_norms, if include_entropy) to apply them frozen to a different
     population instead (train_idx unused, pass None) -- the adversarial
     call."""
-    fit = n_norm is None
+    # Fit iff we were handed train rows to fit on. Do NOT infer this from
+    # `n_norm is None`: with include_log_n=False no n_norm is ever produced, so
+    # the frozen adversarial call would silently RE-FIT on the adversarial
+    # population (and, in the PCA branch, index matrix[None] and produce a
+    # garbage 3-D projection). Latent since include_log_n was added; harmless
+    # only while no other column group was ever used without log N -- i.e. it
+    # bites exactly the classification arms, which set include_log_n: false.
+    fit = train_idx is not None
+    if not fit and entropy_norms is None:
+        entropy_norms = {}
     if include_log_n:
         if fit:
-            if train_idx is None:
-                raise ValueError("build_extra: train_idx is required when fitting (n_norm=None).")
             n_norm = vihrs.fit_log_zscore(split["n_points"][train_idx])
+        elif n_norm is None:
+            raise ValueError("build_extra: applying frozen (train_idx=None) needs n_norm when include_log_n.")
         n_std = vihrs.apply_log_zscore(split["n_points"], n_norm).astype(np.float32)
         cols = [n_std]
     else:
         cols = []
     if fit:
         entropy_norms = {}
+    # entropy_norms is the per-scalar-column norm dict, shared by every named
+    # scalar column group below (entropy, then L(r)-r). Names never collide
+    # (entropy<dim>_k<k> vs lfunc_r<nn>), and each group is appended in sorted
+    # order, so the column layout is identical between the train fit and the
+    # frozen adversarial apply.
     if include_entropy:
-        for name in sorted(split["entropy_cols"]):
+        for name in sorted(split.get("entropy_cols") or {}):
             raw = split["entropy_cols"][name]
             if fit:
-                norm = fit_zscore(raw[train_idx])
-                entropy_norms[name] = norm
-            else:
-                norm = entropy_norms[name]
-            cols.append(apply_zscore(raw, norm).astype(np.float32))
+                entropy_norms[name] = fit_zscore(raw[train_idx])
+            cols.append(apply_zscore(raw, entropy_norms[name]).astype(np.float32))
+
+    if include_lfunc:
+        names = sorted(split.get("lfunc_cols") or {})
+        if lfunc_pca > 0:
+            # Decorrelate before the head -- see _fit_lfunc_pca's docstring.
+            matrix = np.stack([split["lfunc_cols"][name] for name in names], axis=1)
+            if fit:
+                entropy_norms[_LFUNC_PCA_KEY] = _fit_lfunc_pca(matrix[train_idx], lfunc_pca)
+            cols.extend(_apply_lfunc_pca(matrix, entropy_norms[_LFUNC_PCA_KEY]))
+        else:
+            for name in names:
+                raw = split["lfunc_cols"][name]
+                if fit:
+                    entropy_norms[name] = fit_zscore(raw[train_idx])
+                cols.append(apply_zscore(raw, entropy_norms[name]).astype(np.float32))
     if not cols:
         return np.zeros((len(split["n_points"]), 0), dtype=np.float32), n_norm, entropy_norms
     return np.stack(cols, axis=1), n_norm, entropy_norms
@@ -447,6 +569,15 @@ class PIMultiKExperiment(MultiSourceExperiment):
         # 2022), off by default for classification -- a topology-only
         # baseline. Override with method.params.include_log_n either way.
         include_log_n = bool(self.cfg.get("include_log_n", not is_classify))
+        # include_lfunc: N > 0 appends N log-spaced L(r)-r samples to the scalar
+        # side-vector. Feeds the second-order trend back in alongside an
+        # L-reparameterized filtration (l_dtm / l_rips), which normalizes that
+        # trend out of the diagram -- see data_generation/filtration/lfunc.py.
+        lfunc_n_radii = int(self.cfg.get("include_lfunc", 0) or 0)
+        include_lfunc = lfunc_n_radii > 0
+        # lfunc_pca: k > 0 replaces the k raw (heavily collinear) L columns
+        # with k whitened principal components fit on the train rows.
+        lfunc_pca = int(self.cfg.get("lfunc_pca", 0) or 0)
         resolution = int(self.cfg.get("resolution", 64))
         sigma_pixels = float(self.cfg.get("sigma_pixels", 0.5))
         coverage = float(self.cfg.get("pd_calibration_coverage", 0.95))
@@ -457,7 +588,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         # load and align diagrams and clouds by seed
         train_split = load_multik_split(
             k_values, list(dataset_paths["images"]), Path(dataset_paths["clouds"]), label_names, tag="train_test",
-            homology_dims=homology_dims, task=task,
+            homology_dims=homology_dims, task=task, lfunc_n_radii=lfunc_n_radii,
         )
         if train_split is None:
             raise FileNotFoundError(f"diagrams missing for some k in {k_values} under {dataset_paths['images']}.")
@@ -483,6 +614,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
             adv_split = load_multik_split(
                 k_values, list(adversarial_paths["images"]), Path(adversarial_paths["clouds"]),
                 label_names, tag="adversarial", homology_dims=homology_dims, task=task,
+                lfunc_n_radii=lfunc_n_radii,
             )
 
         n = len(train_split["targets"])
@@ -513,6 +645,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
         )
         extra, n_norm, entropy_norms = build_extra(
             train_split, train_idx, include_entropy=include_entropy, include_log_n=include_log_n,
+            include_lfunc=include_lfunc, lfunc_pca=lfunc_pca,
         )
 
         full_dataset = TensorDataset(
@@ -615,7 +748,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
             )
             adv_extra, _, _ = build_extra(
                 adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
-                include_log_n=include_log_n,
+                include_log_n=include_log_n, include_lfunc=include_lfunc, lfunc_pca=lfunc_pca,
             )
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_pi_img), torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),

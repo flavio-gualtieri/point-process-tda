@@ -1,0 +1,67 @@
+# python scripts/train.py configs/runs/classification/fusion_k5.yaml --seed 9371
+#
+# PH + L(r) FUSION SWEEP -- CLASSIFICATION, plain DTM k=5 (NOT L-reparameterized).
+#
+# Chases the one clearly positive result from the L-reparameterization 2x2:
+# adding L(r)-r columns to the scalar side-vector took Thomas from 0.1300 to
+# 0.1110 (p=0.002), which ties the vihrs baseline (0.1123) on the process
+# where persistence images alone clearly lost. This config sweeps how that L
+# information is encoded.
+#
+# The raw columns are 16 samples of one smooth curve and are severely
+# collinear (correlation-matrix condition number ~2.8e4 at 16 radii; top two
+# eigenvalues carry ~95% of the variance). That bad conditioning produced
+# bimodal seed outcomes on classification (3 seeds ~0.88, 2 seeds ~0.80), so
+# the sweep is over PCA components of the curve, with the raw arm kept as the
+# "before".
+#
+#   arm    include_lfunc  lfunc_pca  run-tag        note
+#   Loff   0              0          fusion__Loff   PH only, baseline
+#   raw8   8              0          fusion__raw8   raw collinear columns ("before")
+#   pca2   16             2          fusion__pca2   95.4% of L-curve variance
+#   pca3   16             3          fusion__pca3   98.7%
+#   pca4   16             4          fusion__pca4   99.5%
+#
+# All five arms run at the SAME 10 seeds, and slurm/vihrs_topup.sh extends the
+# vihrs baseline to those same 10 seeds, so every comparison is paired.
+#
+# Driven by slurm/fusion_classification.sh; arms are --set overrides on this file.
+
+process:
+  name: classification
+  seed: 0
+
+filtration:
+  - {name: dtm, params: {k: 5, q: 2.0, maxdim: 1}}
+
+method:
+  name: pi_multik
+  params:
+    task: classify
+    homology_dims: [0, 1]
+    include_entropy: false
+    include_log_n: false      # held false in every arm: only the L columns differ
+    include_lfunc: 0
+    lfunc_pca: 0
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    encoder_mode: shared
+    fusion_mode: concat
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+    batch_size: 128
+    n_epochs: 200
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 30
+
+# Extended from 5 to 10 seeds: n=5 cannot reach p<0.05 under a paired Wilcoxon,
+# and n=5 is also too thin to characterize the bimodal collapse the raw arm showed.
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [matern_cluster, nested_thomas, strauss, thomas]
+use_adversarial: true
