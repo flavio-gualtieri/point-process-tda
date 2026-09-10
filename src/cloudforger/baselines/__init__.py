@@ -23,6 +23,7 @@ from . import mincontrast_g
 from . import mincontrast_nested
 from . import mincontrast_g_nested
 from . import palm
+from . import summstats
 from . import vihrs
 
 __all__ = ["mincontrast", "mincontrast_g", "mincontrast_nested", "mincontrast_g_nested", "palm", "vihrs"]

@@ -117,6 +117,7 @@ from ..core.records import load_diagram_bundle
 from ..core.splits import train_val_test_indices
 from ..provenance import append_ledger_entry, provenance_stamp
 from . import mincontrast as mc
+from . import summstats
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -247,6 +248,7 @@ def extract_features(
     *,
     label_names: tuple[str, ...] = DEFAULT_LABEL_NAMES,
     tag: str = "",
+    fg_grid: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     n = len(records)
     m = len(r_grid)
@@ -254,6 +256,13 @@ def extract_features(
     n_points = np.empty(n, dtype=np.float64)
     targets = np.empty((n, len(label_names)), dtype=np.float64)
     cloud_seeds = np.empty(n, dtype=np.int64)
+
+    # Parameter-estimation twin of extract_cloud_features' F/G/J block; see
+    # there for why fg_grid is separate from r_grid.
+    want_fgj = fg_grid is not None
+    f_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
+    g_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
+    j_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
 
     t0 = time.perf_counter()
     for i, rec in enumerate(records):
@@ -263,6 +272,8 @@ def extract_features(
         high = region.get("high", [1.0, 1.0])
 
         l_minus_r[i] = _isotropic_l_minus_r(points, low, high, r_grid)
+        if want_fgj:
+            f_func[i], g_func[i], j_func[i] = summstats.compute_fgj(points, low, high, fg_grid)
         n_points[i] = len(points)
         targets[i] = [rec["params"][name] for name in label_names]
         cloud_seeds[i] = rec.get("seed", i)
@@ -271,12 +282,15 @@ def extract_features(
             elapsed = time.perf_counter() - t0
             print(f"  [{tag}] featurized {i + 1}/{n} clouds ({elapsed:.1f}s elapsed)", flush=True)
 
-    return {
+    out = {
         "l_minus_r": l_minus_r,
         "n_points": n_points,
         "targets": targets,
         "cloud_seeds": cloud_seeds,
     }
+    if want_fgj:
+        out.update({"f_func": f_func, "g_func": g_func, "j_func": j_func})
+    return out
 
 
 def get_features(
@@ -287,19 +301,37 @@ def get_features(
     cache_path: Path | None,
     force: bool,
     tag: str,
+    fg_grid: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
+    want_keys = ("l_minus_r", "n_points", "targets", "cloud_seeds")
+    if fg_grid is not None:
+        want_keys = want_keys + ("f_func", "g_func", "j_func")
+
     if cache_path is not None and cache_path.exists() and not force:
         cached = np.load(cache_path)
-        if cached["r_grid"].shape == r_grid.shape and np.allclose(cached["r_grid"], r_grid):
+        same_r = cached["r_grid"].shape == r_grid.shape and np.allclose(cached["r_grid"], r_grid)
+        have_keys = all(k in cached for k in want_keys)
+        same_fg = fg_grid is None or (
+            "fg_grid" in cached
+            and cached["fg_grid"].shape == fg_grid.shape
+            and np.allclose(cached["fg_grid"], fg_grid)
+        )
+        if same_r and have_keys and same_fg:
             print(f"  [{tag}] loaded cached features <- {cache_path}")
-            return {k: cached[k] for k in ("l_minus_r", "n_points", "targets", "cloud_seeds")}
-        print(f"  [{tag}] cache at {cache_path} used a different r_grid; recomputing.")
+            return {k: cached[k] for k in want_keys}
+        reason = ("r_grid" if not same_r else "fg_grid" if not same_fg else "missing F/G/J channels")
+        print(f"  [{tag}] cache at {cache_path} is stale ({reason} differs); recomputing.")
 
-    features = extract_features(records, r_grid, label_names=label_names, tag=tag)
+    features = extract_features(records, r_grid, label_names=label_names, tag=tag, fg_grid=fg_grid)
 
     if cache_path is not None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(cache_path, r_grid=r_grid, **features)
+        # Atomic (tmp + os.replace), matching get_cloud_features: a SLURM array
+        # whose tasks all miss the cache would otherwise tear the file.
+        tmp = cache_path.with_name(f"{cache_path.name}.tmp.{os.getpid()}.npz")
+        extra = {} if fg_grid is None else {"fg_grid": fg_grid}
+        np.savez_compressed(tmp, r_grid=r_grid, **extra, **features)
+        os.replace(tmp, cache_path)
         print(f"  [{tag}] cached features -> {cache_path}")
 
     return features
@@ -346,6 +378,35 @@ def apply_zscore_global(values: np.ndarray, norm: dict[str, float]) -> np.ndarra
     return (values - norm["mean"]) / norm["std"]
 
 
+def fit_zscore_per_channel(values: np.ndarray) -> dict[str, np.ndarray]:
+    """Channel-wise version of fit_zscore_global for an (N, C, m) stack: one
+    pooled mean/std per channel, over all clouds and all radii of THAT
+    channel only.
+
+    Per channel rather than per stack because L(r)-r, F, G and J live on
+    genuinely different scales (L is a signed radius deviation, F and G are
+    probabilities in [0, 1], J is a ratio around 1) -- pooling them would let
+    whichever channel has the largest spread dominate the shared scale and
+    flatten the others. Within a channel the pooling is still global across r,
+    preserving Vihrs (2022) Sec. 2.2 step 2(d)'s "scaled by the same amount"
+    rule that keeps each curve's shape undistorted.
+
+    An (N, m) input is treated as a single channel and returns the same
+    numbers fit_zscore_global would, so the L-only path is unchanged.
+    """
+    arr = values if values.ndim == 3 else values[:, None, :]
+    # float64 accumulator so a single channel reproduces fit_zscore_global's
+    # float(values.mean()) exactly rather than to float32 precision.
+    mean = arr.mean(axis=(0, 2), dtype=np.float64)
+    std = arr.std(axis=(0, 2), dtype=np.float64)
+    return {"mean": mean, "std": np.where(std == 0, 1.0, std)}
+
+
+def apply_zscore_per_channel(values: np.ndarray, norm: dict[str, np.ndarray]) -> np.ndarray:
+    arr = values if values.ndim == 3 else values[:, None, :]
+    return (arr - norm["mean"][None, :, None]) / norm["std"][None, :, None]
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Network (PyTorch translation of the paper's Keras architecture)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -355,15 +416,19 @@ class VihrsCNN(nn.Module):
     Conv1D(64,7)-Flatten on the L(r)-r sequence, concatenated with the
     (standardized) scalar n(x), then Dense(64)-Dense(32)-Dense(k, linear)."""
 
-    def __init__(self, seq_len: int, n_targets: int):
+    def __init__(self, seq_len: int, n_targets: int, in_channels: int = 1):
         super().__init__()
+        # in_channels > 1 stacks several summary functions (L, F, G, J -- see
+        # baselines/summstats.py) as parallel channels of the SAME sequence
+        # length. At the default the architecture is identical to the
+        # published single-L one: only the first conv's fan-in changes.
         self.conv = nn.Sequential(
-            nn.Conv1d(1, 64, kernel_size=7), nn.ReLU(), nn.MaxPool1d(5),
+            nn.Conv1d(in_channels, 64, kernel_size=7), nn.ReLU(), nn.MaxPool1d(5),
             nn.Conv1d(64, 64, kernel_size=7), nn.ReLU(), nn.MaxPool1d(5),
             nn.Conv1d(64, 64, kernel_size=7), nn.ReLU(),
         )
         with torch.no_grad():
-            flat_dim = self.conv(torch.zeros(1, 1, seq_len)).flatten(1).shape[1]
+            flat_dim = self.conv(torch.zeros(1, in_channels, seq_len)).flatten(1).shape[1]
         self.merge_dim = flat_dim + 1
         # No dropout: Figure 1's architecture has none, and the paper's own
         # training procedure (fixed 20 epochs, no early stopping) doesn't
@@ -375,7 +440,10 @@ class VihrsCNN(nn.Module):
         )
 
     def forward(self, sequence: torch.Tensor, n_scalar: torch.Tensor) -> torch.Tensor:
-        x = self.conv(sequence.unsqueeze(1)).flatten(start_dim=1)
+        # Accepts the legacy single-channel (B, L) as well as a (B, C, L)
+        # channel stack, so the L-only path is numerically unchanged.
+        seq = sequence if sequence.dim() == 3 else sequence.unsqueeze(1)
+        x = self.conv(seq).flatten(start_dim=1)
         merged = torch.cat([x, n_scalar.unsqueeze(1)], dim=1)
         return self.head(merged)
 
@@ -589,6 +657,7 @@ def run_one_seed(
     mc_rng: np.random.Generator | None = None,
     results_root: Path | None = None,
     run_tag: str | None = None,
+    summary_channels: tuple[str, ...] = ("L",),
 ) -> dict[str, Any]:
     output_dir = output_root / f"seed_{seed}"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -611,13 +680,19 @@ def run_one_seed(
 
     # Fit every normalization statistic on the train split ONLY, then apply
     # the frozen stats to val/test/adversarial below.
+    # summary_channels selects which summary functions become CNN input
+    # channels; ("L",) is the published feature set and reproduces the
+    # single-channel path exactly. See baselines/summstats.py.
+    channels = summstats.normalize_channels(summary_channels)
+    seq_raw = summstats.stack_channels(train_features, channels)   # (N, C, m)
+
     label_norm = fit_log_zscore(train_features["targets"][train_idx])
     n_norm = fit_log_zscore(train_features["n_points"][train_idx])
-    lr_norm = fit_zscore_global(train_features["l_minus_r"][train_idx])
+    lr_norm = fit_zscore_per_channel(seq_raw[train_idx])
 
     targets_std = apply_log_zscore(train_features["targets"], label_norm).astype(np.float32)
     n_std = apply_log_zscore(train_features["n_points"], n_norm).astype(np.float32)
-    seq = apply_zscore_global(train_features["l_minus_r"], lr_norm).astype(np.float32)
+    seq = apply_zscore_per_channel(seq_raw, lr_norm).astype(np.float32)
 
     def _loader(idx: np.ndarray, shuffle: bool) -> DataLoader:
         ds = TensorDataset(
@@ -631,7 +706,11 @@ def run_one_seed(
     val_loader = _loader(val_idx, False)
     test_loader = _loader(test_idx, False)
 
-    model = VihrsCNN(seq_len=len(r_grid), n_targets=len(label_names)).to(device)
+    model = VihrsCNN(
+        seq_len=len(r_grid), n_targets=len(label_names), in_channels=seq.shape[1]
+    ).to(device)
+    print(f"[vihrs seed={seed}] summary channels: {'+'.join(channels)} "
+          f"({seq.shape[1]} x {seq.shape[2]})")
     # No weight_decay: Adam is used with its plain defaults per the paper.
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
@@ -677,7 +756,10 @@ def run_one_seed(
     if adversarial_features is not None:
         adv_targets_std = apply_log_zscore(adversarial_features["targets"], label_norm).astype(np.float32)
         adv_n_std = apply_log_zscore(adversarial_features["n_points"], n_norm).astype(np.float32)
-        adv_seq = apply_zscore_global(adversarial_features["l_minus_r"], lr_norm).astype(np.float32)
+        # Same channel set, same frozen train-split per-channel statistics.
+        adv_seq = apply_zscore_per_channel(
+            summstats.stack_channels(adversarial_features, channels), lr_norm
+        ).astype(np.float32)
         adv_ds = TensorDataset(torch.from_numpy(adv_seq), torch.from_numpy(adv_n_std), torch.from_numpy(adv_targets_std))
         adv_loader = DataLoader(adv_ds, batch_size=batch_size, shuffle=False)
         adversarial_loss = evaluate_loss(model, adv_loader, loss_fn, device)
@@ -827,6 +909,7 @@ def prepare_data(
     cache_dir: Path | None = None,
     force: bool = False,
     max_clouds: int | None = None,
+    fg_r_max: float | None = None,
 ) -> dict[str, Any]:
     """Load clouds_path (+ adversarial_path, if given) and extract/cache the
     L(r)-r + n(x) feature set that run_one_seed needs.
@@ -850,9 +933,20 @@ def prepare_data(
         label_names = tuple(train_records[0]["params"].keys())
         print(f"  no label_names given -- adapting to this process's own params: {label_names}")
 
-    train_cache = cache_dir / (clouds_path.stem + ".lfunc_cache.npz")
+    # fg_r_max None -> L only, using the historical .lfunc_cache.npz files
+    # unchanged. Otherwise F/G/J are computed too and cached under a name that
+    # encodes fg_r_max, so the existing L-only caches stay valid and two arms
+    # with different F/G resolutions never share a file.
+    fg_grid = None if fg_r_max is None else default_r_grid(float(fg_r_max), n_r)
+    cache_suffix = (
+        ".lfunc_cache.npz" if fg_grid is None
+        else f".summ_fg{round(float(fg_r_max) * 1000):04d}_cache.npz"
+    )
+
+    train_cache = cache_dir / (clouds_path.stem + cache_suffix)
     train_features = get_features(
-        train_records, r_grid, label_names=label_names, cache_path=train_cache, force=force, tag="train_test"
+        train_records, r_grid, label_names=label_names, cache_path=train_cache, force=force,
+        tag="train_test", fg_grid=fg_grid,
     )
 
     adversarial_features: dict[str, np.ndarray] | None = None
@@ -862,9 +956,10 @@ def prepare_data(
         if max_clouds is not None:
             adv_records = adv_records[:max_clouds]
         print(f"  {len(adv_records)} adversarial clouds loaded.")
-        adv_cache = cache_dir / (adversarial_path.stem + ".lfunc_cache.npz")
+        adv_cache = cache_dir / (adversarial_path.stem + cache_suffix)
         adversarial_features = get_features(
-            adv_records, r_grid, label_names=label_names, cache_path=adv_cache, force=force, tag="adversarial"
+            adv_records, r_grid, label_names=label_names, cache_path=adv_cache, force=force,
+            tag="adversarial", fg_grid=fg_grid,
         )
     else:
         print(f"No adversarial clouds found at {adversarial_path}; skipping adversarial evaluation.")
@@ -956,7 +1051,13 @@ def _load_classification_alignment(
     }
 
 
-def extract_cloud_features(clouds: list[Any], r_grid: np.ndarray, *, tag: str = "") -> dict[str, np.ndarray]:
+def extract_cloud_features(
+    clouds: list[Any],
+    r_grid: np.ndarray,
+    *,
+    tag: str = "",
+    fg_grid: np.ndarray | None = None,
+) -> dict[str, np.ndarray]:
     """L(r)-r + n(x) for a list of PointCloud objects (or dicts), in the
     given order. No targets -- the class labels come from the diagram
     bundles (see _load_classification_alignment), joined by seed afterwards."""
@@ -965,6 +1066,16 @@ def extract_cloud_features(clouds: list[Any], r_grid: np.ndarray, *, tag: str = 
     l_minus_r = np.empty((n, m), dtype=np.float32)
     n_points = np.empty(n, dtype=np.float64)
     cloud_seeds = np.empty(n, dtype=np.int64)
+
+    # fg_grid None -> L only (the historical behaviour and the historical
+    # cache contents). Otherwise F/G/J are computed too, on their own radius
+    # grid of the same length: F and G saturate at 1 far below Ripley's
+    # r_max = 0.25, so being able to resolve them on a shorter grid without
+    # changing the tensor shape is worth the extra argument.
+    want_fgj = fg_grid is not None
+    f_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
+    g_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
+    j_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
 
     t0 = time.perf_counter()
     for i, c in enumerate(clouds):
@@ -979,6 +1090,8 @@ def extract_cloud_features(clouds: list[Any], r_grid: np.ndarray, *, tag: str = 
             low, high = region.low, region.high
 
         l_minus_r[i] = _isotropic_l_minus_r(points, low, high, r_grid)
+        if want_fgj:
+            f_func[i], g_func[i], j_func[i] = summstats.compute_fgj(points, low, high, fg_grid)
         n_points[i] = len(points)
         seed = c.get("seed", i) if is_dict else getattr(c, "seed", i)
         cloud_seeds[i] = i if seed is None else int(seed)
@@ -986,7 +1099,10 @@ def extract_cloud_features(clouds: list[Any], r_grid: np.ndarray, *, tag: str = 
         if (i + 1) % 5000 == 0 or i + 1 == n:
             print(f"  [{tag}] featurized {i + 1}/{n} clouds ({time.perf_counter() - t0:.1f}s elapsed)", flush=True)
 
-    return {"l_minus_r": l_minus_r, "n_points": n_points, "cloud_seeds": cloud_seeds}
+    out = {"l_minus_r": l_minus_r, "n_points": n_points, "cloud_seeds": cloud_seeds}
+    if want_fgj:
+        out.update({"f_func": f_func, "g_func": g_func, "j_func": j_func})
+    return out
 
 
 def get_cloud_features(
@@ -996,23 +1112,43 @@ def get_cloud_features(
     cache_path: Path | None,
     force: bool,
     tag: str,
+    fg_grid: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """extract_cloud_features + a sibling .npz cache. Cache content is
     split-independent (whole file, file order), so every seed reuses it.
     The write is atomic (tmp file + os.replace) so concurrent SLURM-array
-    tasks that each recompute it can't tear each other's file."""
+    tasks that each recompute it can't tear each other's file.
+
+    When `fg_grid` is given, ALL FOUR channels (L, F, G, J) are computed and
+    cached together, and a cache built for a different fg_grid -- or an older
+    L-only cache -- is treated as stale. Caching the full set rather than the
+    requested subset means every channel-subset arm of a sweep shares one
+    featurization pass instead of triggering its own."""
+    want_keys = ("l_minus_r", "n_points", "cloud_seeds")
+    if fg_grid is not None:
+        want_keys = want_keys + ("f_func", "g_func", "j_func")
+
     if cache_path is not None and cache_path.exists() and not force:
         try:
             cached = np.load(cache_path)
-            if cached["r_grid"].shape == r_grid.shape and np.allclose(cached["r_grid"], r_grid) \
-                    and len(cached["cloud_seeds"]) == len(clouds):
-                print(f"  [{tag}] loaded cached L(r)-r features <- {cache_path}")
-                return {k: cached[k] for k in ("l_minus_r", "n_points", "cloud_seeds")}
-            print(f"  [{tag}] cache at {cache_path} is stale (r_grid or cloud count differs); recomputing.")
+            same_r = cached["r_grid"].shape == r_grid.shape and np.allclose(cached["r_grid"], r_grid)
+            same_n = len(cached["cloud_seeds"]) == len(clouds)
+            have_keys = all(k in cached for k in want_keys)
+            same_fg = fg_grid is None or (
+                "fg_grid" in cached
+                and cached["fg_grid"].shape == fg_grid.shape
+                and np.allclose(cached["fg_grid"], fg_grid)
+            )
+            if same_r and same_n and have_keys and same_fg:
+                print(f"  [{tag}] loaded cached summary features <- {cache_path}")
+                return {k: cached[k] for k in want_keys}
+            reason = ("r_grid" if not same_r else "cloud count" if not same_n
+                      else "fg_grid" if not same_fg else "missing F/G/J channels")
+            print(f"  [{tag}] cache at {cache_path} is stale ({reason} differs); recomputing.")
         except (OSError, KeyError, ValueError, EOFError) as exc:
             print(f"  [{tag}] cache at {cache_path} unreadable ({exc!r}); recomputing.")
 
-    features = extract_cloud_features(clouds, r_grid, tag=tag)
+    features = extract_cloud_features(clouds, r_grid, tag=tag, fg_grid=fg_grid)
 
     if cache_path is not None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1020,9 +1156,10 @@ def get_cloud_features(
         # that lacks it, so a bare ".tmp.<pid>" name lands at ".tmp.<pid>.npz"
         # and the os.replace below then fails on a path that was never written.
         tmp = cache_path.with_name(f"{cache_path.name}.tmp.{os.getpid()}.npz")
-        np.savez_compressed(tmp, r_grid=r_grid, **features)
+        extra = {} if fg_grid is None else {"fg_grid": fg_grid}
+        np.savez_compressed(tmp, r_grid=r_grid, **extra, **features)
         os.replace(tmp, cache_path)
-        print(f"  [{tag}] cached L(r)-r features -> {cache_path}")
+        print(f"  [{tag}] cached summary features -> {cache_path}")
 
     return features
 
@@ -1036,6 +1173,7 @@ def _classification_features_for_alignment(
     *,
     tag: str,
     cache_name: str,
+    fg_grid: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """L(r)-r + n(x) + class targets for exactly the clouds in
     align["common_seeds"], in that order. Mirrors _classification_n_points
@@ -1051,6 +1189,7 @@ def _classification_features_for_alignment(
 
     feats = get_cloud_features(
         clouds, r_grid, cache_path=Path(cache_dir) / cache_name, force=force, tag=tag,
+        fg_grid=fg_grid,
     )
     cloud_seeds = feats["cloud_seeds"]
     common_seeds = np.asarray(align["common_seeds"], dtype=np.int64)
@@ -1076,12 +1215,18 @@ def _classification_features_for_alignment(
             dtype=np.int64,
         )
 
-    return {
+    out = {
         "l_minus_r": feats["l_minus_r"][rows],
         "n_points": feats["n_points"][rows],
         "targets": np.asarray(align["targets"], dtype=np.int64),
         "seeds": common_seeds,
     }
+    # Every extra summary channel must be row-subsetted by the SAME `rows`,
+    # or it silently desynchronises from the labels.
+    for key in ("f_func", "g_func", "j_func"):
+        if key in feats:
+            out[key] = feats[key][rows]
+    return out
 
 
 def prepare_data_classify(
@@ -1096,6 +1241,7 @@ def prepare_data_classify(
     n_r: int = N_R,
     cache_dir: Path | None = None,
     force: bool = False,
+    fg_r_max: float | None = None,
 ) -> dict[str, Any]:
     """Classification counterpart of prepare_data: build the L(r)-r + n(x)
     feature set for the clouds/split pi_multik's classify run uses, plus the
@@ -1103,6 +1249,18 @@ def prepare_data_classify(
     read only for their `seeds`/`labels` (to reproduce the exact split)."""
     r_grid = default_r_grid(r_max, n_r)
     cache_dir = Path(cache_dir) if cache_dir is not None else Path(clouds_path).parent
+
+    # fg_r_max None -> L only, and the historical L-only cache files are used
+    # unchanged. Otherwise F/G/J come along on their own grid of the same
+    # length, cached under a name that encodes fg_r_max so two arms with
+    # different F/G resolutions never share (or invalidate) one file.
+    fg_grid = None if fg_r_max is None else default_r_grid(float(fg_r_max), n_r)
+    if fg_grid is None:
+        cache_name, adv_cache_name = CLASSIFY_LFUNC_CACHE, CLASSIFY_ADV_LFUNC_CACHE
+    else:
+        stem = f"summ_fg{round(float(fg_r_max) * 1000):04d}"
+        cache_name = f"clouds.{stem}_classify_cache.npz"
+        adv_cache_name = f"adversarial_clouds.{stem}_classify_cache.npz"
 
     align = _load_classification_alignment(diagram_paths, k_values, tag="train_test")
     class_names = align["class_names"]
@@ -1114,7 +1272,8 @@ def prepare_data_classify(
 
     print(f"Loading classification clouds from {clouds_path} ...")
     train_features = _classification_features_for_alignment(
-        clouds_path, align, r_grid, cache_dir, force, tag="train_test", cache_name=CLASSIFY_LFUNC_CACHE,
+        clouds_path, align, r_grid, cache_dir, force, tag="train_test", cache_name=cache_name,
+        fg_grid=fg_grid,
     )
 
     adversarial_features = None
@@ -1131,7 +1290,7 @@ def prepare_data_classify(
         print(f"Loading adversarial classification clouds from {adversarial_clouds_path} ...")
         adversarial_features = _classification_features_for_alignment(
             adversarial_clouds_path, adv_align, r_grid, cache_dir, force,
-            tag="adversarial", cache_name=CLASSIFY_ADV_LFUNC_CACHE,
+            tag="adversarial", cache_name=adv_cache_name, fg_grid=fg_grid,
         )
     else:
         print("No adversarial clouds / diagram bundles found; skipping adversarial evaluation.")
@@ -1251,6 +1410,7 @@ def run_one_seed_classify(
     device_pref: str | None = None,
     results_root: Path | None = None,
     run_tag: str | None = None,
+    summary_channels: tuple[str, ...] = ("L",),
 ) -> dict[str, Any]:
     output_dir = Path(output_root) / f"seed_{seed}"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1280,11 +1440,18 @@ def run_one_seed_classify(
 
     # Every normalization statistic fit on the train split ONLY, then frozen
     # for val/test/adversarial -- same discipline as the regression path.
+    # summary_channels selects which summary functions become CNN input
+    # channels. ("L",) is the published vihrs feature set and reproduces the
+    # single-channel path exactly; ("L","F","G","J") is the "union of the
+    # standard summary functions" baseline (see baselines/summstats.py).
+    channels = summstats.normalize_channels(summary_channels)
+    seq_raw = summstats.stack_channels(train_features, channels)   # (N, C, m)
+
     n_norm = fit_log_zscore(train_features["n_points"][train_idx])
-    lr_norm = fit_zscore_global(train_features["l_minus_r"][train_idx])
+    lr_norm = fit_zscore_per_channel(seq_raw[train_idx])
 
     n_std = apply_log_zscore(train_features["n_points"], n_norm).astype(np.float32)
-    seq_all = apply_zscore_global(train_features["l_minus_r"], lr_norm).astype(np.float32)
+    seq_all = apply_zscore_per_channel(seq_raw, lr_norm).astype(np.float32)
 
     def _loader(idx: np.ndarray, shuffle: bool) -> DataLoader:
         ds = TensorDataset(
@@ -1298,7 +1465,11 @@ def run_one_seed_classify(
     val_loader = _loader(val_idx, False)
     test_loader = _loader(test_idx, False)
 
-    model = VihrsCNN(seq_len=len(r_grid), n_targets=n_classes).to(device)
+    model = VihrsCNN(
+        seq_len=len(r_grid), n_targets=n_classes, in_channels=seq_all.shape[1]
+    ).to(device)
+    print(f"[vihrs classify seed={seed}] summary channels: {'+'.join(channels)} "
+          f"({seq_all.shape[1]} x {seq_all.shape[2]})")
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     history: dict[str, list[float]] = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
@@ -1347,7 +1518,10 @@ def run_one_seed_classify(
     if adversarial_features is not None:
         adv_targets = np.asarray(adversarial_features["targets"], dtype=np.int64)
         adv_n_std = apply_log_zscore(adversarial_features["n_points"], n_norm).astype(np.float32)
-        adv_seq = apply_zscore_global(adversarial_features["l_minus_r"], lr_norm).astype(np.float32)
+        # Same channel set, same frozen train-split per-channel statistics.
+        adv_seq = apply_zscore_per_channel(
+            summstats.stack_channels(adversarial_features, channels), lr_norm
+        ).astype(np.float32)
         adv_ds = TensorDataset(torch.from_numpy(adv_seq), torch.from_numpy(adv_n_std), torch.from_numpy(adv_targets))
         adv_loader = DataLoader(adv_ds, batch_size=batch_size, shuffle=False)
         adversarial_loss, adversarial_acc, adversarial_acc_per_class, adv_true, adv_pred = _classify_report(

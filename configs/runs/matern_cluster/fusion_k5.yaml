@@ -1,0 +1,77 @@
+# python scripts/train.py configs/runs/matern_cluster/fusion_k5.yaml --seed 9371
+#
+# Matern cluster counterpart of thomas/fusion_k5.yaml: plain DTM k=5,
+# pi_multik, with the scalar side-vector sweepable over L(r) and F/G columns.
+# Driven by slurm/fgfusion_params.sh; arms are --set overrides on this file.
+#
+# Design block is byte-for-byte matern_cluster_pi_multik_k5k10k15.yaml's --
+# the SAME K / EN / c ranges thomas uses, with cluster_radius = c/sqrt(K) and
+# c1 = cluster_radius*sqrt(K) reducing to exactly c, as thomas's c1 does. The
+# two families are therefore matched on parent intensity, expected count AND
+# overlap index, and differ ONLY in offspring kernel shape (uniform-in-ball
+# vs Gaussian). That is why this process matters here: the classification
+# result showed F and G read kernel shape better than the persistence images
+# do (matern recall 0.563 -> 0.697 on adding F/G to L, overshooting PH's
+# 0.643), so matern cluster is where the same question has the most bite for
+# parameter estimation.
+#
+# Only the filtration differs from the k5k10k15 config: k=5 alone, matching
+# thomas/fusion_k5.yaml so the fusion arms are comparable across processes
+# and to the raw8 = 0.1110 Thomas result.
+
+process:
+  name: matern_cluster
+  seed: 0
+  design:
+    mode: random
+    reps: 1
+    random:
+      n_param_vectors: 8000
+      ranges:
+        K:  {low: 15.0,  high: 120.0, scale: log}
+        EN: {low: 150.0, high: 800.0, scale: log}
+        c:  {low: 0.10,  high: 0.90,  scale: log}
+      derived:
+        parent_intensity: "K"
+        mean_offspring:   "EN / K"
+        cluster_radius:   "c / sqrt(K)"
+        c1:               "cluster_radius * sqrt(parent_intensity)"
+      constraints:
+        - "mean_offspring >= 2.5"
+  adversarial:
+    enabled: true
+    fraction: 0.125
+    seed_offset: 100000
+
+filtration:
+  - {name: dtm, params: {k: 5, q: 2.0, maxdim: 1}}
+
+method:
+  name: pi_multik
+  params:
+    homology_dims: [0, 1]
+    include_entropy: false
+    include_lfunc: 0
+    lfunc_pca: 0
+    include_fgfunc: 0
+    fg_r_max: 0.25
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    encoder_mode: shared
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+    batch_size: 32
+    n_epochs: 500
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 50
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [parent_intensity, mean_offspring, cluster_radius]
+log_label_names: [parent_intensity, mean_offspring, cluster_radius]
+use_adversarial: true

@@ -1,0 +1,89 @@
+# python scripts/train.py configs/runs/classification/summstats_kfgj.yaml --seed 9371 \
+#     --run-tag summ__LFGJ --set method.params.summary_channels=[L,F,G,J]
+#
+# THE STRONG CLASSICAL BASELINE: process classification from the UNION of the
+# standard spatial summary functions, not from Ripley's L alone.
+#
+# WHY. vihrs_lr_nx_k5k10k15.yaml feeds the 1-D CNN exactly one summary
+# function, L(r)-r, plus n(x). Reporting the topological classifier's margin
+# against that invites the reading "L(r) is an impoverished feature set"
+# rather than "topology carries information the standard summaries do not".
+# The textbook answer to *model discrimination* (as opposed to parameter
+# estimation) is K/L together with:
+#
+#   F  empty-space (spherical contact) function -- distance from an arbitrary
+#      location to the nearest point. Sees VOID structure, which K does not.
+#   G  nearest-neighbour distance function -- distance from a typical point to
+#      its nearest neighbour. Sees the short-range clumping/inhibition K
+#      averages over.
+#   J  = (1-G)/(1-F), Van Lieshout & Baddeley's discrimination statistic.
+#      J == 1 for Poisson, < 1 clustered, > 1 inhibited, and it is NOT a
+#      function of the second-order structure alone.
+#
+# This config is vihrs_lr_nx_k5k10k15.yaml with ONE field added
+# (summary_channels). Same clouds, same seeds, same split, same 1-D CNN, same
+# training budget -- the only change is how many channels enter the first
+# convolution. summary_channels: [L] reproduces the published baseline
+# exactly (same code path, same cache file, in_channels=1).
+#
+# ESTIMATORS (src/cloudforger/baselines/summstats.py): F and G use the
+# reduced-sample / border correction (spatstat correction="rs"), which is
+# exactly unbiased and tuning-free. J is held flat where (1-F) < 0.05, since
+# the ratio is undefined once F saturates at 1.
+#
+# THE ONE TUNABLE, and why it is a sweep arm rather than a choice:
+# F and G reach 1 far below Ripley's r_max = 0.25 (mean nearest-neighbour
+# distance is ~0.018-0.041 for these intensities), so on the shared 0.25 grid
+# most of their 513 samples are saturated. fg_r_max puts F/G/J on their own
+# grid of the SAME length, so it can be shortened without changing the tensor
+# shape. Default 0.25 == the literal same grid as L, i.e. no tuning at all;
+# slurm/summstats_classify.sh also runs fg_r_max=0.08 so the baseline is not
+# handicapped by a resolution choice made for K. Report the better one --
+# picked on VALIDATION accuracy -- as the baseline.
+#
+# Feature cache (built once by slurm/summstats_featurize.sh, then shared by
+# every channel-subset arm at the same fg_r_max):
+#   data/classification/{,adversarial_}clouds.summ_fg<fg_r_max*1000>_classify_cache.npz
+# The historical L-only cache (clouds.lfunc_classify_cache.npz) is untouched.
+#
+# Results path: results/classification/raw/vihrs/_runs/<run-tag>/seed_<seed>/
+
+process:
+  name: classification
+  seed: 0
+
+# Consumed ONLY to locate the per-k diagram bundles whose seed intersection
+# defines pi_multik's split (vihrs reads their seeds/labels, never the
+# diagrams), so the baseline trains and tests on exactly the same clouds.
+# MUST match the pi_multik classify config's filtration block.
+filtration:
+  - {name: dtm, params: {k: 5,  q: 2.0, maxdim: 1}}
+  - {name: dtm, params: {k: 10, q: 2.0, maxdim: 1}}
+  - {name: dtm, params: {k: 15, q: 2.0, maxdim: 1}}
+
+method:
+  name: vihrs
+  params:
+    task: classify
+
+    # Which summary functions become CNN input channels, in this order.
+    # Overridden per arm by slurm/summstats_classify.sh.
+    summary_channels: [L, F, G, J]
+    fg_r_max: 0.25            # radius grid for F/G/J; see the header
+
+    # L(r)-r grid: spatstat Kest/Lest geometric defaults for the unit square.
+    r_max: 0.25
+    n_r: 513
+
+    # Budget matched to the classification epoch-cap rerun
+    # (slurm/classification_epochcap.sh), so PH and this baseline are
+    # compared at the same number of epochs and the same patience.
+    batch_size: 128
+    n_epochs: 600
+    lr: 0.001
+    weight_decay: 0.0
+    early_stopping_patience: 60
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [matern_cluster, nested_thomas, strauss, thomas]
+use_adversarial: true

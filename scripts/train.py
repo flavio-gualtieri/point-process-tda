@@ -250,6 +250,17 @@ def run_vihrs_classify_method(
         and all(p.exists() for p in adversarial_diagram_paths)
     )
 
+    # summary_channels: which summary functions become CNN input channels.
+    # ["L"] (the default) is the published vihrs feature set; adding F/G/J
+    # turns it into the "union of the standard summary functions" baseline.
+    # F and G are only computed when something other than L is asked for, so
+    # an L-only run touches neither the new code path nor a new cache.
+    summary_channels = baselines.summstats.normalize_channels(params.get("summary_channels"))
+    fg_r_max = (
+        None if summary_channels == ("L",)
+        else float(params.get("fg_r_max", baselines.vihrs.R_MAX))
+    )
+
     data = baselines.vihrs.prepare_data_classify(
         data_paths.clouds(),
         adversarial_clouds_path if use_adv else None,
@@ -260,6 +271,7 @@ def run_vihrs_classify_method(
         r_max=params.get("r_max", baselines.vihrs.R_MAX),
         n_r=params.get("n_r", baselines.vihrs.N_R),
         force=bool(params.get("recompute_features", False)),
+        fg_r_max=fg_r_max,
     )
     baselines.vihrs.run_one_seed_classify(
         seed,
@@ -276,6 +288,7 @@ def run_vihrs_classify_method(
         early_stopping_patience=params.get("early_stopping_patience", 30),
         results_root=results_paths.root,
         run_tag=run_tag,
+        summary_channels=summary_channels,
     )
 
 
@@ -310,9 +323,18 @@ def run_vihrs_method(
     adversarial_clouds_path = data_paths.clouds(adversarial=True)
     adversarial_path = adversarial_clouds_path if cfg.use_adversarial and adversarial_clouds_path.exists() else None
 
+    # See run_vihrs_classify_method: ["L"] (the default) is the published
+    # feature set and touches neither the F/G code path nor a new cache.
+    summary_channels = baselines.summstats.normalize_channels(params.get("summary_channels"))
+    fg_r_max = (
+        None if summary_channels == ("L",)
+        else float(params.get("fg_r_max", baselines.vihrs.R_MAX))
+    )
+
     data = baselines.vihrs.prepare_data(
         data_paths.clouds(), adversarial_path, label_names=label_names,
         r_max=params.get("r_max", baselines.vihrs.R_MAX), n_r=params.get("n_r", baselines.vihrs.N_R),
+        fg_r_max=fg_r_max,
     )
     label_names = tuple(data["label_names"])
     baselines.vihrs.run_one_seed(
@@ -332,6 +354,7 @@ def run_vihrs_method(
         skip_mincontrast=params.get("skip_mincontrast", False),
         results_root=results_paths.root,
         run_tag=run_tag,
+        summary_channels=summary_channels,
     )
 
 

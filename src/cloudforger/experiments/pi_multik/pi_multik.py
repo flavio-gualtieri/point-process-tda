@@ -12,7 +12,7 @@ import torch.nn as nn
 
 from torch.utils.data import DataLoader, Subset, TensorDataset
 
-from cloudforger.baselines import vihrs
+from cloudforger.baselines import summstats, vihrs
 from cloudforger.core.diagram import PersistenceDiagram
 from cloudforger.core.io import intersect_seeds
 from cloudforger.core.records import load_diagrams
@@ -89,6 +89,17 @@ _LFUNC_R_MIN = 0.01
 # path uses the first, the classification path the second.
 _LFUNC_CACHE_SUFFIXES = (".lfunc_cache.npz", ".lfunc_classify_cache.npz")
 
+# Basenames baselines/vihrs.py caches the F/G/J channels under when
+# fg_r_max is set (see its prepare_data / prepare_data_classify). NNNN is
+# round(fg_r_max * 1000); 0250 is the value that won the classification
+# baseline sweep (slurm/summstats_classify.sh), so it is the default here.
+_FG_CACHE_TEMPLATES = (".summ_fg{tag}_cache.npz", ".summ_fg{tag}_classify_cache.npz")
+_FG_R_MIN = 0.01
+
+# entropy_norms key under which build_extra stashes the curve-branch
+# per-channel normalization (fit on train, applied frozen to adversarial).
+_CURVE_NORM_KEY = "__curves__"
+
 
 def _load_lfunc_cols(
     clouds_path: Path, common_seeds: np.ndarray, n_radii: int
@@ -130,6 +141,106 @@ def _load_lfunc_cols(
     radii = np.geomspace(_LFUNC_R_MIN, float(r_grid[-1]), n_radii)
     sampled = np.stack([np.interp(radii, r_grid, l_minus_r[i]) for i in rows])  # (N, n_radii)
     return {f"lfunc_r{j:02d}": sampled[:, j] for j in range(n_radii)}
+
+
+def _load_fg_cols(
+    clouds_path: Path, common_seeds: np.ndarray, n_radii: int, fg_r_max: float
+) -> dict[str, np.ndarray]:
+    """{column name -> (N,) array} of F(r) and G(r) sampled at `n_radii`
+    log-spaced radii each, joined to `common_seeds` from the vihrs F/G/J cache.
+
+    Exact twin of _load_lfunc_cols, one cache and two functions instead of
+    one: F is the empty-space function and G the nearest-neighbour distance
+    function (see baselines/summstats.py). Together with L they are the
+    "union of the standard summary functions" that beat PH (+) L on 4-way
+    classification, so this is what lets pi_multik ask whether persistence
+    images add anything ON TOP of that union rather than on top of L alone.
+
+    Emits 2 * n_radii columns, index-numbered per function so `sorted()`
+    keeps a stable, function-grouped order between the train and adversarial
+    calls -- the same contract _load_lfunc_cols relies on.
+    """
+    tag = f"{round(float(fg_r_max) * 1000):04d}"
+    cache_path = None
+    for template in _FG_CACHE_TEMPLATES:
+        candidate = clouds_path.parent / (clouds_path.stem + template.format(tag=tag))
+        if candidate.exists():
+            cache_path = candidate
+            break
+    if cache_path is None:
+        raise FileNotFoundError(
+            f"include_fgfunc is set but no F/G cache next to {clouds_path} (looked for "
+            + ", ".join(clouds_path.stem + t.format(tag=tag) for t in _FG_CACHE_TEMPLATES)
+            + f"). Build it with slurm/summstats_featurize*.sh at fg_r_max={fg_r_max}."
+        )
+
+    z = np.load(cache_path)
+    missing_keys = [k for k in ("fg_grid", "f_func", "g_func") if k not in z]
+    if missing_keys:
+        raise KeyError(f"{cache_path} is an L-only cache (missing {missing_keys}); rebuild it.")
+
+    fg_grid = np.asarray(z["fg_grid"], dtype=np.float64)
+    by_seed = {int(s): i for i, s in enumerate(np.asarray(z["cloud_seeds"], dtype=np.int64))}
+    missing = [int(s) for s in common_seeds if int(s) not in by_seed]
+    if missing:
+        raise KeyError(
+            f"{len(missing)}/{len(common_seeds)} seeds absent from {cache_path} "
+            f"(first few: {missing[:5]}) -- F/G cache and diagram bundle disagree on the seed convention."
+        )
+
+    rows = np.array([by_seed[int(s)] for s in common_seeds], dtype=np.int64)
+    radii = np.geomspace(_FG_R_MIN, float(fg_grid[-1]), n_radii)
+
+    cols: dict[str, np.ndarray] = {}
+    for prefix, key in (("ffunc", "f_func"), ("gfunc", "g_func")):
+        curves = np.asarray(z[key], dtype=np.float64)
+        sampled = np.stack([np.interp(radii, fg_grid, curves[i]) for i in rows])  # (N, n_radii)
+        cols.update({f"{prefix}_r{j:02d}": sampled[:, j] for j in range(n_radii)})
+    return cols
+
+
+def _load_curve_stack(
+    clouds_path: Path, common_seeds: np.ndarray, channels: tuple[str, ...], fg_r_max: float
+) -> np.ndarray:
+    """(N, C, m) float32 stack of FULL summary-function curves for the
+    two-branch model's 1-D CNN branch, joined to `common_seeds`.
+
+    Unlike _load_lfunc_cols / _load_fg_cols, nothing is subsampled: the curve
+    branch reads every one of the m radii, exactly as the vihrs L+F+G baseline
+    does, so "does the PH branch add anything" is a clean ablation of one
+    model rather than a comparison between a coarse MLP side vector and a
+    full-resolution CNN. Reads the same vihrs F/G/J cache (which also holds
+    L on its own r_grid of the same length m).
+    """
+    tag = f"{round(float(fg_r_max) * 1000):04d}"
+    cache_path = None
+    for template in _FG_CACHE_TEMPLATES:
+        candidate = clouds_path.parent / (clouds_path.stem + template.format(tag=tag))
+        if candidate.exists():
+            cache_path = candidate
+            break
+    if cache_path is None:
+        raise FileNotFoundError(
+            f"curve_channels is set but no summary-function cache next to {clouds_path} (looked for "
+            + ", ".join(clouds_path.stem + t.format(tag=tag) for t in _FG_CACHE_TEMPLATES)
+            + f"). Build it with slurm/summstats_featurize*.sh at fg_r_max={fg_r_max}."
+        )
+
+    z = np.load(cache_path)
+    keys = [summstats.CHANNEL_KEYS[c] for c in channels]
+    missing_keys = [k for k in keys if k not in z]
+    if missing_keys:
+        raise KeyError(f"{cache_path} lacks curve channel(s) {missing_keys}; rebuild it.")
+
+    by_seed = {int(s): i for i, s in enumerate(np.asarray(z["cloud_seeds"], dtype=np.int64))}
+    missing = [int(s) for s in common_seeds if int(s) not in by_seed]
+    if missing:
+        raise KeyError(
+            f"{len(missing)}/{len(common_seeds)} seeds absent from {cache_path} "
+            f"(first few: {missing[:5]}) -- curve cache and diagram bundle disagree on the seed convention."
+        )
+    rows = np.array([by_seed[int(s)] for s in common_seeds], dtype=np.int64)
+    return np.stack([np.asarray(z[k], dtype=np.float32)[rows] for k in keys], axis=1)
 
 
 # Reserved key under which the fitted L-curve PCA basis is stashed in the
@@ -180,6 +291,9 @@ def load_multik_split(
     homology_dims: tuple[int, ...] = (0, 1),
     task: str = "params",
     lfunc_n_radii: int = 0,
+    fg_n_radii: int = 0,
+    fg_r_max: float = 0.25,
+    curve_channels: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
     """Load and seed-align each k's diagrams.pkl (NOT a precomputed image
     file -- see module docstring). Persistence entropy is computed here,
@@ -263,11 +377,20 @@ def load_multik_split(
         n_points = np.array([n_points_by_seed[int(s)] for s in common_seeds], dtype=np.float64)
 
     lfunc_cols = _load_lfunc_cols(clouds_path, common_seeds, lfunc_n_radii) if lfunc_n_radii else {}
+    fg_cols = (
+        _load_fg_cols(clouds_path, common_seeds, fg_n_radii, fg_r_max) if fg_n_radii else {}
+    )
+    curves = (
+        _load_curve_stack(clouds_path, common_seeds, tuple(curve_channels), fg_r_max)
+        if curve_channels else None
+    )
 
     return {
         "diagrams_per_k": diagrams_per_k,
         "entropy_cols": entropy_cols,
         "lfunc_cols": lfunc_cols,
+        "fg_cols": fg_cols,
+        "curves": curves,
         "n_points": n_points,
         "targets": targets,
         "seeds": common_seeds,
@@ -325,6 +448,8 @@ def build_extra(
     include_log_n: bool = True,
     include_lfunc: bool = False,
     lfunc_pca: int = 0,
+    include_fg: bool = False,
+    include_curves: bool = False,
 ) -> tuple[np.ndarray, dict, dict[str, dict[str, float]]]:
     """(N, include_log_n + (n_entropy_cols if include_entropy else 0))
     side-vector, concatenated onto the per-k embeddings before the fusion
@@ -391,9 +516,91 @@ def build_extra(
                 if fit:
                     entropy_norms[name] = fit_zscore(raw[train_idx])
                 cols.append(apply_zscore(raw, entropy_norms[name]).astype(np.float32))
-    if not cols:
-        return np.zeros((len(split["n_points"]), 0), dtype=np.float32), n_norm, entropy_norms
-    return np.stack(cols, axis=1), n_norm, entropy_norms
+
+    if include_fg:
+        # No PCA option here: the collinearity that motivated lfunc_pca is a
+        # property of sampling ONE smooth curve at many radii, and the F and G
+        # columns are two different curves whose leading directions are not
+        # interchangeable.
+        #
+        # ONE pooled z-score PER FUNCTION (over train rows AND all of that
+        # function's radii), not one per column. Per-column scaling was a bug:
+        # F and G are CDFs, so at the larger radii they sit at ~1 for nearly
+        # every cloud, and fit_zscore only guards std == 0 EXACTLY -- a column
+        # with a tiny nonzero spread got divided by that tiny std, turning the
+        # few clouds that differ into extreme inputs. That made PH (+) F/G
+        # train worse than PH alone on every process (fgp__PHfg, 0/10 seeds).
+        # Pooling is also what vihrs does for its curve channels
+        # (fit_zscore_per_channel), so both paths now scale F and G alike.
+        names = sorted(split.get("fg_cols") or {})
+        for prefix in ("ffunc", "gfunc"):
+            group = [name for name in names if name.startswith(prefix + "_")]
+            if not group:
+                continue
+            key = f"__fgpool_{prefix}__"
+            if fit:
+                block = np.stack([split["fg_cols"][name][train_idx] for name in group], axis=1)
+                entropy_norms[key] = fit_zscore(block)        # pooled: rows x radii
+            for name in group:
+                raw = split["fg_cols"][name]
+                cols.append(apply_zscore(raw, entropy_norms[key]).astype(np.float32))
+
+    out = (
+        np.stack(cols, axis=1) if cols
+        else np.zeros((len(split["n_points"]), 0), dtype=np.float32)
+    )
+
+    if include_curves:
+        # The two-branch model's curve input (see PIMultiK / CurveEncoder):
+        # the full (N, C, m) stack of summary-function curves, z-scored per
+        # channel with one pooled mean/std over train rows x radii (vihrs's
+        # fit_zscore_per_channel -- same normalization the vihrs L+F+G
+        # baseline used), then FLATTENED and appended as the LAST block of
+        # the side vector. Riding on the existing `extra` tensor means the
+        # loaders, the shared train loop and the adversarial path are all
+        # untouched; PIMultiK slices this tail back off and reshapes it to
+        # (B, C, m) before the 1-D CNN. It must stay last for that to work.
+        curves = split.get("curves")
+        if curves is None:
+            raise KeyError("include_curves is set but the split carries no `curves` "
+                           "(load_multik_split was called without curve_channels).")
+        if fit:
+            entropy_norms[_CURVE_NORM_KEY] = vihrs.fit_zscore_per_channel(curves[train_idx])
+        block = vihrs.apply_zscore_per_channel(curves, entropy_norms[_CURVE_NORM_KEY])
+        out = np.concatenate(
+            [out, block.reshape(block.shape[0], -1).astype(np.float32)], axis=1
+        )
+    return out, n_norm, entropy_norms
+
+
+class CurveEncoder(nn.Module):
+    """1-D CNN branch over a (B, C, m) stack of summary-function curves.
+
+    The convolutional trunk is the vihrs baseline's EXACTLY -- Conv1d(C,64,7)
+    -ReLU-MaxPool(5)-Conv1d(64,64,7)-ReLU-MaxPool(5)-Conv1d(64,64,7)-ReLU-
+    Flatten (baselines/vihrs.py::VihrsCNN), so the curve-only arm of the
+    two-branch model is the L+F+G baseline in all but its head. It is followed
+    by Linear(flat -> out_dim)-ReLU, which is VihrsCNN's own first dense layer
+    moved into the branch. That projection is what keeps the fusion balanced:
+    at m = 513 the flattened trunk is 64 x 13 = 832 wide against the PI
+    branch's 64-wide embedding, and concatenating those raw would let the
+    curve branch dominate the head by width alone.
+    """
+
+    def __init__(self, in_channels: int, seq_len: int, out_dim: int):
+        super().__init__()
+        self.trunk = nn.Sequential(
+            nn.Conv1d(in_channels, 64, kernel_size=7), nn.ReLU(), nn.MaxPool1d(5),
+            nn.Conv1d(64, 64, kernel_size=7), nn.ReLU(), nn.MaxPool1d(5),
+            nn.Conv1d(64, 64, kernel_size=7), nn.ReLU(),
+        )
+        with torch.no_grad():
+            flat = self.trunk(torch.zeros(1, in_channels, seq_len)).flatten(1).shape[1]
+        self.proj = nn.Sequential(nn.Linear(flat, out_dim), nn.ReLU())
+        self.out_dim = out_dim
+
+    def forward(self, curves: torch.Tensor) -> torch.Tensor:
+        return self.proj(self.trunk(curves).flatten(start_dim=1))
 
 
 class PIMultiK(nn.Module):
@@ -438,31 +645,59 @@ class PIMultiK(nn.Module):
         pool_type: str = "max",
         use_coords: bool = True,
         task: str = "params",
+        use_pi: bool = True,
+        curve_channels: int = 0,
+        curve_len: int = 0,
     ):
         super().__init__()
         self.n_k = n_k
         self.fusion_mode = fusion_mode
-        self.bank = EncoderBank(
-            mode=encoder_mode, n_k=n_k, in_channels=in_channels, embedding_dim=embedding_dim,
-            conv_channels=conv_channels, dropout=dropout, pool_type=pool_type, use_coords=use_coords,
-        )
-        if fusion_mode == "concat":
-            self.fusion = None
-            fused_dim = n_k * embedding_dim
-        elif fusion_mode == "conv":
-            self.fusion = ConvFusion(
-                n_k=n_k, embedding_dim=embedding_dim, hidden=scale_fusion_hidden,
-                out_dim=scale_fusion_out_dim, kernel_size=scale_fusion_kernel_size,
-                dropout=scale_fusion_dropout, pool=fusion_pool,
-            )
-            fused_dim = self.fusion.out_dim
-        else:
-            raise ValueError(f"PIMultiK: fusion_mode must be 'concat' or 'conv', got {fusion_mode!r}.")
-        # Applied after fusion, before the head, regardless of fusion_mode --
-        # previously only pi_multik_towers had this (as an always-on
-        # nn.Dropout); promoted here so it's available to any combination.
-        self.fusion_dropout = nn.Dropout(fusion_dropout) if fusion_dropout > 0 else nn.Identity()
 
+        # TWO-BRANCH MODEL. curve_channels > 0 adds a 1-D CNN branch
+        # (CurveEncoder) over the full summary-function curves, which arrive
+        # flattened as the LAST curve_channels * curve_len columns of `extra`
+        # (build_extra's include_curves block). use_pi=False removes the
+        # persistence-image branch entirely -- no encoder parameters at all --
+        # so {use_pi True, False} with the same curve branch is a clean PH
+        # ablation of one model. Defaults (use_pi=True, no curves) build the
+        # pre-existing PI-only model unchanged.
+        if not use_pi and curve_channels <= 0:
+            raise ValueError("PIMultiK: use_pi=False needs a curve branch (curve_channels > 0).")
+        self.use_pi = use_pi
+        self.curve_channels = int(curve_channels)
+        self.curve_len = int(curve_len)
+        self.n_curve_cols = self.curve_channels * self.curve_len
+        self.curve_encoder = (
+            CurveEncoder(self.curve_channels, self.curve_len, embedding_dim)
+            if self.curve_channels > 0 else None
+        )
+        curve_dim = self.curve_encoder.out_dim if self.curve_encoder is not None else 0
+        # n_extra counts every side-vector column, curves included; the head
+        # sees the curve EMBEDDING instead of the raw flattened curves.
+        n_scalar = n_extra - self.n_curve_cols
+        if n_scalar < 0:
+            raise ValueError(
+                f"PIMultiK: n_extra={n_extra} is smaller than the curve block "
+                f"({self.curve_channels} x {self.curve_len})."
+            )
+
+        if not use_pi:
+            self.bank = None
+            self.fusion = None
+            self.fusion_dropout = nn.Identity()
+            fused_dim = 0
+        else:
+            self.bank, self.fusion, fused_dim = self._build_pi_branch(
+                encoder_mode, n_k, in_channels, embedding_dim, conv_channels, dropout,
+                pool_type, use_coords, fusion_mode, fusion_pool, scale_fusion_hidden,
+                scale_fusion_out_dim, scale_fusion_kernel_size, scale_fusion_dropout,
+            )
+            # Applied after fusion, before the head, regardless of fusion_mode
+            # -- previously only pi_multik_towers had this (as an always-on
+            # nn.Dropout); promoted here so it's available to any combination.
+            self.fusion_dropout = nn.Dropout(fusion_dropout) if fusion_dropout > 0 else nn.Identity()
+
+        head_in = fused_dim + curve_dim + n_scalar
         # n_targets is the regression target count for task="params", or the
         # class count for task="classify" -- the fused embedding -> output MLP
         # is structurally the same either way (ParameterEstimator and
@@ -470,23 +705,56 @@ class PIMultiK(nn.Module):
         # output semantics differ (see PIMultiKExperiment.run).
         if task == "classify":
             self.head = ClassificationHead(
-                embedding_dim=fused_dim + n_extra, n_classes=n_targets,
+                embedding_dim=head_in, n_classes=n_targets,
                 hidden_dims=head_hidden_dims, dropout=head_dropout,
             )
         else:
             self.head = ParameterEstimator(
-                embedding_dim=fused_dim + n_extra, n_params=n_targets,
+                embedding_dim=head_in, n_params=n_targets,
                 hidden_dims=head_hidden_dims, dropout=head_dropout,
             )
 
-    def forward(self, pi_imgs, extra):
-        seq = self.bank(pi_imgs)  # (B, K, C)
-        if self.fusion_mode == "concat":
-            fused = seq.reshape(seq.shape[0], -1)
+    @staticmethod
+    def _build_pi_branch(
+        encoder_mode, n_k, in_channels, embedding_dim, conv_channels, dropout,
+        pool_type, use_coords, fusion_mode, fusion_pool, scale_fusion_hidden,
+        scale_fusion_out_dim, scale_fusion_kernel_size, scale_fusion_dropout,
+    ):
+        bank = EncoderBank(
+            mode=encoder_mode, n_k=n_k, in_channels=in_channels, embedding_dim=embedding_dim,
+            conv_channels=conv_channels, dropout=dropout, pool_type=pool_type, use_coords=use_coords,
+        )
+        if fusion_mode == "concat":
+            fusion = None
+            fused_dim = n_k * embedding_dim
+        elif fusion_mode == "conv":
+            fusion = ConvFusion(
+                n_k=n_k, embedding_dim=embedding_dim, hidden=scale_fusion_hidden,
+                out_dim=scale_fusion_out_dim, kernel_size=scale_fusion_kernel_size,
+                dropout=scale_fusion_dropout, pool=fusion_pool,
+            )
+            fused_dim = fusion.out_dim
         else:
-            fused = self.fusion(seq)
-        fused = self.fusion_dropout(fused)
-        return self.head(torch.cat([fused, extra], dim=1))
+            raise ValueError(f"PIMultiK: fusion_mode must be 'concat' or 'conv', got {fusion_mode!r}.")
+        return bank, fusion, fused_dim
+
+    def forward(self, pi_imgs, extra):
+        parts = []
+        if self.bank is not None:
+            seq = self.bank(pi_imgs)  # (B, K, C)
+            if self.fusion_mode == "concat":
+                fused = seq.reshape(seq.shape[0], -1)
+            else:
+                fused = self.fusion(seq)
+            parts.append(self.fusion_dropout(fused))
+        if self.curve_encoder is not None:
+            # The curve block is the LAST n_curve_cols columns of extra (see
+            # build_extra's include_curves); slice it off, restore (B, C, m).
+            curves = extra[:, -self.n_curve_cols:].reshape(-1, self.curve_channels, self.curve_len)
+            extra = extra[:, :-self.n_curve_cols]
+            parts.append(self.curve_encoder(curves))
+        parts.append(extra)
+        return self.head(torch.cat(parts, dim=1))
 
 
 def _resolve_fusion_kwargs(cfg: dict) -> dict[str, Any]:
@@ -578,17 +846,47 @@ class PIMultiKExperiment(MultiSourceExperiment):
         # lfunc_pca: k > 0 replaces the k raw (heavily collinear) L columns
         # with k whitened principal components fit on the train rows.
         lfunc_pca = int(self.cfg.get("lfunc_pca", 0) or 0)
+        # include_fgfunc: N > 0 appends N log-spaced samples EACH of the
+        # empty-space F(r) and nearest-neighbour G(r) functions (2N columns),
+        # read from the vihrs F/G/J cache at fg_r_max. Together with
+        # include_lfunc this makes the scalar side-vector the full "union of
+        # the standard summary functions" -- the baseline that beat PH (+) L
+        # on classification -- so this arm tests whether persistence images
+        # add anything on top of that union. See baselines/summstats.py.
+        fg_n_radii = int(self.cfg.get("include_fgfunc", 0) or 0)
+        include_fg = fg_n_radii > 0
+        fg_r_max = float(self.cfg.get("fg_r_max", 0.25))
+        # TWO-BRANCH MODEL. curve_channels (e.g. [L, F, G]) adds a 1-D CNN
+        # branch over the FULL summary-function curves (CurveEncoder, the
+        # vihrs conv trunk); use_pi: false drops the persistence-image branch.
+        # Same model with and without the PH branch is the PH ablation --
+        # see slurm/twobranch_*.sh. Both default to the pre-existing model.
+        curve_channels = (
+            summstats.normalize_channels(self.cfg.get("curve_channels"))
+            if self.cfg.get("curve_channels") else ()
+        )
+        include_curves = bool(curve_channels)
+        use_pi = bool(self.cfg.get("use_pi", True))
         resolution = int(self.cfg.get("resolution", 64))
         sigma_pixels = float(self.cfg.get("sigma_pixels", 0.5))
         coverage = float(self.cfg.get("pd_calibration_coverage", 0.95))
         pad = float(self.cfg.get("pad", 1.05))
         seed = self.cfg["seed"]
-        device = prepare_device(seed)
+        # init_offset: perturb weight init / dropout / batch order for a
+        # RESTART without touching the data split. train_val_test_indices
+        # below draws from its own local torch.Generator(seed), so it is
+        # unaffected by the global RNG prepare_device sets here -- every
+        # restart of a seed therefore shares that seed's exact
+        # train/val/test partition, and selecting among restarts on
+        # val_loss stays honest. Default 0 reproduces existing runs.
+        init_offset = int(self.cfg.get("init_offset", 0) or 0)
+        device = prepare_device(seed + init_offset)
 
         # load and align diagrams and clouds by seed
         train_split = load_multik_split(
             k_values, list(dataset_paths["images"]), Path(dataset_paths["clouds"]), label_names, tag="train_test",
             homology_dims=homology_dims, task=task, lfunc_n_radii=lfunc_n_radii,
+            fg_n_radii=fg_n_radii, fg_r_max=fg_r_max, curve_channels=curve_channels,
         )
         if train_split is None:
             raise FileNotFoundError(f"diagrams missing for some k in {k_values} under {dataset_paths['images']}.")
@@ -614,7 +912,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
             adv_split = load_multik_split(
                 k_values, list(adversarial_paths["images"]), Path(adversarial_paths["clouds"]),
                 label_names, tag="adversarial", homology_dims=homology_dims, task=task,
-                lfunc_n_radii=lfunc_n_radii,
+                lfunc_n_radii=lfunc_n_radii, fg_n_radii=fg_n_radii, fg_r_max=fg_r_max,
+                curve_channels=curve_channels,
             )
 
         n = len(train_split["targets"])
@@ -645,7 +944,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
         )
         extra, n_norm, entropy_norms = build_extra(
             train_split, train_idx, include_entropy=include_entropy, include_log_n=include_log_n,
-            include_lfunc=include_lfunc, lfunc_pca=lfunc_pca,
+            include_lfunc=include_lfunc, lfunc_pca=lfunc_pca, include_fg=include_fg,
+            include_curves=include_curves,
         )
 
         full_dataset = TensorDataset(
@@ -660,6 +960,17 @@ class PIMultiKExperiment(MultiSourceExperiment):
         # PIMultiK.forward(pi_imgs, extra) lines up exactly with
         # cloudforger.training.train's (inputs, covariates, labels) 3-tuple batch
         # convention, so the shared train loop applies as-is.
+        # Only passed when the two-branch model is actually requested: sibling
+        # experiments override _build_model (DimSplitPIMultiK does not accept
+        # these kwargs), and at the defaults every existing method must build
+        # exactly what it built before.
+        two_branch_kwargs: dict[str, Any] = {}
+        if include_curves or not use_pi:
+            two_branch_kwargs = {
+                "use_pi": use_pi,
+                "curve_channels": len(curve_channels),
+                "curve_len": int(train_split["curves"].shape[2]) if include_curves else 0,
+            }
         model = self._build_model(
             in_channels=len(homology_dims),
             embedding_dim=self.cfg["embedding_dim"],
@@ -678,8 +989,13 @@ class PIMultiKExperiment(MultiSourceExperiment):
             pool_type=str(self.cfg.get("pool_type", "max")),
             use_coords=bool(self.cfg.get("coordconv", True)),
             task=task,
+            **two_branch_kwargs,
             **_resolve_fusion_kwargs(self.cfg),
         ).to(device)
+        n_params = sum(p.numel() for p in model.parameters())
+        print(f"[{self.tag} seed={seed}] branches: "
+              f"PI={'on' if use_pi else 'OFF'}  curves={'+'.join(curve_channels) or 'none'}  "
+              f"({n_params:,} params)")
         optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
         # optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
         loss_fn = nn.CrossEntropyLoss() if is_classify else nn.MSELoss()
@@ -749,6 +1065,7 @@ class PIMultiKExperiment(MultiSourceExperiment):
             adv_extra, _, _ = build_extra(
                 adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
                 include_log_n=include_log_n, include_lfunc=include_lfunc, lfunc_pca=lfunc_pca,
+                include_fg=include_fg, include_curves=include_curves,
             )
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_pi_img), torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
@@ -777,16 +1094,23 @@ class PIMultiKExperiment(MultiSourceExperiment):
             # module docstring) is recoverable from results.json alone.
             "imager_params": {k: imager.params for k, imager in zip(k_values, imagers)},
         }
-        extra_meta = None
+        # best_val_loss is the selection statistic for restart arms
+        # (slurm/strauss_restarts.sh -> scripts/collect_restarts.py) and the
+        # convergence flag for the epoch-cap arms; surfaced into results.json
+        # so neither ever has to load results.pt.
+        extra_meta: dict[str, Any] = {
+            "best_val_loss": float(best_val_loss),
+            "n_epochs_run": len(history["val_loss"]),
+        }
         if is_classify:
-            extra_meta = {
+            extra_meta.update({
                 "task": "classify",
                 "class_names": list(label_names),
                 "test_accuracy": test_acc,
                 "test_accuracy_per_class": test_acc_per_class,
                 "adversarial_accuracy": adversarial_acc,
                 "adversarial_accuracy_per_class": adversarial_acc_per_class,
-            }
+            })
         save_results(
             output_dir, model=model, best_state=best_state, history=history, cfg=cfg_meta,
             test_loss=test_loss, label_names=list(label_names), label_norm=label_norm,

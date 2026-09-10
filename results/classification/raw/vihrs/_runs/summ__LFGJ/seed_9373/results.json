@@ -1,0 +1,62 @@
+{
+  "task": "classify",
+  "method": "vihrs",
+  "test_loss": 0.2819812563033331,
+  "test_loss_per_target": null,
+  "seed": 9373,
+  "git_commit": "5d91f03dcfe3be86acd7e53a3721e90646ed7b29",
+  "git_dirty": true,
+  "timestamp": "2026-09-09T13:16:00.887707+00:00",
+  "run_tag": "summ__LFGJ",
+  "config": {
+    "task": "classify",
+    "method": "vihrs",
+    "paper": "Vihrs (2022), feature set + CNN adapted to classification",
+    "batch_size": 128,
+    "n_epochs": 600,
+    "lr": 0.001,
+    "weight_decay": 0.0,
+    "early_stopping_patience": 60,
+    "checkpoint_best": true,
+    "best_epoch": 42,
+    "embedding_dim": 833,
+    "seed": 9373,
+    "r_max": 0.25,
+    "n_r": 513,
+    "class_names": [
+      "matern_cluster",
+      "nested_thomas",
+      "strauss",
+      "thomas"
+    ],
+    "n_train": 24500,
+    "n_val": 5250,
+    "n_test": 5250,
+    "output_dir": "/gpfs/scratch/qp252676/globus/point-process-tda/results/classification/raw/vihrs/_runs/summ__LFGJ/seed_9373",
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "run_tag": "summ__LFGJ"
+  },
+  "class_names": [
+    "matern_cluster",
+    "nested_thomas",
+    "strauss",
+    "thomas"
+  ],
+  "test_accuracy": 0.8834285714285715,
+  "test_accuracy_per_class": {
+    "matern_cluster": 0.6846081208687441,
+    "nested_thomas": 0.9050332383665717,
+    "strauss": 0.9990583804143126,
+    "thomas": 0.9147398843930635
+  },
+  "adversarial_accuracy": 0.8736,
+  "adversarial_accuracy_per_class": {
+    "matern_cluster": 0.675,
+    "nested_thomas": 0.891,
+    "strauss": 1.0,
+    "thomas": 0.901
+  },
+  "adversarial_loss": 0.2857769730206579,
+  "adversarial_loss_per_target": null,
+  "adversarial_path": "/gpfs/scratch/qp252676/globus/point-process-tda/data/classification/adversarial_clouds.pkl"
+}
