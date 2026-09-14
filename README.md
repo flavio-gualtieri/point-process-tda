@@ -219,16 +219,11 @@ DTM `k = 5,10,15`). Baselines are ordinary configs in the same folders:
 configs live in `configs/runs/classification/` and read the per-`k` diagram
 bundles directly (no `featurize.py` step). The `L(r)` fusion, dimension-split
 and `L`-reparameterization sweeps are `{fusion,dimsplit,lfunc}_k5.yaml` in
-each process folder, driven by the matching `slurm/*.sh`; aggregate them with
+each process folder, driven by the matching `slurm/*.sh`.
+
+The vectorization schematic figure:
 
 ```bash
-python scripts/collect_fusion_results.py   # paired Wilcoxon + seed-collapse detector
-```
-
-The two report figures:
-
-```bash
-python scripts/make_calibration_comparison_figure.py   # -> figs/calibration_comparison.pdf
 python scripts/make_vectorization_schematic.py          # -> figs/vectorization_schematic.pdf
 ```
 

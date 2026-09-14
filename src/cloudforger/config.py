@@ -16,7 +16,7 @@ import yaml
 
 @dataclass
 class ProcessConfig:
-    name: str  # registry key: thomas, nested_thomas, matern, poisson, inhom_thomas
+    name: str  # registry key: poisson, thomas, nested_thomas, matern, strauss, lgcp
     seed: int = 0
     design: dict[str, Any] = field(default_factory=dict)
     adversarial: dict[str, Any] = field(default_factory=dict)

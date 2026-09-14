@@ -1,0 +1,33 @@
+# DV3 generation spec -- docs/theory/generation.tex.
+# Numbers only: the logic that reads them lives in src/cloudforger/generation/.
+# The window is fixed at W = [0,1]^2 in code (samplers.WINDOW), not configured here.
+
+dataset: DV3
+
+# Master seed for every random stream in DV3 (seeding.py). Drawn once with
+# secrets.randbits(128) on 2026-09-14. NEVER change it once data exist: every
+# case's parameters and pattern are derived from it.
+root: 70519940839025816406438102027139626253
+
+# Expected number of points, drawn log-uniformly and identically for every family.
+nbar: {low: 100, high: 800}
+
+# Shape priors in dimensionless design coordinates (Table "The DV3 prior").
+# Every coordinate is log-uniform on [low, high]; constraints reject the shape
+# at the drawn nbar, never nbar itself.
+families:
+  poisson: {}
+  thomas:
+    mu: {low: 0.1, high: 30}      # mean cluster size (the amplitude)
+    s:  {low: 0.1, high: 1.5}     # cluster s.d. in point spacings, s = sigma * sqrt(nbar)
+    constraints:
+      sigma_max: 0.1              # cluster s.d. at most a tenth of the window
+      kappa_min: 5                # at least five clusters in W on average
+
+# Prior-drawn sets. Training carries a fixed train/val split assigned at generation.
+sets:
+  train: {size: 10000, n_val: 1500}
+  A:     {size: 5000}
+
+# Cases per shard (one SLURM task each).
+shard_size: 500

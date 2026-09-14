@@ -11,9 +11,9 @@ offspring structure: points inside the window depend only on the field
 inside the window, so -- in contrast to every cluster process here -- no
 edge buffer is needed.
 
-The field is drawn with random Fourier features (same idea as
-inhom_thomas._RFFField, but standalone, variance-controlled, and offering
-the exponential / Matern-1/2 covariance Vihrs uses, not only the RBF one).
+The field is drawn with random Fourier features (variance-controlled, and
+offering the exponential / Matern-1/2 covariance Vihrs uses, not only the RBF
+one).
 """
 
 from __future__ import annotations
@@ -146,7 +146,7 @@ class LGCPProcess(PointProcess):
 
         # Thinning: bound the log-intensity by a uniform probe of the window
         # plus a half-e-fold cushion; the rare points above the bound are just
-        # kept w.p. 1 (same tolerance as inhom_thomas' eta_max clip).
+        # kept w.p. 1.
         probe = region.sample_uniform(self.probe_size, rng)
         log_lam_max = float((self.mu + field(probe)).max()) + 0.5
 

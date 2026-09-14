@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("mode", choices=["compute", "merge"])
-    parser.add_argument("--process", required=True, help="e.g. thomas / nested_thomas / matern_cluster")
+    parser.add_argument("--process", required=True, help="e.g. thomas / nested_thomas / strauss")
     parser.add_argument("--filtration", required=True, choices=sorted(FILTRATIONS))
     parser.add_argument("--n-shards", type=int, required=True)
     parser.add_argument("--shard-index", type=int, default=None, help="compute mode: which shard (0-indexed)")

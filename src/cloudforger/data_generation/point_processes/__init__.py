@@ -2,48 +2,32 @@ from ...core.registry import Registry
 from ...core.base import PointProcess
 from .poisson import PoissonProcess
 from .matern import MaternHardCoreProcess
-from .matern_cluster import MaternClusterProcess
 from .neyman_scott import NeymanScottProcess
 from .thomas import ThomasProcess
 from .nested_thomas import NestedThomasProcess
-from .inhom_thomas import InhomThomas
-from .aniso_thomas import AnisotropicThomasProcess
-from .trend_thomas import TrendThomasProcess
 from .cox import LGCPProcess, GaussianRandomField
-from .gibbs import StraussProcess, LGCPStraussProcess
-from .kernels import Kernel, GaussianKernel, BallKernel, AnisotropicGaussianKernel
+from .gibbs import StraussProcess
+from .kernels import Kernel, GaussianKernel
 
 __all__ = [
     "REGISTRY",
     "PoissonProcess",
     "MaternHardCoreProcess",
-    "MaternClusterProcess",
     "NeymanScottProcess",
     "ThomasProcess",
     "NestedThomasProcess",
-    "InhomThomas",
-    "AnisotropicThomasProcess",
-    "TrendThomasProcess",
     "LGCPProcess",
     "GaussianRandomField",
     "StraussProcess",
-    "LGCPStraussProcess",
     "Kernel",
     "GaussianKernel",
-    "BallKernel",
-    "AnisotropicGaussianKernel",
 ]
 
 REGISTRY: Registry[PointProcess] = Registry("process")
 REGISTRY.register("poisson")(PoissonProcess)
 REGISTRY.register("matern")(MaternHardCoreProcess)
-REGISTRY.register("matern_cluster")(MaternClusterProcess)
 REGISTRY.register("neyman_scott")(NeymanScottProcess)
 REGISTRY.register("thomas")(ThomasProcess)
 REGISTRY.register("nested_thomas")(NestedThomasProcess)
-REGISTRY.register("inhom_thomas")(InhomThomas)
-REGISTRY.register("aniso_thomas")(AnisotropicThomasProcess)
-REGISTRY.register("trend_thomas")(TrendThomasProcess)
 REGISTRY.register("lgcp")(LGCPProcess)
 REGISTRY.register("strauss")(StraussProcess)
-REGISTRY.register("lgcp_strauss")(LGCPStraussProcess)

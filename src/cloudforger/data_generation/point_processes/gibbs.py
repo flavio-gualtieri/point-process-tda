@@ -3,11 +3,8 @@
 
   * StraussProcess       -- density proportional to beta^n(x) * gamma^{S_R(x)},
                             small-scale inhibition (Strauss 1975).
-  * LGCPStraussProcess   -- the same inhibition modulated by a log-Gaussian
-                            random field, i.e. small-scale regularity on top of
-                            larger-scale LGCP clustering (Vihrs et al. 2022).
 
-Neither has a tractable normalizing constant, so both are simulated with a
+It has no tractable normalizing constant, so it is simulated with a
 birth-death Metropolis-Hastings sampler (Geyer & Moller 1994) -- the one
 genuinely new simulation mechanism relative to the Neyman-Scott (Poisson
 superposition) and Cox (thinning) families already in this package.
@@ -22,7 +19,6 @@ import numpy as np
 
 from ...core.base import PointProcess
 from ...core.region import Region
-from .cox import GaussianRandomField
 
 
 def _birth_death_mh(
@@ -148,81 +144,5 @@ class StraussProcess(PointProcess):
             _adaptive_steps(self.n_steps, self.beta * sim_region.volume),
             rng,
             init_intensity=self.beta,
-        )
-        return pts[region.contains(pts)]
-
-
-class LGCPStraussProcess(PointProcess):
-    """LGCP-Strauss process (Vihrs et al. 2022): Strauss-type small-scale
-    inhibition ``(gamma, radius)`` whose activity is modulated by a log-Gaussian
-    random field ``exp(mu + Y(u))`` with ``Y`` of variance ``sigma2`` and
-    correlation length ``s``. Collapses to an LGCP if ``gamma = 1`` / ``radius =
-    0`` and to a Strauss process if ``sigma2 = 0``. Labels ``(mu, sigma2, s,
-    gamma, radius)``.
-    """
-
-    def __init__(
-        self,
-        mu: float,
-        sigma2: float,
-        s: float,
-        gamma: float,
-        radius: float,
-        covariance: str = "exp",
-        n_modes: int = 512,
-        field_seed: int | None = None,
-        n_steps: int | None = None,
-        margin_factor: float = 2.0,
-    ):
-        self.mu = float(mu)
-        self.sigma2 = float(sigma2)
-        self.s = float(s)
-        self.gamma = float(gamma)
-        self.radius = float(radius)
-        if self.sigma2 < 0:
-            raise ValueError("sigma2 must be non-negative")
-        if self.s <= 0:
-            raise ValueError("s must be positive")
-        if not 0.0 <= self.gamma <= 1.0:
-            raise ValueError("gamma must be in [0, 1]")
-        if self.radius < 0:
-            raise ValueError("radius must be non-negative")
-        self.covariance = str(covariance)
-        self.n_modes = int(n_modes)
-        self.field_seed = field_seed
-        self.n_steps = n_steps
-        self.margin_factor = float(margin_factor)
-
-    @property
-    def name(self) -> str:
-        return "lgcp_strauss"
-
-    @property
-    def params(self) -> dict[str, Any]:
-        return {
-            "mu": self.mu,
-            "sigma2": self.sigma2,
-            "s": self.s,
-            "gamma": self.gamma,
-            "radius": self.radius,
-            "covariance": self.covariance,
-        }
-
-    def _sample_points(self, n, region: Region, rng: np.random.Generator) -> np.ndarray:
-        sim_region = region.expanded(self.margin_factor * self.radius)
-        field_rng = rng if self.field_seed is None else np.random.default_rng(self.field_seed)
-        field = GaussianRandomField(
-            sim_region.dimension, self.sigma2, self.s, field_rng,
-            n_modes=self.n_modes, covariance=self.covariance,
-        )
-        expected = math.exp(self.mu + 0.5 * self.sigma2)
-        pts = _birth_death_mh(
-            sim_region,
-            lambda p: self.mu + field(p),
-            self.gamma,
-            self.radius,
-            _adaptive_steps(self.n_steps, expected * sim_region.volume),
-            rng,
-            init_intensity=expected,
         )
         return pts[region.contains(pts)]

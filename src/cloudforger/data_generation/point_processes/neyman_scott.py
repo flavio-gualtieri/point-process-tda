@@ -93,10 +93,14 @@ class NeymanScottProcess(PointProcess):
         else:
             n_parents = int(rng.poisson(self.parent_intensity * expanded.volume))
             if n_parents == 0:
+                self.last_n_parents = 0
                 return np.empty((0, region.dimension))
             parents = expanded.sample_uniform(n_parents, rng)
 
         n_parents = len(parents)
+        # Per-draw sampler diagnostic, read by generation/samplers.py for the
+        # DV3 manifest (overwritten on every call).
+        self.last_n_parents = n_parents
         if n_parents == 0:
             return np.empty((0, region.dimension))
 

@@ -32,15 +32,20 @@ class PointProcess(ABC):
             self,
             n: int | Region | None = None,
             region: Region | None = None,
-            seed: int | None = None
+            seed: int | None = None,
+            rng: np.random.Generator | None = None,
     ) -> PointCloud:
         if region is None and isinstance(n, Region):
             region = n
             n = None
         if region is None:
             raise TypeError("Must specify a region to sample from.")
-        
-        rng = np.random.default_rng(seed)
+        # `rng` lets a caller supply its own stream (DV3's per-case PCG64DXSM
+        # streams, see generation/seeding.py); `seed` is the legacy int route.
+        if rng is not None and seed is not None:
+            raise TypeError("Pass either seed or rng, not both.")
+        if rng is None:
+            rng = np.random.default_rng(seed)
         points = self._sample_points(n, region, rng)
         
         return PointCloud(
