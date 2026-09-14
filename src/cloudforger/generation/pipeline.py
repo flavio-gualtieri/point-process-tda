@@ -1,7 +1,8 @@
 # src/cloudforger/generation/pipeline.py
 """The four DV3 jobs (generation.tex, "How the generation runs"):
 
-    make_plan    dv3.yaml -> plan.csv (+ plan.json with checksums)
+    make_nulls   CSR null tables (once; committed next to dv3.yaml)
+    make_plan    dv3.yaml + null tables -> plan.csv (+ plan.json with checksums)
     run_shard    one (set, family, shard) of the plan -> shard files; idempotent
     merge        all shards -> per-(set, family) outputs + dataset card;
                  refuses if any case is missing or any shard is stale
@@ -16,6 +17,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +25,15 @@ import numpy as np
 import scipy
 import yaml
 
+from scipy.spatial import cKDTree
+
 from ..core.io import dump_pickle
+from .nulls import build_tables, tables_bytes
 from .plan import build_plan, draw_from_row
 from .prior import build_priors, draw
 from .samplers import WINDOW, points_sha1, simulate
 from .seeding import PARAMS, PATTERN, case_rng, key_str, parse_case_id
-from .spec import PRIOR_SETS, Spec
+from .spec import PRIOR_SETS, Spec, load_spec
 from .store import (
     MANIFEST_COLUMNS, PLAN_COLUMNS, DV3Paths, atomic_write_bytes, csv_bytes, load_points,
     points_npz_bytes, read_csv, read_json, sha256_bytes, sha256_file, write_json,
@@ -50,10 +55,40 @@ def git_state() -> tuple[str | None, bool | None]:
         return None, None
 
 
+# --- null tables -----------------------------------------------------------------
+
+def make_nulls(spec: Spec, jobs: int = 1, force: bool = False, log=print) -> dict[str, Any]:
+    """Build the CSR null tables (WP2a) and check V9: Monte Carlo s.e. of c95(n) <= 0.05."""
+    path = spec.null_tables_path
+    if path.exists() and not force:
+        raise PipelineError(f"{path} exists; pass --force to rebuild (every plan made from it goes stale)")
+    tabs = build_tables(spec.root, list(spec.null_n_grid), spec.null_reps, jobs=jobs, log=log)
+    data = tables_bytes(tabs)
+    atomic_write_bytes(path, data)
+    report = {
+        "n_grid": [int(n) for n in tabs["n_grid"]],
+        "reps": spec.null_reps,
+        "c95_L": [round(float(c), 4) for c in tabs["L"]["c95"]],
+        "c95_se_L": [round(float(c), 4) for c in tabs["L"]["c95_se"]],
+        "median_L": [round(float(c), 4) for c in tabs["L"]["median"]],
+        "V9_pass": bool(np.all(tabs["L"]["c95_se"] <= 0.05)),
+        "sha256": sha256_bytes(data),
+    }
+    write_json(path.with_suffix(".json"), report)
+    return report
+
+
+def _null_sha(spec: Spec) -> str:
+    if not spec.null_tables_path.exists():
+        raise PipelineError(f"no null tables at {spec.null_tables_path}; run `nulls` first")
+    return sha256_file(spec.null_tables_path)
+
+
 # --- plan ----------------------------------------------------------------------
 
-def make_plan(spec: Spec, paths: DV3Paths, force: bool = False) -> dict[str, Any]:
-    data = csv_bytes(PLAN_COLUMNS, build_plan(spec))
+def make_plan(spec: Spec, paths: DV3Paths, force: bool = False, jobs: int = 1) -> dict[str, Any]:
+    null_sha = _null_sha(spec)
+    data = csv_bytes(PLAN_COLUMNS, build_plan(spec, jobs=jobs))
     plan_sha = sha256_bytes(data)
 
     if paths.plan_meta.exists() and not force:
@@ -71,6 +106,7 @@ def make_plan(spec: Spec, paths: DV3Paths, force: bool = False) -> dict[str, Any
         "dv": 3,
         "spec_path": str(spec.path),
         "spec_sha256": spec.sha256,
+        "null_tables_sha256": null_sha,
         "plan_sha256": plan_sha,
         "n_cases": data.count(b"\n") - 1,
         "git_commit": commit,
@@ -88,6 +124,8 @@ def load_plan(spec: Spec, paths: DV3Paths) -> tuple[list[dict[str, Any]], dict[s
     meta = read_json(paths.plan_meta)
     if meta["spec_sha256"] != spec.sha256:
         raise PipelineError(f"{spec.path} changed since the plan was made; re-run `plan --force`")
+    if meta["null_tables_sha256"] != _null_sha(spec):
+        raise PipelineError(f"{spec.null_tables_path} changed since the plan was made; re-run `plan --force`")
     if sha256_file(paths.plan_csv) != meta["plan_sha256"]:
         raise PipelineError(f"{paths.plan_csv} does not match the checksum in {paths.plan_meta}")
     return read_csv(paths.plan_csv), meta
@@ -147,6 +185,24 @@ def run_shard(spec: Spec, paths: DV3Paths, set_: str, family: str, shard: int, f
     return f"wrote {len(mine)} cases"
 
 
+def _shard_task(args: tuple[str, str, str, str, int, bool]) -> tuple[str, str, int, str]:
+    spec_path, root, set_, family, shard, force = args
+    return set_, family, shard, run_shard(load_spec(spec_path), DV3Paths(root), set_, family, shard, force)
+
+
+def run_all_shards(spec: Spec, paths: DV3Paths, jobs: int = 1, force: bool = False, log=print) -> None:
+    shards = list_shards(load_plan(spec, paths)[0])
+    tasks = [(str(spec.path), str(paths.root), *s, force) for s in shards]
+    if jobs > 1:
+        with get_context("spawn").Pool(jobs) as pool:
+            for i, (set_, family, shard, status) in enumerate(pool.imap_unordered(_shard_task, tasks)):
+                log(f"[{i + 1}/{len(tasks)}] {set_}/{family}/shard {shard}: {status}")
+    else:
+        for i, t in enumerate(tasks):
+            _, _, shard, status = _shard_task(t)
+            log(f"[{i + 1}/{len(tasks)}] {t[2]}/{t[3]}/shard {shard}: {status}")
+
+
 # --- merge ----------------------------------------------------------------------
 
 def v0_counts(manifest: list[dict[str, Any]]) -> dict[str, Any]:
@@ -156,11 +212,32 @@ def v0_counts(manifest: list[dict[str, Any]]) -> dict[str, Any]:
     return {"mean_n_over_nbar": mean, "se": se, "pass": abs(mean - 1.0) <= max(3.0 * se, 0.01)}
 
 
+def v3_hard_core(clouds: list[np.ndarray], manifest: list[dict[str, Any]]) -> dict[str, Any]:
+    """Check V3 (Matern II): every pattern's minimum inter-point distance is >= R."""
+    worst = min((float(cKDTree(p).query(p, k=2)[0][:, 1].min()) / r["R"] for p, r in zip(clouds, manifest)
+                 if len(p) >= 2), default=float("inf"))
+    return {"min_nn_over_R": worst, "pass": worst >= 1.0}
+
+
+def v7_embedding(manifest: list[dict[str, Any]]) -> dict[str, Any]:
+    """Check V7 (LGCP, per draw): min / max eigenvalue of the embedding >= -1e-10."""
+    worst = min(r["min_eig"] for r in manifest)
+    grids = sorted({r["grid_M"] for r in manifest})
+    return {"min_eig_ratio": worst, "grid_M_used": {str(M): sum(r["grid_M"] == M for r in manifest) for M in grids},
+            "pad_P_used": sorted({r["pad_P"] for r in manifest}), "pass": worst >= -1e-10}
+
+
+def delta_summary(manifest: list[dict[str, Any]]) -> dict[str, Any]:
+    d = np.array([r["delta_tilde"] for r in manifest])
+    return {"frac_le_1": float((d <= 1).mean()), "q05": float(np.quantile(d, 0.05)),
+            "median": float(np.median(d)), "q95": float(np.quantile(d, 0.95))}
+
+
 def compat_record(row: dict[str, Any], points: np.ndarray, prior) -> dict[str, Any]:
     """The legacy cloud record (core/records.py) so featurize/diagrams run unchanged.
     `seed` is the per-(set, family) index: the legacy pipeline uses it as a cloud id."""
     params = {"nbar": row["nbar"], **{k: row[k] for k in prior.design_keys + prior.model_keys}}
-    params.update({k: row[k] for k in ("tau_K", "delta_tilde") if row[k] is not None})
+    params.update({k: row[k] for k in ("tau_K", "tau_K2", "delta_tilde") if row[k] is not None})
     return {
         "points": points,
         "params": params,
@@ -219,13 +296,19 @@ def merge(spec: Spec, paths: DV3Paths, allow_dirty: bool = False) -> dict[str, A
             "splits": {s: sum(r["split"] == s for r in manifest) for s in ("train", "val", "test")},
             "n_points": {"total": int(n.sum()), "min": int(n.min()), "max": int(n.max())},
             "points_sha256": sha256_file(paths.points(set_, family)),
+            "delta_tilde": delta_summary(manifest),
             "V0": v0_counts(manifest),
         }
+        if family == "matern2":
+            outputs[f"{set_}/{family}"]["V3"] = v3_hard_core(clouds, manifest)
+        if family == "lgcp":
+            outputs[f"{set_}/{family}"]["V7"] = v7_embedding(manifest)
 
     card = {
         "dataset": "DV3",
         "spec_path": str(spec.path),
         "spec_sha256": spec.sha256,
+        "null_tables_sha256": meta["null_tables_sha256"],
         "plan_sha256": meta["plan_sha256"],
         "git_commit": commit,
         "git_dirty": dirty,

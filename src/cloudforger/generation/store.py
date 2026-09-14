@@ -31,11 +31,12 @@ IDENTITY = ["case_id", "dv", "set", "family", "index", "cell_id", "level_id", "r
             "spawn_key", "r_seed", "split", "shard"]
 DESIGN = ["nbar", "mu", "s", "mu1", "mu2", "s2", "rho", "tau", "gamma", "sigma2", "sp"]
 MODEL = ["kappa", "sigma", "sigma1", "lam_p", "R", "beta", "mu_log", "s_abs"]
-REGIME = ["delta_tilde", "tau_K", "prior_tries"]
-SAMPLER = ["n", "sampler", "buffer", "n_parents", "grid_M", "pad_P", "min_eig",
+NUMERICS = ["grid_M"]           # per-case sampler settings fixed by the plan
+REGIME = ["delta_tilde", "tau_K", "tau_K2", "prior_tries"]
+SAMPLER = ["n", "sampler", "buffer", "n_parents", "pad_P", "min_eig",
            "cftp_start", "mh_steps", "burnin", "wall_s", "sha1"]
 
-PLAN_COLUMNS = IDENTITY + DESIGN + MODEL + REGIME
+PLAN_COLUMNS = IDENTITY + DESIGN + MODEL + NUMERICS + REGIME
 MANIFEST_COLUMNS = PLAN_COLUMNS + SAMPLER
 
 _INT = {"dv", "index", "cell_id", "level_id", "rep", "r_seed", "shard", "prior_tries",

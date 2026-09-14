@@ -25,6 +25,9 @@ class Spec:
     families: dict[str, dict[str, Any]]
     sets: dict[str, dict[str, int]]
     shard_size: int
+    null_tables_path: Path      # CSR null tables (nulls.py), resolved relative to the spec
+    null_n_grid: tuple[int, ...]
+    null_reps: int
 
     def set_size(self, set_: str) -> int:
         return int(self.sets[set_]["size"])
@@ -65,6 +68,11 @@ def load_spec(path: Path | str) -> Spec:
     if shard_size < 1:
         raise ValueError(f"{path}: shard_size must be >= 1")
 
+    nulls = cfg["null_tables"]
+    n_grid = tuple(int(n) for n in nulls["n_grid"])
+    if list(n_grid) != sorted(set(n_grid)) or n_grid[0] > lo or n_grid[-1] < hi:
+        raise ValueError(f"{path}: null_tables.n_grid must be increasing and cover [{lo}, {hi}]")
+
     return Spec(
         path=path,
         sha256=hashlib.sha256(raw).hexdigest(),
@@ -74,4 +82,7 @@ def load_spec(path: Path | str) -> Spec:
         families=families,
         sets=sets,
         shard_size=shard_size,
+        null_tables_path=(path.parent / nulls["path"]).resolve(),
+        null_n_grid=n_grid,
+        null_reps=int(nulls["reps"]),
     )

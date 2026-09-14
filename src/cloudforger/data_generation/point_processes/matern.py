@@ -6,7 +6,15 @@ from ...core.base import PointProcess
 from ...core.region import Region
 
 class MaternHardCoreProcess(PointProcess):
-    """Matérn Type II hard-core process via dependent thinning."""
+    """Matérn Type II hard-core process via dependent thinning.
+
+    Primary points ~ Poisson(parent_intensity) with iid U(0,1) marks; a primary
+    is deleted if another primary within hardcore_radius R has a smaller mark.
+    Whether a point of W survives depends only on primaries in its R-disc, so
+    the primaries are simulated on W expanded by R, thinned, then cropped to W:
+    exact for the stationary process. (Thinning inside W only lets no primary
+    outside W delete an edge point, inflating the edge-band intensity.)
+    """
 
     def __init__(self, parent_intensity: float, hardcore_radius: float):
         if parent_intensity <= 0:
@@ -30,23 +38,19 @@ class MaternHardCoreProcess(PointProcess):
     def _sample_points(
         self, n: int, region: Region, rng: np.random.Generator
     ) -> np.ndarray:
-        # Step 1: generate parent Poisson process
-        expected = self.parent_intensity * region.volume
-        n_parents = int(rng.poisson(expected))
-        parents = region.sample_uniform(n_parents, rng)
+        sim = region.expanded(self.hardcore_radius)
+        n_primary = int(rng.poisson(self.parent_intensity * sim.volume))
+        primary = sim.sample_uniform(n_primary, rng)
+        marks = rng.uniform(size=n_primary)
+        self.last_n_primary = n_primary  # per-draw diagnostic (DV3 manifest)
 
-        # Step 2: assign iid uniform marks
-        marks = rng.uniform(size=n_parents)
+        # In every R-close pair the later (larger-mark) point is deleted,
+        # whether or not the earlier one itself survives: that is type II.
+        pairs = cKDTree(primary).query_pairs(self.hardcore_radius, output_type="ndarray")
+        deleted = np.zeros(n_primary, dtype=bool)
+        if len(pairs):
+            i, j = pairs[:, 0], pairs[:, 1]
+            deleted[np.where(marks[i] > marks[j], i, j)] = True
 
-        # Step 3: dependent thinning
-        # Retain point i if no neighbor within hardcore_radius has smaller mark
-        tree = cKDTree(parents)
-        keep = np.ones(n_parents, dtype=bool)
-        for i in range(n_parents):
-            neighbors = tree.query_ball_point(parents[i], self.hardcore_radius)
-            for j in neighbors:
-                if j != i and marks[j] < marks[i]:
-                    keep[i] = False
-                    break
-
-        return parents[keep]
+        keep = ~deleted & region.contains(primary)
+        return primary[keep]

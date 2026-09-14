@@ -23,6 +23,32 @@ families:
     constraints:
       sigma_max: 0.1              # cluster s.d. at most a tenth of the window
       kappa_min: 5                # at least five clusters in W on average
+  nested:
+    mu1: {low: 1.5, high: 6}      # parents per meta-cluster
+    mu2: {low: 0.03, high: 20}    # children per parent (the amplitude)
+    s2:  {low: 0.05, high: 0.5}   # inner (child) scale in spacings, s2 = sigma2 * sqrt(nbar)
+    rho: {low: 3, high: 12}       # scale ratio sigma1 / sigma2; >= 3 separates the two steps of K
+    constraints:
+      kappa_min: 15               # enough meta-clusters to identify mu1
+      outer_max: 0.2              # 2 sqrt(sigma1^2 + sigma2^2): meta-clusters within a fifth of W
+  matern2:
+    tau: {low: 0.05, high: 0.55}  # hard-core distance in spacings, tau = R * sqrt(nbar); pi tau^2 < 1
+  lgcp:
+    sigma2: {low: 0.05, high: 3}  # field variance (the amplitude)
+    sp:     {low: 0.5, high: 2}   # correlation length in spacings, sp = s * sqrt(nbar)
+    constraints:
+      s_max: 0.15                 # correlation range 3s under half the window (ergodic in W)
+    grid:                         # resolution criterion (lgcp_grid.py): smallest power of two
+      tol: 0.1                    #   >= M_min with sup |K_grid - K| <= tol * null s.d. of K-hat
+      M_min: 256
+      M_max: 4096
+
+# CSR null tables for delta-tilde (nulls.py, WP2a): binomial patterns at each n,
+# first half of the replicates -> m0, s0; held-out second half -> c95.
+null_tables:
+  path: null_tables.npz           # relative to this file; committed
+  n_grid: [50, 60, 72, 86, 104, 124, 149, 179, 215, 258, 310, 372, 446, 536, 643, 771, 926, 1111, 1333, 1600]
+  reps: 12000                     # 6000 fit + 6000 held out: s.e. of c95 <= 0.05 at every n (V9)
 
 # Prior-drawn sets. Training carries a fixed train/val split assigned at generation.
 sets:
