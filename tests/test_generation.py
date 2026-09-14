@@ -16,8 +16,9 @@ from scipy import stats
 from cloudforger.core.io import load_pickle
 from cloudforger.core.records import to_pointcloud
 from cloudforger.generation import seeding
+from cloudforger.generation.design import read_cells
 from cloudforger.generation.pipeline import (
-    PipelineError, list_shards, load_plan, make_plan, merge, regen_case, run_shard,
+    PipelineError, list_shards, load_plan, make_cells, make_plan, merge, regen_case, run_shard,
 )
 from cloudforger.data_generation.point_processes import CirculantLGCPProcess
 from cloudforger.generation import nulls, validate
@@ -181,6 +182,39 @@ def test_lgcp_field_has_the_target_covariance():
     assert cov == pytest.approx(1.5 * math.exp(-lag / 64 / 0.05), rel=0.05)
 
 
+def test_n_min_conditions_by_redrawing_from_the_same_stream():
+    _, d = _mid("thomas", nbar=300.0)
+    runs = [simulate("thomas", d, case_rng(ROOT, "validation", "thomas", 700_000 + i, PATTERN), n_min=300)
+            for i in range(40)]
+    assert all(len(r.points) >= 300 for r in runs)
+    assert any(r.diagnostics["pattern_tries"] > 1 for r in runs)
+    again = simulate("thomas", d, case_rng(ROOT, "validation", "thomas", 700_000, PATTERN), n_min=300)
+    assert np.array_equal(again.points, runs[0].points)
+
+
+# --- B cells and C ladders ---------------------------------------------------------------
+
+def test_cells_file_matches_the_doc():
+    cells = read_cells(SPEC.cells_path)
+    B = [c for c in cells if c["set"] == "B"]
+    feasible = {f: sum(c["feasible"] for c in B if c["family"] == f) for f in ("thomas", "nested", "matern2", "lgcp")}
+    assert feasible == {"thomas": 42, "nested": 19, "matern2": 15, "lgcp": 40}
+    for c in B:   # ids enumerate the full factorial, so dropping a cell never reseeds another
+        assert c["cell_id"] == [x for x in B if x["family"] == c["family"]].index(c)
+    for c in B:
+        if c["feasible"] and c["target_delta"] is not None:
+            assert c["delta_tilde"] == pytest.approx(c["target_delta"], rel=1e-6)
+    C = [c for c in cells if c["set"] == "C"]
+    assert all(c["feasible"] for c in C)
+    for c in C:
+        if c["family"] == "poisson":
+            assert c["delta_tilde"] == 0.0 and c["reps"] == 2000
+        elif c["family"] != "matern2":
+            assert 0.1 * (1 - 1e-6) <= c["delta_tilde"] <= 10 * (1 + 1e-6)
+    ladder = [c["delta_tilde"] for c in C if (c["family"], c["cell_id"]) == ("thomas", 1)]
+    assert len(ladder) == 16 and all(a < b for a, b in zip(ladder, ladder[1:]))
+
+
 # --- closed forms, null tables, delta-tilde ------------------------------------------
 
 def test_null_tables_are_sane():
@@ -269,10 +303,23 @@ def tiny(tmp_path):
         "nbar": {"low": 100, "high": 800},
         "families": SPEC.families,
         "null_tables": {"path": str(SPEC.null_tables_path), "n_grid": list(SPEC.null_n_grid), "reps": SPEC.null_reps},
+        "n_min": 15,
+        "test_sets": {
+            "interior": 0.1,
+            "B": {"reps": 3, "nbar": {"default": [250]}, "deltas": [1, 4],
+                  "shapes": {"thomas": [{"s": 0.45}], "nested": [{"s2": 0.25, "mu1": 3, "rho": 6}],
+                             "lgcp": [{"sp": 0.9}]},
+                  "matern2_tau": [0.11, 0.26]},
+            "C": {**SPEC.test_sets["C"], "reps": 2, "levels": 3, "nbar": {"default": [250]},
+                  "poisson": {"nbar": [250], "reps": 3}},
+        },
+        "cells": "cells.csv",
         "sets": {"train": {"size": 20, "n_val": 5}, "A": {"size": 12}},
         "shard_size": 8,
     }))
-    return load_spec(spec_path), DV3Paths(tmp_path / "dv3")
+    spec = load_spec(spec_path)
+    make_cells(spec)
+    return spec, DV3Paths(tmp_path / "dv3")
 
 
 def _run_all(spec, paths):
@@ -286,7 +333,10 @@ def test_pipeline_end_to_end(tiny):
     spec, paths = tiny
     card = _run_all(spec, paths)
 
-    assert set(card["outputs"]) == {f"{s}/{f}" for s in ("train", "A") for f in MID}
+    assert set(card["outputs"]) == ({f"{s}/{f}" for s in ("train", "A", "C") for f in MID}
+                                    | {f"B/{f}" for f in MID if f != "poisson"})
+    assert card["outputs"]["B/thomas"]["n_cases"] == 2 * 3 and card["outputs"]["C/thomas"]["n_cases"] == 3 * 2
+    assert card["outputs"]["B/lgcp"]["V0"]["n_cells"] == 2
     assert card["outputs"]["train/thomas"]["splits"] == {"train": 15, "val": 5, "test": 0}
     assert card["outputs"]["A/thomas"]["splits"]["test"] == 12
     assert card["outputs"]["train/matern2"]["V3"]["pass"] and card["outputs"]["A/lgcp"]["V7"]["pass"]
@@ -303,7 +353,11 @@ def test_pipeline_end_to_end(tiny):
     cloud = to_pointcloud(records[3])
     assert cloud.n_points == rows[3]["n"] and cloud.generator_params["mu"] == rows[3]["mu"]
 
-    for cid in ("dv3-train-thomas-000011", "dv3-A-nested-000003", "dv3-train-lgcp-000017"):
+    b_row = read_csv(paths.manifest("B", "matern2"))[4]
+    assert (b_row["cell_id"], b_row["rep"], b_row["index"]) == (1, 1, 10_001)
+    c_ids = [r["case_id"] for r in read_csv(paths.manifest("C", "lgcp"))]
+    for cid in ("dv3-train-thomas-000011", "dv3-A-nested-000003", "dv3-train-lgcp-000017",
+                b_row["case_id"], c_ids[-1]):
         report = regen_case(spec, paths, cid)
         assert report["theta_identical"] and report["points_identical"], cid
 

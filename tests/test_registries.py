@@ -27,7 +27,7 @@ def test_process_registry_covers_expected_names():
 
 
 def test_lgcp_process_builds_and_samples():
-    cloud = _sample_cloud("lgcp", mu=5.0, sigma2=1.0, s=0.1)
+    cloud = _sample_cloud("lgcp", mu=5.0, sigma2=1.0, s=0.1, grid_M=64)
     assert cloud.n_points >= 0
     assert cloud.points.shape[1] == 2
 

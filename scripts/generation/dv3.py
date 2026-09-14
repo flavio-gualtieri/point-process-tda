@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 # scripts/generation/dv3.py
-"""Generate the DV3 prior-drawn sets (training, A) -- docs/theory/generation.tex.
+"""Generate the DV3 data: training, test set A (prior-drawn) and test sets B, C
+(fixed theta) -- docs/generation_procedure.tex, docs/theory/generation.tex.
 
     python scripts/generation/dv3.py nulls --jobs 8         # CSR null tables (once; commit the .npz)
     python scripts/generation/dv3.py validate --jobs 8      # V1 (K vs closed form) and V4 (edges) batches
-    python scripts/generation/dv3.py plan --jobs 8          # dv3.yaml + tables -> data/dv3/plan.csv
+    python scripts/generation/dv3.py cells                  # B cells + C ladders -> dv3_cells.csv (commit)
+    python scripts/generation/dv3.py plan --jobs 8          # dv3.yaml + tables + cells -> data/dv3/plan.csv
     python scripts/generation/dv3.py shards                 # list shards (= SLURM array tasks)
     python scripts/generation/dv3.py run-shard --task 7     # simulate one shard (idempotent)
     python scripts/generation/dv3.py run-shard --set train --family thomas --shard 3
     python scripts/generation/dv3.py merge                  # shards -> data/dv3/<set>/<family>/
     python scripts/generation/dv3.py regen-case dv3-train-thomas-000417
     python scripts/generation/dv3.py all --jobs 8           # plan + every shard + merge, locally
+    python scripts/generation/dv3.py validate-cells --jobs 8  # V1 on every generated B cell (gate D3)
 
 On SLURM: `sbatch --array=0-$((N-1))` where N comes from `shards`, each task
 running `run-shard --task $SLURM_ARRAY_TASK_ID`; then one `merge` job.
@@ -28,11 +31,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.generation.pipeline import (  # noqa: E402
-    PipelineError, list_shards, load_plan, make_nulls, make_plan, merge, regen_case, run_all_shards, run_shard,
+    PipelineError, list_shards, load_plan, make_cells, make_nulls, make_plan, merge, regen_case, run_all_shards,
+    run_shard,
 )
 from cloudforger.generation.spec import load_spec  # noqa: E402
 from cloudforger.generation.store import DV3Paths, write_json  # noqa: E402
-from cloudforger.generation.validate import run as run_validation  # noqa: E402
+from cloudforger.generation.validate import run as run_validation, v1_cells  # noqa: E402
 
 DEFAULT_SPEC = ROOT / "configs" / "generation" / "dv3.yaml"
 DEFAULT_OUT = ROOT / "data" / "dv3"
@@ -50,6 +54,27 @@ def cmd_validate(spec, paths, args) -> None:
     report = run_validation(str(spec.path), reps=args.reps, jobs=args.jobs)
     write_json(paths.root / "validation.json", report)
     print(f"{'ALL PASS' if report['pass'] else 'FAILURES'} -> {paths.root / 'validation.json'}")
+    if not report["pass"]:
+        raise SystemExit(1)
+
+
+def cmd_cells(spec, paths, args) -> None:
+    cells = make_cells(spec, force=args.force)
+    for set_ in ("B", "C"):
+        for family in spec.families:
+            mine = [c for c in cells if (c["set"], c["family"]) == (set_, family)]
+            if mine:
+                ok = [c for c in mine if c["feasible"]]
+                why = sorted({c["why"] for c in mine if not c["feasible"]})
+                print(f"{set_} {family:8s} {len(ok):3d}/{len(mine)} feasible, {sum(c['reps'] for c in ok):6d} patterns"
+                      + (f"  (dropped: {', '.join(why)})" if why else ""))
+    print(f"-> {spec.cells_path}")
+
+
+def cmd_validate_cells(spec, paths, args) -> None:
+    report = v1_cells(str(spec.path), str(paths.root), set_="B", jobs=args.jobs)
+    write_json(paths.root / "validation_B.json", report)
+    print(f"{'ALL PASS' if report['pass'] else 'FAILURES'} -> {paths.root / 'validation_B.json'}")
     if not report["pass"]:
         raise SystemExit(1)
 
@@ -83,9 +108,10 @@ def cmd_merge(spec, paths, args) -> None:
     for name, out in card["outputs"].items():
         v0, dt = out["V0"], out["delta_tilde"]
         checks = "  ".join(f"{v}: {'PASS' if out[v]['pass'] else 'FAIL'}" for v in ("V0", "V3", "V7") if v in out)
+        counts = (f"mean n/nbar {v0['mean_n_over_nbar']:.4f} +- {v0['se']:.4f}" if "se" in v0
+                  else f"{v0['n_cells']} cells, max |z| {v0['max_z']:.2f}")
         print(f"{name:16s} {out['n_cases']:6d} cases  n in [{out['n_points']['min']}, {out['n_points']['max']}]  "
-              f"mean n/nbar {v0['mean_n_over_nbar']:.4f} +- {v0['se']:.4f}  "
-              f"P(delta~ <= 1) {dt['frac_le_1']:.2f}  {checks}")
+              f"{counts}  P(delta~ <= 1) {dt['frac_le_1']:.2f}  redraws {out['pattern_redraws']}  {checks}")
     print(f"dataset card -> {paths.card}")
 
 
@@ -117,6 +143,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--reps", type=int, default=1000)
     p.add_argument("--jobs", type=int, default=1)
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("cells", help="solve the B cells and C ladders into dv3_cells.csv")
+    p.add_argument("--force", action="store_true", help="replace an existing, different cells file")
+    p.set_defaults(func=cmd_cells)
+
+    p = sub.add_parser("validate-cells", help="V1 on every generated B cell")
+    p.add_argument("--jobs", type=int, default=1)
+    p.set_defaults(func=cmd_validate_cells)
 
     p = sub.add_parser("plan", help="enumerate every case and draw its theta")
     p.add_argument("--force", action="store_true", help="replace an existing, different plan")

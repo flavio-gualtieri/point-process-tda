@@ -126,3 +126,63 @@ def run(spec_path: str, reps: int = 400, jobs: int = 1, log=print) -> dict[str, 
                f"{'PASS' if out['V4']['pass'] else 'FAIL'}" if "V4" in out else ""))
     report["pass"] = all(v[k]["pass"] for v in report.values() if isinstance(v, dict) for k in ("V1", "V4") if k in v)
     return report
+
+
+# --- V1 on the generated B cells (gate D3) -------------------------------------------
+
+def _khat_task(args: tuple[list[np.ndarray], list[float]]) -> np.ndarray:
+    clouds, nbars = args
+    out = np.zeros((len(clouds), len(R_GRID)))
+    for i, (pts, nbar) in enumerate(zip(clouds, nbars)):
+        n = len(pts)
+        if n >= 2:
+            out[i] = np.pi * (_isotropic_l_minus_r(pts, [0, 0], [1, 1], R_GRID) + R_GRID) ** 2 * n * (n - 1) / nbar**2
+    return out
+
+
+def v1_cells(spec_path: str, root: str, set_: str = "B", jobs: int = 1, log=print) -> dict[str, Any]:
+    """Per cell: mean K-hat (true lambda^2) vs the closed form. Pass: the number of
+    cells beyond their 99% point is within the 99% quantile of Bin(#cells, 0.01),
+    and none is beyond a Bonferroni bound on the 99.99% point."""
+    from scipy.stats import binom, norm
+
+    from .design import cell_shape, read_cells
+    from .store import DV3Paths, load_points, read_csv
+
+    spec = load_spec(spec_path)
+    priors = build_priors(spec)
+    paths = DV3Paths(root)
+    rng = case_rng(spec.root, "validation", "poisson", 99_999_998, 0)
+    n_radii = int((R_GRID >= L_RMIN).sum())
+    extreme = float(norm.isf(1e-4 / (2 * n_radii)))
+    cells = [c for c in read_cells(spec.cells_path) if c["set"] == set_ and c["feasible"]]
+    report: dict[str, Any] = {"set": set_, "bonferroni_99.99": extreme}
+    for family in spec.families:
+        mine = [c for c in cells if c["family"] == family]
+        if not mine:
+            continue
+        clouds, _ = load_points(paths.points(set_, family))
+        manifest = read_csv(paths.manifest(set_, family))
+        step = max(1, len(clouds) // (4 * max(jobs, 1)))
+        tasks = [(clouds[i:i + step], [r["nbar"] for r in manifest[i:i + step]]) for i in range(0, len(clouds), step)]
+        if jobs > 1:
+            with get_context("spawn").Pool(jobs) as pool:
+                K = np.concatenate(pool.map(_khat_task, tasks))
+        else:
+            K = np.concatenate([_khat_task(t) for t in tasks])
+        cell_of = np.array([r["cell_id"] for r in manifest])
+        per_cell = []
+        for c in mine:
+            res = v1(K[cell_of == c["cell_id"]], priors[family].K(R_GRID, c["nbar"], cell_shape(c, priors[family])), rng)
+            per_cell.append({"cell_id": c["cell_id"], "sup_z": res["sup_z"], "q99": res["q99"]})
+        n_fail = sum(p["sup_z"] > p["q99"] for p in per_cell)
+        n_extreme = sum(p["sup_z"] > extreme for p in per_cell)
+        allowed = int(binom.ppf(0.99, len(per_cell), 0.01))
+        report[family] = {"n_cells": len(per_cell), "n_beyond_q99": int(n_fail), "allowed": allowed,
+                          "n_extreme": int(n_extreme), "max_sup_z": max(p["sup_z"] for p in per_cell),
+                          "pass": n_fail <= allowed and n_extreme == 0, "cells": per_cell}
+        log(f"  {set_}/{family:8s} {len(per_cell):3d} cells: {n_fail} beyond their 99% point (allowed {allowed}), "
+            f"{n_extreme} extreme, max sup z {report[family]['max_sup_z']:.2f}  "
+            f"{'PASS' if report[family]['pass'] else 'FAIL'}")
+    report["pass"] = all(v["pass"] for v in report.values() if isinstance(v, dict))
+    return report

@@ -3,7 +3,6 @@
 
     point_processes/   sampling clouds from a spatial point process (registry)
     filtration/          clouds -> diagrams/signed measures (registry)
-    design.py             design-space sampling driving scripts/generate.py
 
 An explicit (non-namespace) package so setuptools' find_packages() picks it
 up for installation. Nothing is re-exported at this level -- import from

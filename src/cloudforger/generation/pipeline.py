@@ -2,7 +2,8 @@
 """The four DV3 jobs (generation.tex, "How the generation runs"):
 
     make_nulls   CSR null tables (once; committed next to dv3.yaml)
-    make_plan    dv3.yaml + null tables -> plan.csv (+ plan.json with checksums)
+    make_cells   B cells and C ladders -> dv3_cells.csv (reviewed at D1; committed)
+    make_plan    dv3.yaml + null tables + cells -> plan.csv (+ plan.json with checksums)
     run_shard    one (set, family, shard) of the plan -> shard files; idempotent
     merge        all shards -> per-(set, family) outputs + dataset card;
                  refuses if any case is missing or any shard is stale
@@ -28,9 +29,10 @@ import yaml
 from scipy.spatial import cKDTree
 
 from ..core.io import dump_pickle
-from .nulls import build_tables, tables_bytes
+from .design import build_cells, cell_shape, cells_bytes, read_cells
+from .nulls import build_tables, load_tables, tables_bytes
 from .plan import build_plan, draw_from_row
-from .prior import build_priors, draw
+from .prior import build_priors, draw, fixed
 from .samplers import WINDOW, points_sha1, simulate
 from .seeding import PARAMS, PATTERN, case_rng, key_str, parse_case_id
 from .spec import PRIOR_SETS, Spec, load_spec
@@ -84,10 +86,32 @@ def _null_sha(spec: Spec) -> str:
     return sha256_file(spec.null_tables_path)
 
 
+# --- B/C cells ----------------------------------------------------------------------
+
+def make_cells(spec: Spec, force: bool = False) -> list[dict[str, Any]]:
+    path = spec.cells_path
+    if path is None:
+        raise PipelineError(f"{spec.path} has no `cells:` entry")
+    data = cells_bytes(build_cells(spec, load_tables(spec.null_tables_path)))
+    if path.exists() and path.read_bytes() != data and not force:
+        raise PipelineError(f"{path} exists and differs; pass --force to replace it (plans made from it go stale)")
+    atomic_write_bytes(path, data)
+    return read_cells(path)
+
+
+def _cells_sha(spec: Spec) -> str | None:
+    if spec.cells_path is None:
+        return None
+    if not spec.cells_path.exists():
+        raise PipelineError(f"no cells file at {spec.cells_path}; run `cells` first")
+    return sha256_file(spec.cells_path)
+
+
 # --- plan ----------------------------------------------------------------------
 
 def make_plan(spec: Spec, paths: DV3Paths, force: bool = False, jobs: int = 1) -> dict[str, Any]:
     null_sha = _null_sha(spec)
+    cells_sha = _cells_sha(spec)
     data = csv_bytes(PLAN_COLUMNS, build_plan(spec, jobs=jobs))
     plan_sha = sha256_bytes(data)
 
@@ -107,6 +131,7 @@ def make_plan(spec: Spec, paths: DV3Paths, force: bool = False, jobs: int = 1) -
         "spec_path": str(spec.path),
         "spec_sha256": spec.sha256,
         "null_tables_sha256": null_sha,
+        "cells_sha256": cells_sha,
         "plan_sha256": plan_sha,
         "n_cases": data.count(b"\n") - 1,
         "git_commit": commit,
@@ -126,6 +151,8 @@ def load_plan(spec: Spec, paths: DV3Paths) -> tuple[list[dict[str, Any]], dict[s
         raise PipelineError(f"{spec.path} changed since the plan was made; re-run `plan --force`")
     if meta["null_tables_sha256"] != _null_sha(spec):
         raise PipelineError(f"{spec.null_tables_path} changed since the plan was made; re-run `plan --force`")
+    if meta.get("cells_sha256") != _cells_sha(spec):
+        raise PipelineError(f"{spec.cells_path} changed since the plan was made; re-run `plan --force`")
     if sha256_file(paths.plan_csv) != meta["plan_sha256"]:
         raise PipelineError(f"{paths.plan_csv} does not match the checksum in {paths.plan_meta}")
     return read_csv(paths.plan_csv), meta
@@ -150,7 +177,7 @@ def shard_is_valid(paths: DV3Paths, set_: str, family: str, shard: int, plan_sha
 
 def simulate_row(spec: Spec, row: dict[str, Any], prior) -> tuple[np.ndarray, dict[str, Any]]:
     rng = case_rng(spec.root, row["set"], row["family"], row["index"], PATTERN)
-    sim = simulate(row["family"], draw_from_row(row, prior), rng)
+    sim = simulate(row["family"], draw_from_row(row, prior), rng, n_min=spec.n_min)
     return sim.points, {**row, "n": len(sim.points), **sim.diagnostics}
 
 
@@ -212,6 +239,20 @@ def v0_counts(manifest: list[dict[str, Any]]) -> dict[str, Any]:
     return {"mean_n_over_nbar": mean, "se": se, "pass": abs(mean - 1.0) <= max(3.0 * se, 0.01)}
 
 
+def v0_cells(manifest: list[dict[str, Any]]) -> dict[str, Any]:
+    """Check V0 per B/C cell: |mean n / nbar - 1| <= max(3 s.e., 1%) in every cell."""
+    groups: dict[tuple, list[float]] = defaultdict(list)
+    for r in manifest:
+        groups[(r["cell_id"], r["level_id"])].append(r["n"] / r["nbar"])
+    z, fail = [], 0
+    for ratios in groups.values():
+        x = np.array(ratios)
+        se = x.std(ddof=1) / math.sqrt(len(x))
+        z.append(abs(x.mean() - 1.0) / se if se > 0 else 0.0)
+        fail += int(abs(x.mean() - 1.0) > max(3.0 * se, 0.01))
+    return {"n_cells": len(groups), "n_fail": fail, "max_z": float(max(z)), "pass": fail == 0}
+
+
 def v3_hard_core(clouds: list[np.ndarray], manifest: list[dict[str, Any]]) -> dict[str, Any]:
     """Check V3 (Matern II): every pattern's minimum inter-point distance is >= R."""
     worst = min((float(cKDTree(p).query(p, k=2)[0][:, 1].min()) / r["R"] for p, r in zip(clouds, manifest)
@@ -248,6 +289,9 @@ def compat_record(row: dict[str, Any], points: np.ndarray, prior) -> dict[str, A
         "region": {"low": WINDOW.low, "high": WINDOW.high},
         "case_id": row["case_id"],
         "split": row["split"],
+        "cell_id": row["cell_id"],
+        "level_id": row["level_id"],
+        "rep": row["rep"],
         "dv": 3,
     }
 
@@ -297,7 +341,8 @@ def merge(spec: Spec, paths: DV3Paths, allow_dirty: bool = False) -> dict[str, A
             "n_points": {"total": int(n.sum()), "min": int(n.min()), "max": int(n.max())},
             "points_sha256": sha256_file(paths.points(set_, family)),
             "delta_tilde": delta_summary(manifest),
-            "V0": v0_counts(manifest),
+            "V0": v0_counts(manifest) if set_ in PRIOR_SETS else v0_cells(manifest),
+            "pattern_redraws": int(sum(r["pattern_tries"] - 1 for r in manifest)),
         }
         if family == "matern2":
             outputs[f"{set_}/{family}"]["V3"] = v3_hard_core(clouds, manifest)
@@ -309,7 +354,9 @@ def merge(spec: Spec, paths: DV3Paths, allow_dirty: bool = False) -> dict[str, A
         "spec_path": str(spec.path),
         "spec_sha256": spec.sha256,
         "null_tables_sha256": meta["null_tables_sha256"],
+        "cells_sha256": meta.get("cells_sha256"),
         "plan_sha256": meta["plan_sha256"],
+        "n_min": spec.n_min,
         "git_commit": commit,
         "git_dirty": dirty,
         "merged": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -340,10 +387,14 @@ def regen_case(spec: Spec, paths: DV3Paths, cid: str) -> dict[str, Any]:
     prior = build_priors(spec)[family]
     report: dict[str, Any] = {"case_id": cid, "spawn_key": row["spawn_key"]}
 
+    stored = draw_from_row(row, prior)
     if set_ in PRIOR_SETS:
         d = draw(prior, case_rng(spec.root, set_, family, index, PARAMS), spec.nbar_low, spec.nbar_high)
-        stored = draw_from_row(row, prior)
-        report["theta_identical"] = (d.nbar == stored.nbar and d.design == stored.design and d.model == stored.model)
+    else:
+        cell = next(c for c in read_cells(spec.cells_path)
+                    if (c["set"], c["family"], c["cell_id"], c["level_id"]) == (set_, family, row["cell_id"], row["level_id"]))
+        d = fixed(prior, cell["nbar"], cell_shape(cell, prior))
+    report["theta_identical"] = (d.nbar == stored.nbar and d.design == stored.design and d.model == stored.model)
 
     points, mrow = simulate_row(spec, row, prior)
     stored_points, _ = load_points(paths.points(set_, family))

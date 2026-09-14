@@ -97,11 +97,19 @@ def points_sha1(points: np.ndarray) -> str:
     return hashlib.sha1(np.ascontiguousarray(points, dtype="<f8").tobytes()).hexdigest()
 
 
-def simulate(family: str, draw: PriorDraw, rng: np.random.Generator) -> Simulated:
+def simulate(family: str, draw: PriorDraw, rng: np.random.Generator, n_min: int = 0,
+             max_tries: int = 10_000) -> Simulated:
+    """One pattern from the model conditioned on n >= n_min: redraw from the
+    same stream until it holds (an exact sampler of the conditional law)."""
     if family not in SAMPLERS:
         raise NotImplementedError(f"no sampler implemented for {family!r}")
     t0 = time.perf_counter()
-    points, diag = SAMPLERS[family](draw, rng)
+    for tries in range(1, max_tries + 1):
+        points, diag = SAMPLERS[family](draw, rng)
+        if len(points) >= n_min:
+            break
+    else:
+        raise RuntimeError(f"{family}: no pattern with n >= {n_min} in {max_tries} draws")
     wall_s = time.perf_counter() - t0
     points = np.ascontiguousarray(points, dtype=np.float64).reshape(-1, 2)
-    return Simulated(points, {**diag, "wall_s": wall_s, "sha1": points_sha1(points)})
+    return Simulated(points, {**diag, "pattern_tries": tries, "wall_s": wall_s, "sha1": points_sha1(points)})

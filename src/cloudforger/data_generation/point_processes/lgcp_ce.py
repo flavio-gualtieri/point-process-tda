@@ -66,7 +66,7 @@ class CirculantLGCPProcess(PointProcess):
 
     @property
     def name(self) -> str:
-        return "lgcp_ce"
+        return "lgcp"
 
     @property
     def params(self) -> dict[str, Any]:

@@ -13,6 +13,7 @@ import yaml
 from .seeding import FAMILY_ID, SET_ID, check_root
 
 PRIOR_SETS = ("train", "A")  # sets whose theta is drawn from the prior
+FIXED_SETS = ("B", "C")      # sets whose theta is fixed by dv3_cells.csv
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,9 @@ class Spec:
     null_tables_path: Path      # CSR null tables (nulls.py), resolved relative to the spec
     null_n_grid: tuple[int, ...]
     null_reps: int
+    n_min: int = 0                                          # patterns are conditioned on n >= n_min
+    test_sets: dict[str, Any] | None = None                 # B/C design (design.py)
+    cells_path: Path | None = None                          # dv3_cells.csv, resolved relative to the spec
 
     def set_size(self, set_: str) -> int:
         return int(self.sets[set_]["size"])
@@ -73,6 +77,12 @@ def load_spec(path: Path | str) -> Spec:
     if list(n_grid) != sorted(set(n_grid)) or n_grid[0] > lo or n_grid[-1] < hi:
         raise ValueError(f"{path}: null_tables.n_grid must be increasing and cover [{lo}, {hi}]")
 
+    test_sets = cfg.get("test_sets")
+    if test_sets is not None:
+        for fam in {**test_sets["B"]["shapes"], **test_sets["C"]["ladders"]}:
+            if fam not in families:
+                raise ValueError(f"{path}: test_sets name family {fam!r}, which is not in families")
+
     return Spec(
         path=path,
         sha256=hashlib.sha256(raw).hexdigest(),
@@ -85,4 +95,7 @@ def load_spec(path: Path | str) -> Spec:
         null_tables_path=(path.parent / nulls["path"]).resolve(),
         null_n_grid=n_grid,
         null_reps=int(nulls["reps"]),
+        n_min=int(cfg.get("n_min", 0)),
+        test_sets=test_sets,
+        cells_path=(path.parent / cfg["cells"]).resolve() if "cells" in cfg else None,
     )

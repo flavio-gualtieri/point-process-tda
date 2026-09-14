@@ -206,8 +206,10 @@ tests/                           pytest suite (registry smoke + full-CLI e2e)
 ```bash
 pip install -e .
 
-# one process/method, four stages, each reads the previous stage's disk output
-python scripts/generate.py  configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml
+# data: the DV3 synthetic point patterns (docs/generation_procedure.tex)
+python scripts/generation/dv3.py all --jobs 8          # -> data/dv3/<set>/<family>/
+
+# one process/method, three stages, each reads the previous stage's disk output
 python scripts/featurize.py configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml
 python scripts/train.py     configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml
 python scripts/evaluate.py  configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml --methods pi_multik

@@ -1,7 +1,10 @@
 # tests/test_pipeline_e2e.py
-"""End-to-end smoke test: generate -> featurize -> train -> evaluate,
-driven through the actual CLI scripts (subprocess, exactly as a user would
-invoke them) on a tiny synthetic config, with isolated data/results roots.
+"""End-to-end smoke test: clouds -> featurize -> train -> evaluate, driven
+through the actual CLI scripts (subprocess, exactly as a user would invoke
+them) on a tiny synthetic config, with isolated data/results roots. The
+clouds are written directly in the legacy record layout by `_make_clouds`
+(the retired scripts/generate.py's job); DV3 data comes from
+scripts/generation/dv3.py and is tested in test_generation.py.
 This is the same verification run manually while building the refactored
 pipeline, kept here as a regression test.
 
@@ -29,8 +32,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
+
+from cloudforger.core.io import dump_pickle
+from cloudforger.core.records import cloud_to_record
+from cloudforger.core.region import Box
+from cloudforger.data_generation.point_processes import ThomasProcess
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
@@ -198,9 +207,32 @@ def _run(script: str, config_path: Path, data_root: Path, results_root: Path, *e
     assert result.returncode == 0, f"{script} failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
 
 
+def _make_clouds(config: dict, data_root: Path) -> None:
+    """Tiny Thomas clouds from config["process"]["design"] (log-uniform ranges),
+    with the adversarial fraction held out, in the legacy clouds.pkl layout.
+    Like DV3, each cloud is redrawn until it has n >= 15 points (DTM-k needs n >= k)."""
+    process = config["process"]
+    design = process["design"]["random"]
+    rng = np.random.default_rng(process["seed"])
+    unit = Box(low=np.zeros(2), high=np.ones(2))
+    records, seed = [], process["seed"]
+    for _ in range(design["n_param_vectors"]):
+        params = {k: float(np.exp(rng.uniform(np.log(v["low"]), np.log(v["high"]))))
+                  for k, v in design["ranges"].items()}
+        while True:
+            cloud = ThomasProcess(**params).sample(unit, seed=seed)
+            seed += 1
+            if cloud.n_points >= 15:
+                break
+        records.append(cloud_to_record(cloud))
+    n_adv = round(process["adversarial"]["fraction"] * len(records))
+    dump_pickle(data_root / process["name"] / "clouds.pkl", records[:len(records) - n_adv])
+    dump_pickle(data_root / process["name"] / "adversarial_clouds.pkl", records[len(records) - n_adv:])
+
+
 @pytest.mark.slow
 def test_pi_multik_reference_pipeline(tmp_path):
-    """generate -> featurize -> train for pi_multik specifically -- the
+    """clouds -> featurize -> train for pi_multik specifically -- the
     reference k=5,10,15 pipeline (docs/architecture.md), here with a
     2-k (5, 10) grid to keep the test fast."""
     config_path = tmp_path / "run.yaml"
@@ -208,7 +240,7 @@ def test_pi_multik_reference_pipeline(tmp_path):
     data_root = tmp_path / "data"
     results_root = tmp_path / "results"
 
-    _run("generate.py", config_path, data_root, results_root)
+    _make_clouds(PI_MULTIK_CONFIG, data_root)
     assert (data_root / "thomas" / "clouds.pkl").exists()
 
     _run("featurize.py", config_path, data_root, results_root)
@@ -245,7 +277,7 @@ def test_pi_multik_reference_pipeline(tmp_path):
 
 @pytest.mark.slow
 def test_betti_multik_reference_pipeline(tmp_path):
-    """generate -> featurize -> train for betti_multik specifically -- the
+    """clouds -> featurize -> train for betti_multik specifically -- the
     Betti-curve/Euler-characteristic sibling of pi_multik (see
     betti_multik.py's module docstring), here with a 2-k (5, 10) grid to
     keep the test fast."""
@@ -254,7 +286,7 @@ def test_betti_multik_reference_pipeline(tmp_path):
     data_root = tmp_path / "data"
     results_root = tmp_path / "results"
 
-    _run("generate.py", config_path, data_root, results_root)
+    _make_clouds(BETTI_MULTIK_CONFIG, data_root)
     assert (data_root / "thomas" / "clouds.pkl").exists()
 
     _run("featurize.py", config_path, data_root, results_root)
@@ -297,7 +329,7 @@ def test_vec_multik_persistence_image_native_matches_pi_multik(tmp_path):
     data_root = tmp_path / "data"
     results_root = tmp_path / "results"
 
-    _run("generate.py", pi_config_path, data_root, results_root)
+    _make_clouds(PI_MULTIK_CONFIG, data_root)
     _run("featurize.py", pi_config_path, data_root, results_root)
     _run("train.py", pi_config_path, data_root, results_root)
 
@@ -338,7 +370,7 @@ def test_vec_multik_landscape_silhouette_stats(tmp_path):
 
     gen_config_path = tmp_path / "gen.yaml"
     gen_config_path.write_text(yaml.safe_dump(PI_MULTIK_CONFIG))
-    _run("generate.py", gen_config_path, data_root, results_root)
+    _make_clouds(PI_MULTIK_CONFIG, data_root)
     _run("featurize.py", gen_config_path, data_root, results_root)
 
     common_params = {
@@ -390,7 +422,7 @@ def test_vec_multik_landscape_silhouette_stats(tmp_path):
 
 @pytest.mark.slow
 def test_betti_cnn_reference_pipeline(tmp_path):
-    """generate -> featurize -> train for betti_cnn specifically -- the
+    """clouds -> featurize -> train for betti_cnn specifically -- the
     single-filtration/single-homology-dimension sibling of betti_multik
     (see betti_cnn.py's module docstring)."""
     config_path = tmp_path / "run.yaml"
@@ -398,7 +430,7 @@ def test_betti_cnn_reference_pipeline(tmp_path):
     data_root = tmp_path / "data"
     results_root = tmp_path / "results"
 
-    _run("generate.py", config_path, data_root, results_root)
+    _make_clouds(BETTI_CNN_CONFIG, data_root)
     assert (data_root / "thomas" / "clouds.pkl").exists()
 
     _run("featurize.py", config_path, data_root, results_root)

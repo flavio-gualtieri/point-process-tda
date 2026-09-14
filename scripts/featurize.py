@@ -211,7 +211,7 @@ def run_one_filtration(cfg: RunConfig, filt_cfg, data_paths: DataPaths, force: b
 
     train = _get_or_compute_diagrams(data_paths.clouds(), diagrams_path, filtration, force, tag)
     if train is None:
-        raise FileNotFoundError(f"{data_paths.clouds()} not found -- run scripts/generate.py first.")
+        raise FileNotFoundError(f"{data_paths.clouds()} not found -- generate it first (scripts/generation/dv3.py).")
     train_diagrams, train_bundle = train
 
     adv = _get_or_compute_diagrams(data_paths.clouds(adversarial=True), adv_diagrams_path, filtration, force, f"{tag} adversarial")

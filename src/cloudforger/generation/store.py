@@ -33,14 +33,14 @@ DESIGN = ["nbar", "mu", "s", "mu1", "mu2", "s2", "rho", "tau", "gamma", "sigma2"
 MODEL = ["kappa", "sigma", "sigma1", "lam_p", "R", "beta", "mu_log", "s_abs"]
 NUMERICS = ["grid_M"]           # per-case sampler settings fixed by the plan
 REGIME = ["delta_tilde", "tau_K", "tau_K2", "prior_tries"]
-SAMPLER = ["n", "sampler", "buffer", "n_parents", "pad_P", "min_eig",
+SAMPLER = ["n", "pattern_tries", "sampler", "buffer", "n_parents", "pad_P", "min_eig",
            "cftp_start", "mh_steps", "burnin", "wall_s", "sha1"]
 
 PLAN_COLUMNS = IDENTITY + DESIGN + MODEL + NUMERICS + REGIME
 MANIFEST_COLUMNS = PLAN_COLUMNS + SAMPLER
 
 _INT = {"dv", "index", "cell_id", "level_id", "rep", "r_seed", "shard", "prior_tries",
-        "n", "n_parents", "grid_M", "pad_P", "cftp_start", "mh_steps", "burnin"}
+        "n", "pattern_tries", "n_parents", "grid_M", "pad_P", "cftp_start", "mh_steps", "burnin"}
 _STR = {"case_id", "set", "family", "spawn_key", "split", "sampler", "sha1"}
 
 

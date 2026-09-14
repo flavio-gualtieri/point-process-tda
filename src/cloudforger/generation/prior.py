@@ -54,6 +54,7 @@ class FamilyPrior:
 
     design_keys: tuple[str, ...] = ()
     model_keys: tuple[str, ...] = ()
+    ranges: dict[str, tuple[float, float]] = {}   # log-uniform marginal of each design key
 
     def draw_shape(self, rng: np.random.Generator, nbar: float) -> dict[str, float]:
         return {}
@@ -101,6 +102,7 @@ class ThomasPrior(FamilyPrior):
     def __init__(self, mu: dict, s: dict, constraints: dict):
         self.mu_low, self.mu_high = _lu(mu)
         self.s_low, self.s_high = _lu(s)
+        self.ranges = {"mu": _lu(mu), "s": _lu(s)}
         self.sigma_max = float(constraints["sigma_max"])
         self.kappa_min = float(constraints["kappa_min"])
 
@@ -192,6 +194,7 @@ class Matern2Prior(FamilyPrior):
 
     def __init__(self, tau: dict):
         self.tau_low, self.tau_high = _lu(tau)
+        self.ranges = {"tau": _lu(tau)}
         if math.pi * self.tau_high**2 >= 1.0:
             raise ValueError("Matern II needs pi tau^2 < 1 (tau < 0.564)")
 
@@ -251,6 +254,7 @@ class LGCPPrior(FamilyPrior):
     def __init__(self, sigma2: dict, sp: dict, constraints: dict, grid: dict):
         self.sigma2_low, self.sigma2_high = _lu(sigma2)
         self.sp_low, self.sp_high = _lu(sp)
+        self.ranges = {"sigma2": _lu(sigma2), "sp": _lu(sp)}
         self.s_max = float(constraints["s_max"])
         self.grid = {"tol": float(grid["tol"]), "M_min": int(grid["M_min"]), "M_max": int(grid["M_max"])}
 

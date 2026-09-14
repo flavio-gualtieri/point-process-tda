@@ -5,7 +5,6 @@ from .matern import MaternHardCoreProcess
 from .neyman_scott import NeymanScottProcess
 from .thomas import ThomasProcess
 from .nested_thomas import NestedThomasProcess
-from .cox import LGCPProcess, GaussianRandomField
 from .lgcp_ce import CirculantLGCPProcess
 from .gibbs import StraussProcess
 from .kernels import Kernel, GaussianKernel
@@ -17,8 +16,6 @@ __all__ = [
     "NeymanScottProcess",
     "ThomasProcess",
     "NestedThomasProcess",
-    "LGCPProcess",
-    "GaussianRandomField",
     "CirculantLGCPProcess",
     "StraussProcess",
     "Kernel",
@@ -31,6 +28,5 @@ REGISTRY.register("matern")(MaternHardCoreProcess)
 REGISTRY.register("neyman_scott")(NeymanScottProcess)
 REGISTRY.register("thomas")(ThomasProcess)
 REGISTRY.register("nested_thomas")(NestedThomasProcess)
-REGISTRY.register("lgcp")(LGCPProcess)
-REGISTRY.register("lgcp_ce")(CirculantLGCPProcess)
+REGISTRY.register("lgcp")(CirculantLGCPProcess)
 REGISTRY.register("strauss")(StraussProcess)

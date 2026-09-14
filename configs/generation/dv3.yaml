@@ -50,6 +50,39 @@ null_tables:
   n_grid: [50, 60, 72, 86, 104, 124, 149, 179, 215, 258, 310, 372, 446, 536, 643, 771, 926, 1111, 1333, 1600]
   reps: 12000                     # 6000 fit + 6000 held out: s.e. of c95 <= 0.05 at every n (V9)
 
+# Every pattern is drawn from its model conditioned on n >= n_min (redrawn from
+# the same pattern stream until it holds; `pattern_tries` records how often).
+# DTM-k features need n >= k. P(n < 15 | theta) is at most ~1% anywhere in the
+# priors (Thomas, nbar = 100, kappa = 5) and ~1e-4 averaged over them; the
+# conditional law differs from the unconditional one by at most that much in
+# total variation.
+n_min: 15
+
+# Fixed-theta test sets (design.py -> dv3_cells.csv, reviewed at gate D1).
+test_sets:
+  interior: 0.1                   # keep theta in the central 80% of every log-uniform marginal
+  B:                              # regime grid: nbar x scale x target delta-tilde
+    reps: 400
+    nbar: {default: [125, 250, 500], nested: [250, 500]}
+    deltas: [0.5, 1, 2, 4, 8]
+    shapes:                       # non-amplitude coordinates; the amplitude is solved from the target
+      thomas: [{s: 0.2}, {s: 0.45}, {s: 1.0}]
+      nested: [{s2: 0.1, mu1: 3, rho: 6}, {s2: 0.25, mu1: 3, rho: 6}]
+      lgcp:   [{sp: 0.6}, {sp: 0.9}, {sp: 1.4}]
+    matern2_tau: [0.07, 0.11, 0.17, 0.26, 0.40]   # Matern II is laid out in tau, not delta
+  C:                              # ladders: fixed shape, amplitude walks down to CSR
+    reps: 300
+    levels: 16
+    delta_range: [0.1, 10]
+    nbar: {default: [125, 500], nested: [250, 500]}
+    ladders:
+      thomas:  {amplitude: mu,     shape: {s: 1.0}}
+      nested:  {amplitude: mu2,    shape: {s2: 0.2, mu1: 3, rho: 6}}
+      matern2: {amplitude: tau,    shape: {}}
+      lgcp:    {amplitude: sigma2, shape: {sp: 1.0}}
+    poisson: {nbar: [125, 250, 500], reps: 2000}   # exact CSR anchors (delta = 0)
+cells: dv3_cells.csv              # written by `dv3.py cells`, relative to this file; committed
+
 # Prior-drawn sets. Training carries a fixed train/val split assigned at generation.
 sets:
   train: {size: 10000, n_val: 1500}
