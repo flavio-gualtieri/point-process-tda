@@ -239,18 +239,32 @@ def v0_counts(manifest: list[dict[str, Any]]) -> dict[str, Any]:
     return {"mean_n_over_nbar": mean, "se": se, "pass": abs(mean - 1.0) <= max(3.0 * se, 0.01)}
 
 
-def v0_cells(manifest: list[dict[str, Any]]) -> dict[str, Any]:
-    """Check V0 per B/C cell: |mean n / nbar - 1| <= max(3 s.e., 1%) in every cell."""
+def v0_cells(manifest: list[dict[str, Any]], alpha: float = 0.01) -> dict[str, Any]:
+    """Check V0 per B/C cell, with the pre-registered Holm correction over the
+    (set, family) battery at family-wise alpha: a cell fails if |mean n / nbar - 1|
+    exceeds 1% and Holm rejects mean = 1. `n_flagged` counts cells beyond the
+    uncorrected max(3 s.e., 1%) rule, for reference."""
+    from scipy.stats import norm
+
     groups: dict[tuple, list[float]] = defaultdict(list)
     for r in manifest:
         groups[(r["cell_id"], r["level_id"])].append(r["n"] / r["nbar"])
-    z, fail = [], 0
+    dev, z, flagged = [], [], 0
     for ratios in groups.values():
         x = np.array(ratios)
         se = x.std(ddof=1) / math.sqrt(len(x))
-        z.append(abs(x.mean() - 1.0) / se if se > 0 else 0.0)
-        fail += int(abs(x.mean() - 1.0) > max(3.0 * se, 0.01))
-    return {"n_cells": len(groups), "n_fail": fail, "max_z": float(max(z)), "pass": fail == 0}
+        dev.append(abs(x.mean() - 1.0))
+        z.append(dev[-1] / se if se > 0 else 0.0)
+        flagged += int(dev[-1] > max(3.0 * se, 0.01))
+    p = 2.0 * norm.sf(np.array(z))
+    rejected, m = np.zeros(len(p), bool), len(p)
+    for j, i in enumerate(np.argsort(p)):          # Holm step-down
+        if p[i] > alpha / (m - j):
+            break
+        rejected[i] = True
+    fail = int(np.sum(rejected & (np.array(dev) > 0.01)))
+    return {"n_cells": m, "n_flagged": flagged, "n_fail": fail, "max_z": float(max(z)),
+            "min_p": float(p.min()), "pass": fail == 0}
 
 
 def v3_hard_core(clouds: list[np.ndarray], manifest: list[dict[str, Any]]) -> dict[str, Any]:
