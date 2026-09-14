@@ -1,0 +1,148 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage[authoryear,round]{natbib}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em plus 0.1em}
+\setlist{nosep,leftmargin=*,topsep=2pt}
+\renewcommand{\arraystretch}{1.15}
+\renewcommand{\bibfont}{\small}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+\newcommand{\nbar}{\bar n}
+\newcommand{\dtil}{\tilde\delta}
+\newcommand{\LogU}{\operatorname{LogU}}
+\newcommand{\Pois}{\operatorname{Poisson}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathcal{R}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+\title{\textbf{Synthetic point patterns: generation procedure}\\[2pt]\large The DV3 dataset}
+\author{\normalsize point-process-tda}
+\date{\normalsize \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent We generate 165{,}800 point patterns in the unit square from five stationary, isotropic models: complete spatial randomness (CSR), Thomas, nested Thomas, Mat\'ern hard-core type~II and the log-Gaussian Cox process (LGCP). Every parameter vector is described by its expected number of points $\nbar$ and dimensionless shape coordinates, with lengths measured in units of the point spacing $\nbar^{-1/2}$; a third coordinate, $\dtil$, measures how far the model sits from CSR in units of the 5\% critical value of a classical $L$-function test. Patterns form a training pool and a test set drawn from a known prior, a replicated grid of fixed parameters, and fixed-shape paths that end at exact CSR. All samplers are exact up to stated, checked truncations; every pattern is reproducible from its identifier alone. The full specification is \code{docs/theory/generation.tex}; the code is \code{src/cloudforger/generation/}.
+\end{abstract}
+
+% ============================================================================
+\section{Models and coordinates}\label{sec:models}
+
+Let $W=[0,1]^2$, so the intensity equals the expected count, $\lambda=\nbar$, and the typical point spacing is $\ell=\nbar^{-1/2}$. Each model is parametrised by $\nbar$ and a \emph{shape}, whose length parameters are expressed in spacings (for instance $s=\sigma\sqrt{\nbar}$ for a cluster standard deviation $\sigma$). At fixed shape, changing $\nbar$ changes the amount of data but not the geometry seen at the scale of the point spacing, so sample size and structure are separate factors. Table~\ref{tab:prior} lists the models, their shape coordinates, the prior, and the exact inversion to model parameters.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}l >{\raggedright\arraybackslash}p{0.33\linewidth} L L@{}}
+\toprule
+Model & Shape coordinates and prior & Constraints (given $\nbar$) & Model parameters\\
+\midrule
+all & $\nbar\sim\LogU[100,800]$ & -- & $\lambda=\nbar$\\
+CSR & -- & -- & --\\
+Thomas & $\mu\sim\LogU[0.1,30]$, $s\sim\LogU[0.1,1.5]$ & $\sigma\le0.1$, $\kappa\ge5$ & $\kappa=\nbar/\mu$, $\sigma=s/\sqrt{\nbar}$\\
+Nested Thomas & $\mu_1\sim\LogU[1.5,6]$, $\mu_2\sim\LogU[0.03,20]$, $s_2\sim\LogU[0.05,0.5]$, $\rho\sim\LogU[3,12]$ & $\kappa\ge15$, $2(\sigma_1^2+\sigma_2^2)^{1/2}\le0.2$ & $\kappa=\nbar/(\mu_1\mu_2)$, $\sigma_2=s_2/\sqrt{\nbar}$, $\sigma_1=\rho\sigma_2$\\
+Mat\'ern II & $\tau\sim\LogU[0.05,0.55]$ & -- & $R=\tau/\sqrt{\nbar}$, $\lambda_p=\nbar\,\frac{-\ln(1-\pi\tau^2)}{\pi\tau^2}$\\
+LGCP & $\sigma^2\sim\LogU[0.05,3]$, $s'\sim\LogU[0.5,2]$ & $s\le0.15$ & $\mu=\ln\nbar-\sigma^2/2$, $s=s'/\sqrt{\nbar}$\\
+\bottomrule
+\end{tabularx}
+\caption{Models and prior. Coordinates are independent a priori; constraints reject the shape at the drawn $\nbar$, never $\nbar$ itself, so every model has the same $\nbar$ marginal and the realised count carries no class information beyond dispersion.}
+\label{tab:prior}
+\end{table}
+
+\textbf{Models.} \emph{Thomas} \citep{Thomas1949,NeymanScott1958}: parents form a Poisson process of intensity $\kappa$; each has $\Pois(\mu)$ children displaced by $N(0,\sigma^2I)$. \emph{Nested Thomas}: meta-parents (intensity $\kappa$) have $\Pois(\mu_1)$ parents at $N(0,\sigma_1^2I)$, each with $\Pois(\mu_2)$ children at $N(0,\sigma_2^2I)$. \emph{Mat\'ern II} \citep{Matern1986}: primary points of intensity $\lambda_p$ carry i.i.d.\ uniform marks, and a point is deleted if another primary within distance $R$ has a smaller mark. \emph{LGCP} \citep{Moller1998}: a Poisson process driven by the random intensity $\exp(\mu+Y)$, where $Y$ is Gaussian with covariance $\sigma^2e^{-r/s}$.
+
+\textbf{Second-order structure.} Each model's $K$ function is known in closed form. Writing $e(r)=K(r)-\pi r^2$,
+\begin{align*}
+\text{Thomas:}\quad & e(r)=\kappa^{-1}\big(1-e^{-r^2/4\sigma^2}\big),\\
+\text{Nested:}\quad & e(r)=(\kappa\mu_1)^{-1}\big(1-e^{-r^2/4\sigma_2^2}\big)+\kappa^{-1}\big(1-e^{-r^2/4(\sigma_1^2+\sigma_2^2)}\big),\\
+\text{LGCP:}\quad & e(r)=2\pi s^2\textstyle\sum_{k\ge1}\frac{\sigma^{2k}}{k!\,k^2}\big[1-(1+kr/s)e^{-kr/s}\big],\\
+\text{Mat\'ern II:}\quad & K(r)=2\pi\textstyle\int_0^r g(t)\,t\,dt,\qquad g(t)=0\ \ (t<R),\qquad g(t)=1\ \ (t\ge2R),\\
+& g(t)=\frac{2\big[U(1-e^{-\lambda_pa})-a(1-e^{-\lambda_pU})\big]}{\lambda^2\,aU(U-a)}\quad(R\le t<2R),
+\end{align*}
+with $a=\pi R^2$ and $U(t)$ the area of the union of two discs of radius $R$ at distance $t$. For Thomas and nested Thomas the excess is exactly proportional to the amplitude $\mu$ (resp.\ $\mu_2$); for the LGCP it is so to first order in $\sigma^2$. The scale of the structure in spacings, $\tau_K=\sqrt{\nbar}\,r_{1/2}$ with $r_{1/2}$ the radius at which $|e|$ reaches half its limit, is recorded for every pattern.
+
+% ============================================================================
+\section{Distance from CSR}\label{sec:delta}
+
+Let $\hat\Phi_x(r)=\hat L_x(r)-r$ be Ripley's isotropically corrected estimator \citep{Ripley1977} with $\hat\lambda^2=n(n-1)$, on 513 radii in $[0,0.25]$. For CSR conditioned on $n$ points (the binomial process), let $m_0(r;n)$ and $s_0(r;n)$ be the mean and standard deviation of $\hat\Phi$, and $c_{0.95}(n)$ the 95\% quantile of $\max_{r\in\R}|\hat\Phi-m_0|/s_0$ over $\R=[0.01,0.25]$, a studentised global envelope test \citep{Myllymaki2017}. We estimate $m_0$ and $s_0$ from 6{,}000 binomial patterns at each of 20 sizes $n\in[50,1600]$ and $c_{0.95}$ from 6{,}000 further held-out patterns; the Monte Carlo standard error of $c_{0.95}$ is at most 0.039 (values 3.03--3.30). Between grid sizes, statistics are interpolated linearly in $\log n$.
+
+The design-time departure of a parameter vector is
+\[
+\dtil(\theta)=\frac{1}{c_{0.95}(\nbar)}\max_{r\in\R}\frac{|L_\theta(r)-r|}{s_0(r;\nbar)},
+\]
+with $L_\theta=\sqrt{K_\theta/\pi}$ from the closed forms above (evaluated as $(e/\pi)/(\sqrt{r^2+e/\pi}+r)$ to avoid cancellation). Thus $\dtil=0$ exactly for CSR, and $\dtil\approx1$ places a typical pattern at the edge of detectability by this test. At fixed shape $\dtil$ grows roughly as $\sqrt{\nbar}$. The estimator's own bias is not included in $\dtil$; analyses use the replicate-based $\hat\delta$ (the same statistic on a cell's mean curve). Because $\R$ starts at $r=0.01$, structure below that radius is invisible to $\dtil$; this matters for the inhibitory model, whose test sets are therefore laid out in $\tau$ rather than $\dtil$.
+
+% ============================================================================
+\section{Simulation}\label{sec:sim}
+
+\textbf{Samplers.} Every sampler is exact for its model on an enlarged window and is cropped to $W$.
+\begin{itemize}
+  \item \emph{CSR}: $N\sim\Pois(\nbar)$ uniform points.
+  \item \emph{Thomas and nested Thomas}: parents are simulated on $W$ enlarged by $b=\sigma\,\Phi^{-1}(1-10^{-4})=3.719\sigma$ (one buffer per level for the nested model), so points in $W$ lose at most a fraction $10^{-5}$ of their expected count to parents outside the buffer, and $\E n=\nbar$.
+  \item \emph{Mat\'ern II}: primaries are simulated on $W$ enlarged by $R$, thinned, then cropped. Whether a point of $W$ survives depends only on primaries within $R$ of it, all of which are simulated.
+  \item \emph{LGCP}: $W$ is divided into $M\times M$ cells; the Gaussian field is drawn exactly at the cell centres by circulant embedding on a $2M\times2M$ torus \citep{WoodChan1994,DietrichNewsam1997}, and each cell receives $\Pois(M^{-2}e^{\mu+Y_{ij}})$ uniform points. This is exactly the grid LGCP, with $\E n=\nbar$. The grid is the smallest power of two $M\ge256$ whose discretisation bias satisfies $\sup_{r\in\R}|K_M(r)-K(r)|\le0.1\cdot2\pi r\,s_0(r;\nbar)$, i.e.\ a tenth of the null standard deviation of $\hat K$; $K_M$ follows from the grid process's pair correlation, the bilinear interpolation of $e^{C}$ on the lattice. Over the 40{,}600 LGCP patterns, $M=256$ suffices for 94.5\%, $M=512$ for 4.7\% and $M=1024$ for 0.9\%; the torus never needed more than $P=2$.
+\end{itemize}
+
+\textbf{Minimum size.} Persistence diagrams of the distance-to-measure filtration with $k$ neighbours \citep{Chazal2011} require $n\ge k$, and we use $k\le15$. Every pattern is therefore drawn from its model \emph{conditioned on} $n\ge15$, by redrawing from the same random stream until the condition holds. For any event $A$, $|P(A\mid n\ge15)-P(A)|\le P(n<15)$, so conditioning changes the law of any statistic by at most $P(n<15\mid\theta)$ in total variation. By simulation this is at most 1\% anywhere in the prior (Thomas at $\nbar=100$, $\kappa=5$, $\mu=20$), at most 0.2\% for the LGCP and 0.05\% for nested Thomas, and about $10^{-4}$ on average over the prior. In the generated data, one pattern in 165{,}800 (a Thomas training pattern) needed a redraw.
+
+\textbf{Reproducibility.} Every pattern has its own random streams,
+\[
+\texttt{PCG64DXSM}\big(\texttt{SeedSequence}(\textit{root},\ \text{key}=(3,\textit{set},\textit{model},\textit{index},\textit{role}))\big),
+\]
+with one 128-bit root for the whole dataset and separate roles for drawing parameters and simulating the pattern. Any pattern can therefore be regenerated alone, streams never overlap across models or sets, and changing a sampler never changes the parameters. A planning step enumerates every pattern with its parameters into a table; simulation reads the table in shards of 500 patterns, and a merge step refuses to write a set with any pattern missing. The specification, null tables, cell table and plan are chained by SHA-256 checksums and recorded, with the git commit and library versions, in a dataset card.
+
+% ============================================================================
+\section{Data products}\label{sec:sets}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}l L r L@{}}
+\toprule
+Set & Construction & Patterns & Supports\\
+\midrule
+Training & i.i.d.\ from the prior, 10{,}000 per model; fixed 8{,}500/1{,}500 train/validation split & 50{,}000 & fitting\\
+A & i.i.d.\ from the prior, 5{,}000 per model, own streams & 25{,}000 & risk integrated over the prior; overall accuracy\\
+B & fixed-parameter cells, 400 replicates each & 46{,}400 & conditional error and bias at given $(\nbar,\text{scale},\dtil)$\\
+C & fixed-shape paths to CSR, 300 replicates per level, plus exact CSR & 44{,}400 & detection power and error as functions of $\dtil$\\
+\bottomrule
+\end{tabularx}
+\caption{The four data products.}
+\label{tab:sets}
+\end{table}
+
+\textbf{Prior draws (training, A).} For each pattern, draw $u\sim U(0,1)$ and set $\nbar=100\cdot8^u$; draw the shape from its marginals, redrawing only the shape until the constraints hold at this $\nbar$; invert; simulate. Rejection affects only small $\nbar$ (e.g.\ 14\% of Thomas shapes at $\nbar=125$, none above $\nbar=225$). The prior places 26--42\% (Thomas), 24--45\% (nested), 42--47\% (Mat\'ern II) and 32--54\% (LGCP) of its mass at $\dtil\le1$, the ranges being over $\nbar$ bands, so near-CSR evaluation is interpolation, not extrapolation. Because the prior is known exactly, results on A can be reweighted to any other prior on the same support.
+
+\textbf{Regime grid (B).} For each model, a factorial over $\nbar\in\{125,250,500\}$ ($\{250,500\}$ for nested), a scale level (Thomas $s\in\{0.2,0.45,1\}$; nested $s_2\in\{0.1,0.25\}$ with $\mu_1=3$, $\rho=6$; LGCP $s'\in\{0.6,0.9,1.4\}$) and a target $\dtil\in\{0.5,1,2,4,8\}$; the amplitude ($\mu$, $\mu_2$, $\sigma^2$) is solved from the target by bisection, $\dtil$ being monotone in it. Mat\'ern II uses $\tau\in\{0.07,0.11,0.17,0.26,0.40\}$ at each $\nbar$. A cell is kept only if it meets the constraints and every coordinate lies in the central 80\% of its prior marginal (on the log scale), so B stays inside the support, where a prior-trained estimator's shrinkage is not dominated by a boundary. This keeps 42/45 Thomas, 19/20 nested, 15/15 Mat\'ern and 40/45 LGCP cells.
+
+\textbf{Paths to CSR (C).} One path per model, holding the shape fixed while the amplitude decreases: Thomas $\mu\downarrow$ at $s=1$; nested $\mu_2\downarrow$ at $(\mu_1,\rho,s_2)=(3,6,0.2)$; LGCP $\sigma^2\downarrow$ at $s'=1$; Mat\'ern II $\tau\downarrow$. For Thomas and nested Thomas the shape of $K-\pi r^2$ is then exactly fixed along the path. Each path is run at two values of $\nbar$ (125 and 500; 250 and 500 for nested) with 16 levels, log-spaced over the amplitude's central 80\% prior range, capped by the constraints and clipped to $\dtil\in[0.1,10]$ (Mat\'ern: $\tau\in[0.064,0.433]$, $\dtil$ from 0.13 to 7.7). Exact CSR patterns at $\nbar\in\{125,250,500\}$, 2{,}000 each, calibrate each method's 5\% detection threshold.
+
+% ============================================================================
+\section{Validation}\label{sec:valid}
+
+Pass criteria were fixed before generation.
+\begin{itemize}
+  \item \emph{Counts (V0).} Mean $n/\nbar$ within $\max(3\,\text{s.e.},1\%)$ of 1: every prior-drawn set lies in $[0.9996,1.0042]$. Over the 247 cells of B and C, with the pre-registered Holm correction at family-wise $\alpha=0.01$ within each model's cells, no cell fails; one exceeds the uncorrected 3\,s.e.\ rule ($z=3.6$), as expected by chance among 247.
+  \item \emph{Second order (V1).} For one mid-prior parameter vector per model, 4{,}000 patterns: the mean of $\hat K$ (with the true $\lambda^2$) against the closed form, using the studentised supremum over $\R$ and its 99\% point under a Gaussian with the replicates' correlation. All five pass (supremum 0.9--2.1 against 99\% points of 2.9--3.4). This ties $\dtil$ to the samplers: a wrong closed form or a wrong sampler would fail. The same test on all 116 B cells (400 patterns each): no cell exceeds its 99\% point (1--2 are allowed per model at a 1\% false-alarm rate) and the largest supremum is 3.2.
+  \item \emph{Edges (V4).} Intensity within $\max(R,2\sigma)$ of $\partial W$ against the interior: 1.002\,$\pm$\,0.004 (Thomas), 0.996\,$\pm$\,0.005 (nested), 0.996\,$\pm$\,0.003 (Mat\'ern II).
+  \item \emph{Hard core (V3).} Every Mat\'ern II pattern respects its hard-core distance. \emph{Embedding (V7).} Every LGCP embedding is nonnegative definite (criterion: minimum eigenvalue at least $-10^{-10}$ times the largest). \emph{Regeneration.} Patterns regenerated from their identifiers are bit-identical.
+\end{itemize}
+
+\textbf{Limitations.} The Strauss model is not yet included. $\dtil$ measures difficulty for one test, window and radius range; it is blind below $r=0.01$ and, being second order, can miss structure a non-Poisson process hides from $K$ \citep{BaddeleySilverman1984}. The LGCP is the grid process, with a bounded bias relative to the continuous one. The prior is a design choice; its effect on the headline numbers is assessed by reweighting A.
+
+\bibliographystyle{plainnat}
+\bibliography{theory/generation,generation_procedure}
+
+\end{document}
