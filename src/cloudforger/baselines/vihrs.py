@@ -97,8 +97,9 @@ import os
 import pickle
 import time
 import warnings
+from multiprocessing import get_context
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Iterator
 
 import numpy as np
 import torch
@@ -226,6 +227,28 @@ def _isotropic_l_minus_r(
     return l_hat - r_grid
 
 
+def _summary_curves(task: tuple) -> tuple[np.ndarray, ...]:
+    """(L - r,) or (L - r, F, G, J) for one cloud: the per-cloud unit of work
+    both feature extractors share. Top-level so a spawn pool can pickle it."""
+    points, low, high, r_grid, fg_grid = task
+    lmr = _isotropic_l_minus_r(points, low, high, r_grid)
+    if fg_grid is None:
+        return (lmr,)
+    return (lmr, *summstats.compute_fgj(points, low, high, fg_grid))
+
+
+def _map_summary_curves(tasks: Iterable[tuple], jobs: int) -> Iterator[tuple[np.ndarray, ...]]:
+    """_summary_curves over `tasks`, in order. jobs > 1 fans the clouds out to
+    a spawn pool; every cloud's curves are a deterministic function of its
+    own points, so the result is identical to the serial loop, only faster
+    (DV3's 166k-cloud classification bundle is ~1 CPU-hour per pass)."""
+    if jobs <= 1:
+        yield from map(_summary_curves, tasks)
+        return
+    with get_context("spawn").Pool(jobs) as pool:
+        yield from pool.imap(_summary_curves, tasks, chunksize=32)
+
+
 def load_cloud_records(path: Path) -> list[dict[str, Any]]:
     with open(path, "rb") as f:
         data = pickle.load(f)
@@ -249,6 +272,7 @@ def extract_features(
     label_names: tuple[str, ...] = DEFAULT_LABEL_NAMES,
     tag: str = "",
     fg_grid: np.ndarray | None = None,
+    jobs: int = 1,
 ) -> dict[str, np.ndarray]:
     n = len(records)
     m = len(r_grid)
@@ -264,17 +288,17 @@ def extract_features(
     g_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
     j_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
 
-    t0 = time.perf_counter()
-    for i, rec in enumerate(records):
-        points = np.asarray(rec["points"], dtype=np.float64)
+    def _task(rec: dict[str, Any]) -> tuple:
         region = rec.get("region", {})
-        low = region.get("low", [0.0, 0.0])
-        high = region.get("high", [1.0, 1.0])
+        return (np.asarray(rec["points"], dtype=np.float64), region.get("low", [0.0, 0.0]),
+                region.get("high", [1.0, 1.0]), r_grid, fg_grid)
 
-        l_minus_r[i] = _isotropic_l_minus_r(points, low, high, r_grid)
+    t0 = time.perf_counter()
+    for i, (rec, curves) in enumerate(zip(records, _map_summary_curves(map(_task, records), jobs))):
+        l_minus_r[i] = curves[0]
         if want_fgj:
-            f_func[i], g_func[i], j_func[i] = summstats.compute_fgj(points, low, high, fg_grid)
-        n_points[i] = len(points)
+            f_func[i], g_func[i], j_func[i] = curves[1:]
+        n_points[i] = len(rec["points"])
         targets[i] = [rec["params"][name] for name in label_names]
         cloud_seeds[i] = rec.get("seed", i)
 
@@ -302,6 +326,7 @@ def get_features(
     force: bool,
     tag: str,
     fg_grid: np.ndarray | None = None,
+    jobs: int = 1,
 ) -> dict[str, np.ndarray]:
     want_keys = ("l_minus_r", "n_points", "targets", "cloud_seeds")
     if fg_grid is not None:
@@ -322,7 +347,7 @@ def get_features(
         reason = ("r_grid" if not same_r else "fg_grid" if not same_fg else "missing F/G/J channels")
         print(f"  [{tag}] cache at {cache_path} is stale ({reason} differs); recomputing.")
 
-    features = extract_features(records, r_grid, label_names=label_names, tag=tag, fg_grid=fg_grid)
+    features = extract_features(records, r_grid, label_names=label_names, tag=tag, fg_grid=fg_grid, jobs=jobs)
 
     if cache_path is not None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -965,6 +990,7 @@ def prepare_data(
     max_clouds: int | None = None,
     fg_r_max: float | None = None,
     eval_paths: dict[str, Path] | None = None,
+    feature_jobs: int = 1,
 ) -> dict[str, Any]:
     """Load clouds_path (+ adversarial_path, if given) and extract/cache the
     L(r)-r + n(x) feature set that run_one_seed needs.
@@ -972,6 +998,9 @@ def prepare_data(
     eval_paths (DV3): {set -> clouds.pkl} of each evaluation product; each
     is featurized (cached next to its own clouds.pkl under the same name
     the training cache uses) and returned under eval_features/eval_records.
+
+    feature_jobs: worker processes for a cache miss (see _map_summary_curves);
+    the cached features do not depend on it.
 
     label_names=None adapts to whatever labels this process's clouds
     actually carry (every key in the first record's `params`, in that
@@ -1005,7 +1034,7 @@ def prepare_data(
     train_cache = cache_dir / (clouds_path.stem + cache_suffix)
     train_features = get_features(
         train_records, r_grid, label_names=label_names, cache_path=train_cache, force=force,
-        tag="train_test", fg_grid=fg_grid,
+        tag="train_test", fg_grid=fg_grid, jobs=feature_jobs,
     )
     _refresh_targets(train_features, train_records, label_names, train_cache)
 
@@ -1019,7 +1048,7 @@ def prepare_data(
             recs = recs[:max_clouds]
         set_cache = set_clouds.parent / (set_clouds.stem + cache_suffix)
         feats = get_features(recs, r_grid, label_names=label_names, cache_path=set_cache, force=force,
-                             tag=f"eval_{set_name}", fg_grid=fg_grid)
+                             tag=f"eval_{set_name}", fg_grid=fg_grid, jobs=feature_jobs)
         _refresh_targets(feats, recs, label_names, set_cache)
         eval_features[set_name], eval_records[set_name] = feats, recs
 
@@ -1033,7 +1062,7 @@ def prepare_data(
         adv_cache = cache_dir / (adversarial_path.stem + cache_suffix)
         adversarial_features = get_features(
             adv_records, r_grid, label_names=label_names, cache_path=adv_cache, force=force,
-            tag="adversarial", fg_grid=fg_grid,
+            tag="adversarial", fg_grid=fg_grid, jobs=feature_jobs,
         )
     else:
         print(f"No adversarial clouds found at {adversarial_path}; skipping adversarial evaluation.")
@@ -1168,6 +1197,7 @@ def extract_cloud_features(
     *,
     tag: str = "",
     fg_grid: np.ndarray | None = None,
+    jobs: int = 1,
 ) -> dict[str, np.ndarray]:
     """L(r)-r + n(x) for a list of PointCloud objects (or dicts), in the
     given order. No targets -- the class labels come from the diagram
@@ -1188,8 +1218,7 @@ def extract_cloud_features(
     g_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
     j_func = np.empty((n, m), dtype=np.float32) if want_fgj else None
 
-    t0 = time.perf_counter()
-    for i, c in enumerate(clouds):
+    def _task(c: Any) -> tuple:
         is_dict = isinstance(c, dict)
         points = np.asarray(c["points"] if is_dict else c.points, dtype=np.float64)
         region = c.get("region") if is_dict else getattr(c, "region", None)
@@ -1199,11 +1228,15 @@ def extract_cloud_features(
             low, high = region.get("low", [0.0, 0.0]), region.get("high", [1.0, 1.0])
         else:  # cloudforger.core.region.Box
             low, high = region.low, region.high
+        return points, low, high, r_grid, fg_grid
 
-        l_minus_r[i] = _isotropic_l_minus_r(points, low, high, r_grid)
+    t0 = time.perf_counter()
+    for i, (c, curves) in enumerate(zip(clouds, _map_summary_curves(map(_task, clouds), jobs))):
+        is_dict = isinstance(c, dict)
+        l_minus_r[i] = curves[0]
         if want_fgj:
-            f_func[i], g_func[i], j_func[i] = summstats.compute_fgj(points, low, high, fg_grid)
-        n_points[i] = len(points)
+            f_func[i], g_func[i], j_func[i] = curves[1:]
+        n_points[i] = len(c["points"] if is_dict else c.points)
         seed = c.get("seed", i) if is_dict else getattr(c, "seed", i)
         cloud_seeds[i] = i if seed is None else int(seed)
 
@@ -1224,6 +1257,7 @@ def get_cloud_features(
     force: bool,
     tag: str,
     fg_grid: np.ndarray | None = None,
+    jobs: int = 1,
 ) -> dict[str, np.ndarray]:
     """extract_cloud_features + a sibling .npz cache. Cache content is
     split-independent (whole file, file order), so every seed reuses it.
@@ -1259,7 +1293,7 @@ def get_cloud_features(
         except (OSError, KeyError, ValueError, EOFError) as exc:
             print(f"  [{tag}] cache at {cache_path} unreadable ({exc!r}); recomputing.")
 
-    features = extract_cloud_features(clouds, r_grid, tag=tag, fg_grid=fg_grid)
+    features = extract_cloud_features(clouds, r_grid, tag=tag, fg_grid=fg_grid, jobs=jobs)
 
     if cache_path is not None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1285,6 +1319,7 @@ def _classification_features_for_alignment(
     tag: str,
     cache_name: str,
     fg_grid: np.ndarray | None = None,
+    jobs: int = 1,
 ) -> dict[str, np.ndarray]:
     """L(r)-r + n(x) + class targets for exactly the clouds in
     align["common_seeds"], in that order. Mirrors _classification_n_points
@@ -1300,7 +1335,7 @@ def _classification_features_for_alignment(
 
     feats = get_cloud_features(
         clouds, r_grid, cache_path=Path(cache_dir) / cache_name, force=force, tag=tag,
-        fg_grid=fg_grid,
+        fg_grid=fg_grid, jobs=jobs,
     )
     cloud_seeds = feats["cloud_seeds"]
     common_seeds = np.asarray(align["common_seeds"], dtype=np.int64)
@@ -1354,6 +1389,7 @@ def prepare_data_classify(
     force: bool = False,
     fg_r_max: float | None = None,
     eval_sets: dict[str, dict[str, Any]] | None = None,
+    feature_jobs: int = 1,
 ) -> dict[str, Any]:
     """Classification counterpart of prepare_data: build the L(r)-r + n(x)
     feature set for the clouds/split pi_multik's classify run uses, plus the
@@ -1398,7 +1434,7 @@ def prepare_data_classify(
     print(f"Loading classification clouds from {clouds_path} ...")
     train_features = _classification_features_for_alignment(
         clouds_path, align, r_grid, cache_dir, force, tag="train_test", cache_name=cache_name,
-        fg_grid=fg_grid,
+        fg_grid=fg_grid, jobs=feature_jobs,
     )
 
     eval_features: dict[str, dict[str, np.ndarray]] = {}
@@ -1413,7 +1449,7 @@ def prepare_data_classify(
                 raise ValueError(f"eval set {set_name}: class list differs from the training bundle's.")
             feats = _classification_features_for_alignment(
                 set_clouds, set_align, r_grid, set_clouds.parent, force,
-                tag=f"eval_{set_name}", cache_name=cache_name, fg_grid=fg_grid,
+                tag=f"eval_{set_name}", cache_name=cache_name, fg_grid=fg_grid, jobs=feature_jobs,
             )
             feats.update(dv3_row_meta(set_clouds, feats["seeds"]))
             eval_features[set_name] = feats
@@ -1432,7 +1468,7 @@ def prepare_data_classify(
         print(f"Loading adversarial classification clouds from {adversarial_clouds_path} ...")
         adversarial_features = _classification_features_for_alignment(
             adversarial_clouds_path, adv_align, r_grid, cache_dir, force,
-            tag="adversarial", cache_name=adv_cache_name, fg_grid=fg_grid,
+            tag="adversarial", cache_name=adv_cache_name, fg_grid=fg_grid, jobs=feature_jobs,
         )
     else:
         print("No adversarial clouds / diagram bundles found; skipping adversarial evaluation.")
@@ -1785,6 +1821,11 @@ def run_one_seed_classify(
         "class_names": list(class_names),
         "test_accuracy": test_acc,
         "test_accuracy_per_class": test_acc_per_class,
+        # The selected checkpoint's validation numbers: what a choice between
+        # arms (e.g. fg_r_max 0.25 vs 0.08) is made on, never test/eval sets.
+        "best_epoch": best_epoch,
+        "best_val_loss": best_val_loss,
+        "best_val_accuracy": history["val_acc"][best_epoch - 1] if best_epoch else None,
     }
     if eval_sets:
         json_payload["eval_sets"] = eval_sets

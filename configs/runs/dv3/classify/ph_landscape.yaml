@@ -1,0 +1,49 @@
+# python scripts/train.py configs/runs/dv3/classify/ph_landscape.yaml --seed 9371
+#
+# DV3 -- 5-way classification: ONE persistence landscape cell of the experiment matrix --
+# 2-D CNN on one calibrated landscape raster (vec_multik, native encoder), a single filtration and a single homology dimension, + n(x) (off for classification, as in classify/pi_multik.yaml).
+#
+# Template: DTM k=5, H0 as written. slurm/dv3_ph_train.sh runs every cell by
+# overriding the filtration (DTM_K) and the dimension (method.params.homology_dims=[1] + results_subdir),
+# so results land in results/dv3_classify/dtm_k<K>/<subdir>/ -- one directory per
+# (k, dim), never the shared pi_multik/ dir the fused configs use.
+# Trains on data/dv3/train/_classify/ (train/val split fixed at generation) and
+# writes predictions_<set>.npz for A, B, C; regime tables via scripts/evaluate_regimes.py.
+
+process:
+  name: dv3_classify
+
+data:
+  source: dv3
+  group: _classify
+  eval_sets: [A, B, C]
+
+filtration:
+  - {name: dtm, params: {k: 5, q: 2.0, maxdim: 1}}
+
+method:
+  name: vec_multik
+  params:
+    task: classify
+    include_log_n: false
+    vectorization: landscape
+    encoder_path: native
+    homology_dims: [0]
+    results_subdir: vec_multik_landscape_native_h0
+    G: 128
+    include_entropy: false
+    pd_calibration_coverage: 0.95
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+    batch_size: 128
+    n_epochs: 600
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 60
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [poisson, thomas, nested, matern2, lgcp]

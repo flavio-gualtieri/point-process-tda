@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 
 from cloudforger.provenance import append_ledger_entry, provenance_stamp
 
@@ -340,6 +341,116 @@ def print_eval_set(tag: str, set_name: str, summary: dict[str, Any]) -> None:
               f"accuracy {summary['accuracy']:.4f}")
     else:
         print(f"[{tag}] eval set {set_name}: n={summary['n']} | loss {summary['loss']:.4f}")
+
+
+def targets_for_task(
+    targets: np.ndarray, train_idx: np.ndarray, n_classes: int, is_classify: bool, tag: str,
+) -> tuple[dict[str, Any], np.ndarray]:
+    """(label_norm, training targets) for either task, as pi_multik.py does
+    inline: class indices verbatim (CrossEntropyLoss) with a label_norm stub,
+    or log + z-score fit on train_idx rows only (MSELoss)."""
+    from cloudforger.baselines import vihrs  # local: keep this module's import surface small
+
+    if is_classify:
+        classes = sorted(int(c) for c in np.unique(targets))
+        if classes != list(range(n_classes)):
+            raise ValueError(f"[{tag}] expected contiguous class labels 0..{n_classes - 1}, got {classes}.")
+        label_norm = {"kind": "classification", "classes": classes, "mean": None, "std": None,
+                      "transforms": ["class_index"] * n_classes}
+        return label_norm, targets.astype(np.int64)
+    label_norm = vihrs.fit_log_zscore(targets[train_idx])
+    return label_norm, vihrs.apply_log_zscore(targets, label_norm).astype(np.float32)
+
+
+def dv3_eval_sets(
+    model: nn.Module,
+    device: str,
+    output_dir: Path,
+    eval_paths: dict[str, dict[str, Any]] | None,
+    *,
+    load_split: Any,
+    build_inputs: Any,
+    is_classify: bool,
+    label_norm: dict,
+    label_names: list[str],
+    batch_size: int,
+    method: str,
+    seed: int,
+    tag: str,
+) -> dict[str, dict[str, Any]]:
+    """Score `model` on every DV3 evaluation product and write its
+    predictions_<set>.npz -- the method-agnostic tail of pi_multik.py's DV3
+    block. load_split(set_name, set_paths) returns the set's split dict
+    (targets, seeds, ...); build_inputs(split) returns its (main tensor, extra)
+    through the FROZEN train-fit transforms. {set -> summary} for results.json."""
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from cloudforger.baselines import vihrs  # local: keep this module's import surface small
+    from cloudforger.training.train import predict_outputs
+
+    out: dict[str, dict[str, Any]] = {}
+    for set_name, set_paths in (eval_paths or {}).items():
+        split = load_split(set_name, set_paths)
+        if split is None:
+            raise FileNotFoundError(f"[{tag} seed={seed}] eval set {set_name}: diagrams missing -- compute them "
+                                    f"(scripts/processing/dv3_diagrams.py) or drop {set_name!r} from data.eval_sets.")
+        truth = (split["targets"].astype(np.int64) if is_classify
+                 else vihrs.apply_log_zscore(split["targets"], label_norm).astype(np.float32))
+        main, extra = build_inputs(split)
+        loader = DataLoader(TensorDataset(torch.from_numpy(main), torch.from_numpy(extra), torch.from_numpy(truth)),
+                            batch_size=batch_size, shuffle=False)
+        meta = dv3_row_meta(set_paths["clouds"], split["seeds"])
+        out[set_name] = record_eval_set(
+            output_dir, set_name, task="classify" if is_classify else "params",
+            outputs=predict_outputs(model, loader, device), truth=truth,
+            case_id=meta["case_id"], family=meta["family"], names=list(label_names),
+            label_norm=None if is_classify else label_norm,
+            truth_raw=None if is_classify else split["targets"], method=method, seed=seed,
+        )
+        print_eval_set(f"{tag} seed={seed}", set_name, out[set_name])
+    return out
+
+
+def fit_best_val(
+    model: nn.Module, train_loader: DataLoader, val_loader: DataLoader, optimizer: torch.optim.Optimizer,
+    loss_fn: nn.Module, device: str, cfg: dict[str, Any], is_classify: bool, tag: str,
+) -> tuple[dict[str, list[float]], dict[str, torch.Tensor], float]:
+    """Best-val-loss training with early stopping -- the loop every
+    MultiSourceExperiment here runs; accuracy is tracked under classify.
+    Returns (history, best_state, best_val_loss); load best_state before evaluating."""
+    from cloudforger.training.train import evaluate, train_one_epoch  # local: keep this module's import surface small
+
+    history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
+    if is_classify:
+        history["train_acc"], history["val_acc"] = [], []
+    best_val_loss, best_state = float("inf"), None
+    n_epochs = cfg["n_epochs"]
+    patience = cfg.get("early_stopping_patience")
+    epochs_no_improve = 0
+
+    for epoch in range(1, n_epochs + 1):
+        train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
+        val_loss, val_acc = evaluate(model, val_loader, loss_fn, device)
+        history["train_loss"].append(train_loss)
+        history["val_loss"].append(val_loss)
+        if is_classify:
+            history["train_acc"].append(train_acc)
+            history["val_acc"].append(val_acc)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+        if epoch == 1 or epoch % 25 == 0 or epoch == n_epochs:
+            msg = f"[{tag}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}"
+            if is_classify:
+                msg += f" | train_acc {train_acc:.4f} | val_acc {val_acc:.4f}"
+            print(msg)
+        if patience is not None and epochs_no_improve >= patience:
+            print(f"[{tag}] early stopping at epoch {epoch} (no val improvement for {patience} epochs)")
+            break
+    return history, best_state, best_val_loss
 
 
 class MultiSourceExperiment(ABC):

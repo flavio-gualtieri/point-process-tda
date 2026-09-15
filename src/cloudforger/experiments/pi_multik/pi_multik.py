@@ -812,7 +812,9 @@ class PIMultiKExperiment(MultiSourceExperiment):
 
     @property
     def subdir(self) -> str:
-        return "pi_multik"
+        # results_subdir: keeps single-dimension arms (homology_dims [0] / [1])
+        # out of the shared <filtration>/pi_multik/ dir. Siblings define their own.
+        return self.cfg.get("results_subdir") or "pi_multik"
 
     def _build_model(self, **kwargs) -> PIMultiK:
         """Shared-weight-encoder, flat-concat baseline -- the reference

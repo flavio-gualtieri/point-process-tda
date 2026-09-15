@@ -108,7 +108,10 @@ CHUNK_MAX_CLOUDS = {"rips": 400, "dtm": 40}
 
 # --- memory model (MB; gates launches) ----------------------------------------
 BASE_MB = 600.0                  # interpreter + numpy + gudhi + cloudforger (~140 MB measured)
-DTM_BYTES_PER_SIMPLEX = 100.0    # simplex tree + filtration sort + persistence; pessimistic
+# Measured: max observed peak / model = 0.50-0.55 at 100 B/simplex over ~4,000
+# chunks incl. the n=1320 cloud (job 26796165 tasks 0-3,18) -> ~55 B/simplex real.
+# 70 keeps a ~1.27x margin; the adaptive scale and OOM retry cover the rest.
+DTM_BYTES_PER_SIMPLEX = 70.0
 LEAK_MB_PER_DIAGRAM = 100.0      # GUDHI DTM leak (~80 MB measured), accumulates per process
 RIPS_MB_PER_N2 = 4.0e-4          # ripser, dense distances + H1 reduction; generous
 BUDGET_FRACTION = 0.88           # of the job's --mem; rest = driver, page cache, slack

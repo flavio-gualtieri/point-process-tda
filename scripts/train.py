@@ -301,7 +301,8 @@ def run_vihrs_classify_method(
     params = cfg.method.params
     subdir = params.get("results_subdir", "vihrs")
     output_dir = results_paths.seed_dir([], subdir, seed, run_tag=run_tag)
-    if is_done(output_dir) and not force:
+    prepare_only = bool(params.get("prepare_only", False))
+    if is_done(output_dir) and not force and not prepare_only:
         print(f"[{subdir} seed={seed}] already done, skipping ({output_dir}).")
         return
 
@@ -360,7 +361,11 @@ def run_vihrs_classify_method(
         force=bool(params.get("recompute_features", False)),
         fg_r_max=fg_r_max,
         eval_sets=eval_sets_spec,
+        feature_jobs=int(params.get("feature_jobs", 1)),
     )
+    if prepare_only:
+        print(f"[{subdir}] prepare_only: feature caches in place, not training.")
+        return
     baselines.vihrs.run_one_seed_classify(
         seed,
         train_features=data["train_features"],
@@ -406,7 +411,10 @@ def run_vihrs_method(
     # paper-faithful/fair-comparison variants so results dirs stay unambiguous.
     subdir = params.get("results_subdir", subdir)
     output_dir = results_paths.seed_dir([], subdir, seed, run_tag=run_tag)
-    if is_done(output_dir) and not force:
+    # prepare_only: build (or verify) the feature caches and stop -- the
+    # CPU-side warm-up that lets GPU array tasks start training at once.
+    prepare_only = bool(params.get("prepare_only", False))
+    if is_done(output_dir) and not force and not prepare_only:
         print(f"[{subdir} seed={seed}] already done, skipping ({output_dir}).")
         return
 
@@ -434,7 +442,11 @@ def run_vihrs_method(
         fg_r_max=fg_r_max,
         force=bool(params.get("recompute_features", False)),
         eval_paths={s: dp.clouds() for s, dp in (eval_data_paths or {}).items()} or None,
+        feature_jobs=int(params.get("feature_jobs", 1)),
     )
+    if prepare_only:
+        print(f"[{subdir}] prepare_only: feature caches in place, not training.")
+        return
     label_names = tuple(data["label_names"])
     baselines.vihrs.run_one_seed(
         seed,

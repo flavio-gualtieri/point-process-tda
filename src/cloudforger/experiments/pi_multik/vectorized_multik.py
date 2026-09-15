@@ -45,7 +45,13 @@ p (silhouette's amplitude-weighting exponent, see vectorization/landscapes/
 tent.py's silhouette_from_tents) is an experimental axis, not a tuned
 hyperparameter: separate arms of a sweep, each its own results row/subdir
 (see subdir below), never stacked as channels and never used to pick a
-"winning" p."""
+"winning" p.
+
+DV3 (cfg["split"] == "dv3") and task="classify" follow pi_multik.py: train/val
+from the generator's split, a ClassificationHead + CrossEntropyLoss under
+classify, and every eval set scored through the frozen train-fit vectorizer
+(experiments.common.dv3_eval_sets). results_subdir overrides the subdir so
+single-dimension arms (homology_dims [0] vs [1]) do not share one."""
 
 from __future__ import annotations
 
@@ -59,16 +65,25 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Subset, TensorDataset
 
 from cloudforger.baselines import vihrs
-from cloudforger.core.splits import train_val_test_indices
+from cloudforger.core.splits import resolve_split
 from cloudforger.encoders.encoder_bank import EncoderBank
 from cloudforger.encoders.flatten_mlp import FlattenMLPEncoder
 from cloudforger.encoders.scaleconv_pi import ConvFusion
 from cloudforger.encoders.silhouette_conv import SilhouetteConv1DEncoder
 from cloudforger.experiments.base import register
-from cloudforger.experiments.common import MultiSourceExperiment, prepare_device, save_results
+from cloudforger.experiments.common import (
+    MultiSourceExperiment,
+    dv3_eval_sets,
+    dv3_row_meta,
+    fit_best_val,
+    prepare_device,
+    save_results,
+    targets_for_task,
+)
 from cloudforger.experiments.pi_multik import pi_multik, betti_multik
+from cloudforger.models.heads.classifier import ClassificationHead
 from cloudforger.models.heads.paramest import ParameterEstimator
-from cloudforger.training.train import evaluate, evaluate_per_target, train_one_epoch
+from cloudforger.training.train import evaluate, evaluate_per_target
 from cloudforger.vectorization.landscapes.calibrated import build_calibrated_landscape, build_calibrated_silhouette
 from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
 
@@ -400,6 +415,7 @@ class VectorizedMultiK(nn.Module):
         scale_fusion_dropout: float = 0.0,
         head_hidden_dims: tuple[int, ...] = (64, 32),
         head_dropout: float = 0.1,
+        task: str = "params",
     ):
         super().__init__()
         self.bank = bank
@@ -419,9 +435,11 @@ class VectorizedMultiK(nn.Module):
             raise ValueError(f"VectorizedMultiK: fusion_mode must be 'concat' or 'conv', got {fusion_mode!r}.")
         self.fusion_dropout = nn.Dropout(fusion_dropout) if fusion_dropout > 0 else nn.Identity()
 
-        self.head = ParameterEstimator(
-            embedding_dim=fused_dim + n_extra, n_params=n_targets,
-            hidden_dims=head_hidden_dims, dropout=head_dropout,
+        # n_targets = number of classes under task="classify" (logits head).
+        head_cls = ClassificationHead if task == "classify" else ParameterEstimator
+        size_kw = {"n_classes": n_targets} if task == "classify" else {"n_params": n_targets}
+        self.head = head_cls(
+            embedding_dim=fused_dim + n_extra, hidden_dims=head_hidden_dims, dropout=head_dropout, **size_kw,
         )
 
     def forward(self, x: torch.Tensor, extra: torch.Tensor) -> torch.Tensor:
@@ -441,9 +459,12 @@ class VectorizedMultiK(nn.Module):
 @register("vec_multik")
 class VectorizedMultiKExperiment(MultiSourceExperiment):
     file_keys = ("clouds", "images")
+    supports_dv3 = True
 
     @property
     def subdir(self) -> str:
+        if self.cfg.get("results_subdir"):
+            return str(self.cfg["results_subdir"])
         vectorization = self.cfg.get("vectorization", "persistence_image")
         encoder_path = self.cfg.get("encoder_path", "native")
         tag = f"vec_multik_{vectorization}_{encoder_path}"
@@ -462,6 +483,7 @@ class VectorizedMultiKExperiment(MultiSourceExperiment):
         dataset_paths: dict[str, Any],
         output_dir: Path,
         adversarial_paths: dict[str, Any] | None = None,
+        eval_paths: dict[str, dict[str, Any]] | None = None,
     ) -> dict:
         vectorization = self.cfg.get("vectorization", "persistence_image")
         encoder_path = self.cfg.get("encoder_path", "native")
@@ -483,40 +505,60 @@ class VectorizedMultiKExperiment(MultiSourceExperiment):
             # before .run() is ever called, so results land in their own
             # directory rather than colliding with method: pi_multik's.
             return pi_multik.PIMultiKExperiment(self.cfg).run(
-                dataset_paths, output_dir, adversarial_paths=adversarial_paths
+                dataset_paths, output_dir, adversarial_paths=adversarial_paths, eval_paths=eval_paths,
             )
 
+        task = str(self.cfg.get("task", "params"))
+        is_classify = task == "classify"
+        use_dv3 = str(self.cfg.get("split", "random")) == "dv3"
         label_names = tuple(self.cfg.get("target_label_names"))
         k_values = list(self.cfg["k_values"])
         homology_dims = tuple(self.cfg.get("homology_dims", (0, 1)))
         include_entropy = bool(self.cfg.get("include_entropy", False))
+        # Same default as pi_multik: log n(x) on for parameters, off for classification.
+        include_log_n = bool(self.cfg.get("include_log_n", not is_classify))
         seed = self.cfg["seed"]
         device = prepare_device(seed)
 
-        train_split = pi_multik.load_multik_split(
-            k_values, list(dataset_paths["images"]), Path(dataset_paths["clouds"]), label_names, tag="train_test",
-            homology_dims=homology_dims,
-        )
+        def _load(paths: dict[str, Any], tag: str) -> dict[str, Any] | None:
+            return pi_multik.load_multik_split(
+                k_values, list(paths["images"]), Path(paths["clouds"]), label_names, tag=tag,
+                homology_dims=homology_dims, task=task,
+            )
+
+        train_split = _load(dataset_paths, "train_test")
         if train_split is None:
             raise FileNotFoundError(f"diagrams missing for some k in {k_values} under {dataset_paths['images']}.")
 
-        adv_split = None
-        if adversarial_paths is not None:
-            adv_split = pi_multik.load_multik_split(
-                k_values, list(adversarial_paths["images"]), Path(adversarial_paths["clouds"]),
-                label_names, tag="adversarial", homology_dims=homology_dims,
-            )
+        adv_split = _load(adversarial_paths, "adversarial") if adversarial_paths is not None else None
 
         n = len(train_split["targets"])
-        train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
+        split_labels = dv3_row_meta(dataset_paths["clouds"], train_split["seeds"])["split"] if use_dv3 else None
+        train_idx, val_idx, test_idx = resolve_split(
+            n, seed, split_labels, reshuffle_seed=self.cfg.get("split_reshuffle_seed"),
+        )
+        print(f"[{self.tag} seed={seed}] split ({'dv3' if use_dv3 else 'random'}): "
+              f"{len(train_idx)} train / {len(val_idx)} val / {len(test_idx)} in-pool test")
 
-        label_norm = vihrs.fit_log_zscore(train_split["targets"][train_idx])
-        targets_std = vihrs.apply_log_zscore(train_split["targets"], label_norm).astype(np.float32)
+        label_norm, targets_std = targets_for_task(
+            train_split["targets"], train_idx, len(label_names), is_classify, f"{self.tag} seed={seed}",
+        )
 
         main_tensor, fitted = _build_tensor(
             train_split, k_values, homology_dims, vectorization, self.cfg, train_idx=train_idx, fitted=None,
         )
-        extra, n_norm, entropy_norms = pi_multik.build_extra(train_split, train_idx, include_entropy=include_entropy)
+        extra, n_norm, entropy_norms = pi_multik.build_extra(
+            train_split, train_idx, include_entropy=include_entropy, include_log_n=include_log_n,
+        )
+
+        def _frozen_inputs(split: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+            """Any other population through the train-fit vectorizer and n/entropy norms."""
+            frozen, _ = _build_tensor(split, k_values, homology_dims, vectorization, self.cfg, train_idx=None, fitted=fitted)
+            frozen_extra, _, _ = pi_multik.build_extra(
+                split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
+                include_log_n=include_log_n,
+            )
+            return frozen, frozen_extra
 
         full_dataset = TensorDataset(
             torch.from_numpy(main_tensor), torch.from_numpy(extra), torch.from_numpy(targets_std),
@@ -548,46 +590,32 @@ class VectorizedMultiKExperiment(MultiSourceExperiment):
             scale_fusion_dropout=float(self.cfg.get("scale_fusion_dropout", 0.0)),
             head_hidden_dims=tuple(self.cfg.get("head_hidden_dims", (64, 32))),
             head_dropout=self.cfg.get("head_dropout", 0.1),
+            task=task,
         ).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.get("lr", 1e-3), weight_decay=self.cfg.get("weight_decay", 1e-4))
-        loss_fn = nn.MSELoss()
+        loss_fn = nn.CrossEntropyLoss() if is_classify else nn.MSELoss()
 
-        history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
-        best_val_loss, best_state = float("inf"), None
-        n_epochs = self.cfg["n_epochs"]
-        patience = self.cfg.get("early_stopping_patience")
-        epochs_no_improve = 0
-
-        for epoch in range(1, n_epochs + 1):
-            train_loss, _ = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
-            val_loss, _ = evaluate(model, val_loader, loss_fn, device)
-            history["train_loss"].append(train_loss)
-            history["val_loss"].append(val_loss)
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                epochs_no_improve = 0
-            else:
-                epochs_no_improve += 1
-            if epoch == 1 or epoch % 25 == 0 or epoch == n_epochs:
-                print(f"[{self.tag} seed={seed}] epoch {epoch:3d} | train {train_loss:.4f} | val {val_loss:.4f}")
-            if patience is not None and epochs_no_improve >= patience:
-                print(f"[{self.tag} seed={seed}] early stopping at epoch {epoch} (no val improvement for {patience} epochs)")
-                break
-
+        history, best_state, best_val_loss = fit_best_val(model, train_loader, val_loader, optimizer, loss_fn, device,
+                                                          self.cfg, is_classify, f"{self.tag} seed={seed}")
         model.load_state_dict(best_state)
-        test_loss, _ = evaluate(model, test_loader, loss_fn, device)
-        test_loss_per_target = dict(zip(label_names, evaluate_per_target(model, test_loader, device).tolist()))
-        print(f"\n[{self.tag} seed={seed}] test loss {test_loss:.4f}")
+
+        test_loss, test_acc, test_loss_per_target, test_acc_per_class = None, None, None, None
+        if len(test_idx):
+            test_loss, test_acc = evaluate(model, test_loader, loss_fn, device)
+            if is_classify:
+                test_acc_per_class = pi_multik._per_class_accuracy(
+                    model, test_loader, device, len(label_names), label_names,
+                )
+                print(f"\n[{self.tag} seed={seed}] test cross-entropy {test_loss:.4f} | test accuracy {test_acc:.4f}")
+            else:
+                test_loss_per_target = dict(zip(label_names, evaluate_per_target(model, test_loader, device).tolist()))
+                print(f"\n[{self.tag} seed={seed}] test loss {test_loss:.4f}")
 
         adversarial_loss = None
         adversarial_loss_per_target = None
-        if adv_split is not None:
+        if adv_split is not None and not is_classify:
             adv_targets_std = vihrs.apply_log_zscore(adv_split["targets"], label_norm).astype(np.float32)
-            adv_tensor, _ = _build_tensor(adv_split, k_values, homology_dims, vectorization, self.cfg, train_idx=None, fitted=fitted)
-            adv_extra, _, _ = pi_multik.build_extra(
-                adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
-            )
+            adv_tensor, adv_extra = _frozen_inputs(adv_split)
             adv_ds = TensorDataset(
                 torch.from_numpy(adv_tensor), torch.from_numpy(adv_extra), torch.from_numpy(adv_targets_std),
             )
@@ -598,6 +626,19 @@ class VectorizedMultiKExperiment(MultiSourceExperiment):
             )
             print(f"[{self.tag} seed={seed}] adversarial loss {adversarial_loss:.4f}")
 
+        eval_sets = dv3_eval_sets(
+            model, device, output_dir, eval_paths,
+            load_split=lambda name, paths: _load(paths, f"eval_{name}"), build_inputs=_frozen_inputs,
+            is_classify=is_classify, label_norm=label_norm, label_names=list(label_names),
+            batch_size=self.cfg["batch_size"], method=self.subdir, seed=seed, tag=self.tag,
+        )
+        # Under DV3 there is no in-pool test slice: set A stands in (see pi_multik.py).
+        if test_loss is None and "A" in eval_sets:
+            test_loss = eval_sets["A"]["loss"]
+            test_acc = eval_sets["A"].get("accuracy")
+            test_loss_per_target = eval_sets["A"].get("loss_per_target")
+            test_acc_per_class = eval_sets["A"].get("accuracy_per_class")
+
         cfg_meta = {
             **self.cfg,
             "vectorization": vectorization,
@@ -607,15 +648,24 @@ class VectorizedMultiKExperiment(MultiSourceExperiment):
             "channels": _channel_names(vectorization, k_values, homology_dims, self.cfg),
             "vectorizer_params": _serialize_fitted(vectorization, fitted),
         }
+        extra_meta: dict[str, Any] = {"best_val_loss": float(best_val_loss), "n_epochs_run": len(history["val_loss"])}
+        if is_classify:
+            extra_meta.update({"task": "classify", "class_names": list(label_names), "test_accuracy": test_acc,
+                               "test_accuracy_per_class": test_acc_per_class})
         save_results(
             output_dir, model=model, best_state=best_state, history=history, cfg=cfg_meta,
             test_loss=test_loss, label_names=list(label_names), label_norm=label_norm,
             test_loss_per_target=test_loss_per_target, adversarial_loss=adversarial_loss,
             adversarial_loss_per_target=adversarial_loss_per_target,
             adversarial_path=adversarial_paths.get("clouds") if adversarial_paths else None,
+            extra_meta=extra_meta, eval_sets=eval_sets or None,
         )
 
-        result: dict[str, Any] = {"seed": seed, "test_loss": test_loss, "test_loss_per_target": test_loss_per_target}
+        result: dict[str, Any] = {"seed": seed, "test_loss": test_loss, "test_loss_per_target": test_loss_per_target,
+                                  "eval_sets": eval_sets}
+        if is_classify:
+            result["test_accuracy"] = test_acc
+            result["test_accuracy_per_class"] = test_acc_per_class
         if adversarial_loss is not None:
             result["adversarial_loss"] = adversarial_loss
             result["adversarial_loss_per_target"] = adversarial_loss_per_target
