@@ -1,0 +1,126 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.17274864542289023,
+  "test_loss_per_target": {
+    "kappa": 0.11802356369929758,
+    "mu": 0.12551927604369054,
+    "sigma": 0.2747030965256825
+  },
+  "seed": 9375,
+  "git_commit": "55f2bfa6c9b6caee3f9857293f084be132243b53",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T12:32:36.422670+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9375,
+    "homology_dims": [
+      0
+    ],
+    "results_subdir": "pi_multik_h0",
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "target_label_names": [
+      "kappa",
+      "mu",
+      "sigma"
+    ],
+    "log_label_names": [
+      "kappa",
+      "mu",
+      "sigma"
+    ],
+    "split": "dv3",
+    "data_group": "thomas",
+    "eval_sets": [
+      "A",
+      "B",
+      "C"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.004817156256886451,
+            0.44675697587152813
+          ],
+          "pers_range": [
+            0.0,
+            0.4082862959240074
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.003452654840739388,
+          "sigma_pers": 0.0031897366869063077,
+          "weight_fn": "linear_weight"
+        }
+      }
+    }
+  },
+  "best_val_loss": 0.16072777835528057,
+  "n_epochs_run": 138,
+  "eval_sets": {
+    "A": {
+      "n": 5000,
+      "n_ok": 5000,
+      "loss": 0.17274864542289023,
+      "loss_per_target": {
+        "kappa": 0.11802356369929758,
+        "mu": 0.12551927604369054,
+        "sigma": 0.2747030965256825
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 16800,
+      "n_ok": 16800,
+      "loss": 0.18938339649566735,
+      "loss_per_target": {
+        "kappa": 0.16340724771716097,
+        "mu": 0.17263883488469153,
+        "sigma": 0.23210410688514946
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 9600,
+      "n_ok": 9600,
+      "loss": 0.38667949427813975,
+      "loss_per_target": {
+        "kappa": 0.3271245818405946,
+        "mu": 0.33066402268800515,
+        "sigma": 0.5022498783058194
+      },
+      "predictions": "predictions_C.npz"
+    }
+  }
+}

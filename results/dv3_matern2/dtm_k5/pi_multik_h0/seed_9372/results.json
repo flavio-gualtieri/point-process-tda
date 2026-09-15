@@ -1,0 +1,120 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.048186732102872075,
+  "test_loss_per_target": {
+    "lam_p": 0.019535539119914073,
+    "R": 0.07683792508583008
+  },
+  "seed": 9372,
+  "git_commit": "55f2bfa6c9b6caee3f9857293f084be132243b53",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T12:29:43.963647+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9372,
+    "homology_dims": [
+      0
+    ],
+    "results_subdir": "pi_multik_h0",
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "target_label_names": [
+      "lam_p",
+      "R"
+    ],
+    "log_label_names": [
+      "lam_p",
+      "R"
+    ],
+    "split": "dv3",
+    "data_group": "matern2",
+    "eval_sets": [
+      "A",
+      "B",
+      "C"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.02369369222253063,
+            0.3503521272990728
+          ],
+          "pers_range": [
+            0.0,
+            0.21839165009904707
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.0025520190240354854,
+          "sigma_pers": 0.0017061847663988052,
+          "weight_fn": "linear_weight"
+        }
+      }
+    }
+  },
+  "best_val_loss": 0.04769122740626335,
+  "n_epochs_run": 285,
+  "eval_sets": {
+    "A": {
+      "n": 5000,
+      "n_ok": 5000,
+      "loss": 0.048186732102872075,
+      "loss_per_target": {
+        "lam_p": 0.019535539119914073,
+        "R": 0.07683792508583008
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 6000,
+      "n_ok": 6000,
+      "loss": 0.040994635735237366,
+      "loss_per_target": {
+        "lam_p": 0.013280224734520873,
+        "R": 0.06870904673595386
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 9600,
+      "n_ok": 9600,
+      "loss": 0.04272844437819004,
+      "loss_per_target": {
+        "lam_p": 0.012945594905112975,
+        "R": 0.0725112938512671
+      },
+      "predictions": "predictions_C.npz"
+    }
+  }
+}

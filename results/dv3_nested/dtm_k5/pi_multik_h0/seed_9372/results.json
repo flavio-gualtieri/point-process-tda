@@ -1,0 +1,138 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.4537231917588137,
+  "test_loss_per_target": {
+    "kappa": 0.14526789181274125,
+    "mu1": 0.8818194442690931,
+    "mu2": 0.1119956585971318,
+    "sigma1": 0.6432032544480673,
+    "sigma": 0.4863297096670356
+  },
+  "seed": 9372,
+  "git_commit": "55f2bfa6c9b6caee3f9857293f084be132243b53",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T12:31:21.243182+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9372,
+    "homology_dims": [
+      0
+    ],
+    "results_subdir": "pi_multik_h0",
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "target_label_names": [
+      "kappa",
+      "mu1",
+      "mu2",
+      "sigma1",
+      "sigma"
+    ],
+    "log_label_names": [
+      "kappa",
+      "mu1",
+      "mu2",
+      "sigma1",
+      "sigma"
+    ],
+    "split": "dv3",
+    "data_group": "nested",
+    "eval_sets": [
+      "A",
+      "B",
+      "C"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.0034230668983410285,
+            0.43492428601268246
+          ],
+          "pers_range": [
+            0.0,
+            0.354947063430222
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.0033711032743307923,
+          "sigma_pers": 0.002773023933048609,
+          "weight_fn": "linear_weight"
+        }
+      }
+    }
+  },
+  "best_val_loss": 0.46373847913742067,
+  "n_epochs_run": 266,
+  "eval_sets": {
+    "A": {
+      "n": 5000,
+      "n_ok": 5000,
+      "loss": 0.4537231917588137,
+      "loss_per_target": {
+        "kappa": 0.14526789181274125,
+        "mu1": 0.8818194442690931,
+        "mu2": 0.1119956585971318,
+        "sigma1": 0.6432032544480673,
+        "sigma": 0.4863297096670356
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 7600,
+      "n_ok": 7600,
+      "loss": 0.24382279500689297,
+      "loss_per_target": {
+        "kappa": 0.09046749997428148,
+        "mu1": 0.14245283306558135,
+        "mu2": 0.07375235591640103,
+        "sigma1": 0.5194046773922462,
+        "sigma": 0.3930366086859548
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 9600,
+      "n_ok": 9600,
+      "loss": 0.22466474558206792,
+      "loss_per_target": {
+        "kappa": 0.08318249354460353,
+        "mu1": 0.12111947586182102,
+        "mu2": 0.06838404789159395,
+        "sigma1": 0.4890859211007735,
+        "sigma": 0.3615517895115476
+      },
+      "predictions": "predictions_C.npz"
+    }
+  }
+}

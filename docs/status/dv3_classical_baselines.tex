@@ -222,6 +222,54 @@ F\_r080 & 0.048 $\pm$ 0.003 & 0.133 & 0.380 & 0.647 & 0.935 & 0.999 & 1.000\\
 \textbf{Reading.} All seven arms calibrate correctly (size 0.048--0.051 against the 5\% target) and reach essentially perfect power by $\dtil\ge4$. L and LFGJ are statistically indistinguishable and dominate the single-function arms throughout the range that matters, most visibly at $\dtil\in[0.5,2)$ where L/LFGJ already reach 0.56--0.90 power while G/F sit at 0.34--0.66 -- roughly a full $\dtil$ band behind. Adding $F$/$G$/$J$ to $L$ does not improve detection (it is not better than L alone at any band, and marginally worse at $\dtil\in[0.5,2)$), consistent with $L$ alone already carrying most of the departure-from-CSR signal that a global envelope test targets.
 
 % ============================================================================
+\section{Persistence images, $H_0$ (parameter estimation, preliminary)}\label{sec:pi-h0}
+
+First persistence-feature cell on the same DV3 splits: a CNN (\code{pi_multik}) on a single persistence image of the DTM filtration ($k=5$), $H_0$ only, plus $n(x)$, 10 seeds, same loss and sets as \S\ref{sec:params}. Results in \code{results/dv3_<family>/dtm_k5/pi_multik_h0/}. Classification is still running and $H_1$ is excluded: its raw image intensities ($\sim$10$\times$ below $H_0$'s) are swamped by the encoder's coordinate channels, so the $H_1$ runs collapsed to an $n(x)$-only predictor (parameters) or chance (classification). They are to be rerun with per-channel input normalisation.
+
+\begin{table}[ht]
+\centering\scriptsize
+\begin{tabular}{@{}ll cccc@{}}
+\toprule
+Family & Arm (seeds) & Val loss & $A$: all & $B$: whole set & $C$: whole set\\
+\midrule
+thomas & PI H0 (10) & 0.1651 $\pm$ 0.0058 & 0.1771 $\pm$ 0.0045 & 0.1931 $\pm$ 0.0078 & 0.3923 $\pm$ 0.0319\\
+thomas & \emph{L (ref.)} & 0.1311 $\pm$ 0.0009 & 0.1365 $\pm$ 0.0007 & 0.1371 $\pm$ 0.0054 & 0.2818 $\pm$ 0.0208\\
+\midrule
+nested & PI H0 (10) & 0.4676 $\pm$ 0.0100 & 0.4540 $\pm$ 0.0111 & 0.2531 $\pm$ 0.0234 & 0.2515 $\pm$ 0.0404\\
+nested & \emph{L (ref.)} & 0.3795 $\pm$ 0.0028 & 0.3645 $\pm$ 0.0023 & 0.2045 $\pm$ 0.0102 & 0.1689 $\pm$ 0.0128\\
+\midrule
+matern2 & PI H0 (10) & 0.0969 $\pm$ 0.0633 & 0.1002 $\pm$ 0.0658 & 0.0868 $\pm$ 0.0588 & 0.0930 $\pm$ 0.0647\\
+matern2 & \emph{L (ref.)} & 0.0171 $\pm$ 0.0005 & 0.0184 $\pm$ 0.0008 & 0.0166 $\pm$ 0.0008 & 0.0178 $\pm$ 0.0008\\
+\midrule
+lgcp & PI H0 (10) & 0.3430 $\pm$ 0.1613 & 0.3465 $\pm$ 0.1597 & 0.2611 $\pm$ 0.0874 & 0.1422 $\pm$ 0.0665\\
+lgcp & \emph{L (ref.)} & 0.2155 $\pm$ 0.0008 & 0.2203 $\pm$ 0.0011 & 0.1889 $\pm$ 0.0042 & 0.1051 $\pm$ 0.0053\\
+\bottomrule
+\end{tabular}
+\caption{Persistence image ($H_0$, DTM $k=5$) vs.\ the L-only classical arm (Table~\ref{tab:params-summary}): normalised loss $L$, mean $\pm$ SD over 10 seeds. The matern2 and lgcp SDs reflect bimodal training, not noise: see text.}
+\label{tab:pi-h0-summary}
+\end{table}
+
+\begin{table}[ht]
+\centering\scriptsize
+\begin{tabular}{@{}ll cccccc c ccc@{}}
+\toprule
+Family & Arm & \multicolumn{6}{c}{$A$, by $\dtil$ band} & & \multicolumn{3}{c}{$A$, by $\nbar$ band}\\
+\cmidrule(lr){3-8}\cmidrule(l){10-12}
+ & & [0,0.5) & [0.5,1) & [1,2) & [2,4) & [4,8) & [8,$\infty$) & & [100,200) & [200,400) & [400,800)\\
+\midrule
+thomas & PI H0 & 0.338 & 0.338 & 0.274 & 0.134 & 0.051 & 0.022 & & 0.222 & 0.185 & 0.126\\
+nested & PI H0 & 0.597 & 0.593 & 0.548 & 0.441 & 0.359 & 0.239 & & 0.448 & 0.450 & 0.464\\
+matern2 & PI H0 & 0.149 & 0.047 & 0.079 & 0.110 & 0.058 & 0.073 & & 0.131 & 0.090 & 0.080\\
+lgcp & PI H0 & 0.438 & 0.338 & 0.297 & 0.270 & 0.299 & 0.388 & & 0.361 & 0.361 & 0.319\\
+\bottomrule
+\end{tabular}
+\caption{Persistence image ($H_0$, DTM $k=5$), set $A$: normalised loss by $\dtil$ and $\nbar$ band (means over 10 seeds, all seeds included). Compare the L rows of Table~\ref{tab:params-regime}.}
+\label{tab:pi-h0-regime}
+\end{table}
+
+\textbf{Reading.} On every family the $H_0$ persistence image is worse than the L-only baseline on all three sets. On thomas and nested, where training is stable (SD $\le0.011$), the gap is 0.04 (thomas, 0.177 vs.\ 0.137) and 0.09 (nested, 0.454 vs.\ 0.365) on $A$. PI~H0 shares L's regime profile: loss falls with $\dtil$, and at $\dtil\ge8$ on thomas it matches L (0.022 vs.\ 0.021). The gap is therefore concentrated near CSR. Matern2 and lgcp are bimodal across seeds. On matern2, 6 seeds reach $A$ = 0.046--0.054, but 4 stopped early (epochs 55--66) at 0.14--0.19. On lgcp, 7 seeds reach 0.244--0.251, but 3 are stuck at 0.578, the $n(x)$-only value. Even the good seeds trail L (matern2 0.018, lgcp 0.220), so the ordering does not depend on the failures, but the means above overstate the typical gap on these two families.
+
+% ============================================================================
 \section{Visual summary}\label{sec:figs}
 
 \begin{figure}[ht]
