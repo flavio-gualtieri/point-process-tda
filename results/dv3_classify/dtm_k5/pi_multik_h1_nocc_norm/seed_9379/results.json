@@ -1,0 +1,156 @@
+{
+  "task": "classify",
+  "method": "pi_multik",
+  "test_loss": 1.2547905581024306,
+  "test_loss_per_target": null,
+  "seed": 9379,
+  "git_commit": "55ac5c5e497829f8eca3d616da09c2b9fafdb2c7",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T17:03:27.142487+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "classify",
+    "method": "pi_multik",
+    "seed": 9379,
+    "include_log_n": false,
+    "homology_dims": [
+      1
+    ],
+    "results_subdir": "pi_multik_h1_nocc_norm",
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 128,
+    "n_epochs": 600,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 60,
+    "coordconv": false,
+    "pi_normalize": "channel",
+    "target_label_names": [
+      "poisson",
+      "thomas",
+      "nested",
+      "matern2",
+      "lgcp"
+    ],
+    "split": "dv3",
+    "data_group": "_classify",
+    "eval_sets": [
+      "A",
+      "B",
+      "C"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h1"
+    ],
+    "imager_params": {
+      "5": {
+        "1": {
+          "birth_range": [
+            0.019163176899911503,
+            0.4780821035740425
+          ],
+          "pers_range": [
+            0.0,
+            0.1466696325385625
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.0035853041146416487,
+          "sigma_pers": 0.0011458565042075195,
+          "weight_fn": "linear_weight"
+        }
+      }
+    },
+    "pi_norm": {
+      "mean": [
+        [
+          0.00018862113719579507
+        ]
+      ],
+      "std": [
+        [
+          0.0014965200254805835
+        ]
+      ]
+    }
+  },
+  "best_val_loss": 1.2435448582331339,
+  "n_epochs_run": 135,
+  "class_names": [
+    "poisson",
+    "thomas",
+    "nested",
+    "matern2",
+    "lgcp"
+  ],
+  "test_accuracy": 0.43316,
+  "test_accuracy_per_class": {
+    "poisson": 0.6864,
+    "thomas": 0.2616,
+    "nested": 0.361,
+    "matern2": 0.3624,
+    "lgcp": 0.4944
+  },
+  "adversarial_accuracy": null,
+  "adversarial_accuracy_per_class": null,
+  "eval_sets": {
+    "A": {
+      "n": 25000,
+      "loss": 1.2547905581024306,
+      "accuracy": 0.43316,
+      "accuracy_per_class": {
+        "poisson": 0.6864,
+        "thomas": 0.2616,
+        "nested": 0.361,
+        "matern2": 0.3624,
+        "lgcp": 0.4944
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 46400,
+      "loss": 1.290189288101956,
+      "accuracy": 0.34625,
+      "accuracy_per_class": {
+        "thomas": 0.17529761904761904,
+        "nested": 0.33828947368421053,
+        "matern2": 0.31933333333333336,
+        "lgcp": 0.539625
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 44400,
+      "loss": 1.3387681552479416,
+      "accuracy": 0.361036036036036,
+      "accuracy_per_class": {
+        "poisson": 0.6861666666666667,
+        "thomas": 0.1659375,
+        "nested": 0.3103125,
+        "matern2": 0.265625,
+        "lgcp": 0.4990625
+      },
+      "predictions": "predictions_C.npz"
+    }
+  }
+}

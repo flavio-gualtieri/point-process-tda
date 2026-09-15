@@ -1,0 +1,159 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.2439466787359921,
+  "test_loss_per_target": {
+    "nbar": 0.05538893730645366,
+    "sigma2": 0.18122965761699456,
+    "s_abs": 0.4952214412845281
+  },
+  "seed": 9372,
+  "git_commit": "55ac5c5e497829f8eca3d616da09c2b9fafdb2c7",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T17:45:09.851327+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9372,
+    "homology_dims": [
+      0,
+      1
+    ],
+    "results_subdir": "pi_multik_h01_nocc_norm",
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "coordconv": false,
+    "pi_normalize": "channel",
+    "target_label_names": [
+      "nbar",
+      "sigma2",
+      "s_abs"
+    ],
+    "log_label_names": [
+      "nbar",
+      "sigma2",
+      "s_abs"
+    ],
+    "split": "dv3",
+    "data_group": "lgcp",
+    "eval_sets": [
+      "A",
+      "B",
+      "C"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0",
+      "k5_h1"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.007243457666789441,
+            0.4278916601072339
+          ],
+          "pers_range": [
+            0.0,
+            0.29227509880979763
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.003286314081565972,
+          "sigma_pers": 0.002283399209451544,
+          "weight_fn": "linear_weight"
+        },
+        "1": {
+          "birth_range": [
+            0.022561717585868394,
+            0.500010323274209
+          ],
+          "pers_range": [
+            0.0,
+            0.15000596155124998
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.003730067231940161,
+          "sigma_pers": 0.0011719215746191405,
+          "weight_fn": "linear_weight"
+        }
+      }
+    },
+    "pi_norm": {
+      "mean": [
+        [
+          0.002267197260101551,
+          0.00017970407267828395
+        ]
+      ],
+      "std": [
+        [
+          0.01236523271052464,
+          0.001424466628513701
+        ]
+      ]
+    }
+  },
+  "best_val_loss": 0.23945047493775687,
+  "n_epochs_run": 89,
+  "eval_sets": {
+    "A": {
+      "n": 5000,
+      "n_ok": 5000,
+      "loss": 0.2439466787359921,
+      "loss_per_target": {
+        "nbar": 0.05538893730645366,
+        "sigma2": 0.18122965761699456,
+        "s_abs": 0.4952214412845281
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 16000,
+      "n_ok": 16000,
+      "loss": 0.21263835449372948,
+      "loss_per_target": {
+        "nbar": 0.043663069636544434,
+        "sigma2": 0.18558081686049324,
+        "s_abs": 0.4086711769841508
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 9600,
+      "n_ok": 9600,
+      "loss": 0.09454399925045189,
+      "loss_per_target": {
+        "nbar": 0.03001982842006054,
+        "sigma2": 0.16274396753802067,
+        "s_abs": 0.09086820179327447
+      },
+      "predictions": "predictions_C.npz"
+    }
+  }
+}

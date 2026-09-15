@@ -9,27 +9,32 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=100G
 #SBATCH -t 01:00:00
-#SBATCH --array=0-14
+#SBATCH --array=0-19
 #SBATCH --output=logs/dv3_pi_nocc_%A_%a.out
 #SBATCH --error=logs/dv3_pi_nocc_%A_%a.err
 
 # PERSISTENCE-IMAGE cells WITHOUT CoordConv, with and without input
 # normalization -- the fix for the collapsed H1 runs (pi_multik_h1: H1 pixels
 # ~10x below H0's, swamped by the two constant coordinate channels, so the
-# network ignored its input). One DTM filtration (k = $DTM_K, default 5), one
-# homology dimension per cell, 10 seeds, scored on DV3 sets A, B, C.
+# network ignored its input). One DTM filtration (k = $DTM_K, default 5),
+# 10 seeds per cell, scored on DV3 sets A, B, C.
 #
 #   cell  dim  coordconv  pi_normalize  results subdir (results/<process>/dtm_k<K>/)
 #   0     H0   off        channel       pi_multik_h0_nocc_norm
 #   1     H1   off        channel       pi_multik_h1_nocc_norm
 #   2     H0   off        none          pi_multik_h0_nocc   (isolates CoordConv vs the
 #                                                          existing pi_multik_h0 run)
+#   3     H0+H1 off       channel       pi_multik_h01_nocc_norm  (both dimensions as two
+#                                                          channels of one image, each
+#                                                          normalized separately)
 #   pi_normalize=channel: per-(k, dim) pixel z-score fit on the TRAIN rows only
 #   and applied frozen to validation and A/B/C (pi_multik.fit_pi_norm).
 #
-#   tasks 0-11   PARAMETER ESTIMATION: t = cell*4 + family
+#   tasks 0-15   PARAMETER ESTIMATION: t = cell*4 + family
 #                family 0 thomas  1 nested  2 matern2  3 lgcp
-#   tasks 12-14  CLASSIFICATION: t = 12 + cell
+#   tasks 16-19  CLASSIFICATION: t = 16 + cell
+#   (cells 0-2 were first submitted under the 3-cell layout, classification then
+#   at 12-14; their results are on disk and are skipped on a re-submit)
 #
 # Everything else matches configs/runs/dv3/<group>/ph_pi.yaml (same network,
 # epochs, early stopping; n(x) on for parameters, off for classification).
@@ -59,12 +64,12 @@ DTM_K="${DTM_K:-5}"
 SEEDS=(9371 9372 9373 9374 9375 9376 9377 9378 9379 9380)
 FAMILY_LIST=(thomas nested matern2 lgcp)
 
-CELL_TAG=(h0_nocc_norm  h1_nocc_norm  h0_nocc)
-CELL_DIM=(0             1             0)
-CELL_NORM=(channel      channel       none)
+CELL_TAG=(h0_nocc_norm  h1_nocc_norm  h0_nocc  h01_nocc_norm)
+CELL_DIMS=("0"          "1"           "0"      "0,1")
+CELL_NORM=(channel      channel       none     channel)
 N_CELLS=${#CELL_TAG[@]}
 N_FAM=${#FAMILY_LIST[@]}
-N_PARAMS=$(( N_CELLS * N_FAM ))   # 12
+N_PARAMS=$(( N_CELLS * N_FAM ))   # 16
 
 t="${SLURM_ARRAY_TASK_ID:?run this as an array job (sbatch slurm/dv3_pi_nocc_train.sh)}"
 if (( t < N_PARAMS )); then
@@ -80,7 +85,7 @@ elif (( t < N_PARAMS + N_CELLS )); then
 else
   echo "task $t out of range -- nothing to do (check --array span)"; exit 0
 fi
-dim="${CELL_DIM[$cell]}"
+dims="${CELL_DIMS[$cell]}"
 subdir="pi_multik_${CELL_TAG[$cell]}"
 
 threads=$(( ${SLURM_CPUS_PER_TASK:-$PAR} / PAR )); (( threads >= 1 )) || threads=1
@@ -89,14 +94,14 @@ export OMP_NUM_THREADS=$threads OPENBLAS_NUM_THREADS=$threads MKL_NUM_THREADS=$t
 cfg="configs/runs/dv3/${group}/ph_pi.yaml"
 overrides=(
   --set "filtration=[{name: dtm, params: {k: ${DTM_K}, q: 2.0, maxdim: 1}}]"
-  --set "method.params.homology_dims=[${dim}]"
+  --set "method.params.homology_dims=[${dims}]"
   --set "method.params.coordconv=false"
   --set "method.params.pi_normalize=${CELL_NORM[$cell]}"
   --set "method.params.results_subdir=${subdir}"
 )
 resdir="results/${process}/dtm_k${DTM_K}/${subdir}"
 
-echo "Host: $(hostname)  job ${SLURM_ARRAY_JOB_ID:-unset}_${t}  ->  ${subdir} (H${dim}, coordconv off, pi_normalize=${CELL_NORM[$cell]})  DTM k=${DTM_K}  group=${group}"
+echo "Host: $(hostname)  job ${SLURM_ARRAY_JOB_ID:-unset}_${t}  ->  ${subdir} (H[${dims}], coordconv off, pi_normalize=${CELL_NORM[$cell]})  DTM k=${DTM_K}  group=${group}"
 echo "  config=${cfg}"
 echo "  results -> ${resdir}/seed_<seed>/   ${PAR} seeds at a time, ${threads} thread(s) each"
 echo "  GPU: ${SLURM_JOB_GPUS:-unset}  CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
