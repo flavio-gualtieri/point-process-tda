@@ -1,294 +1,212 @@
 \documentclass[10pt,a4paper]{article}
-\usepackage[margin=2.3cm]{geometry}
+\usepackage[margin=2.2cm]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage{microtype}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
-\usepackage{tabularx}
-\usepackage{array}
 \usepackage{enumitem}
-\usepackage{xcolor}
-\usepackage{graphicx}
 \usepackage[font=small,labelfont=bf]{caption}
-\usepackage{longtable}
-\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
 
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{0.45em plus 0.1em}
-\setlist{nosep,leftmargin=*,topsep=2pt}
-\renewcommand{\arraystretch}{1.1}
-\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\setlength{\parskip}{0.4em}
+\setlist{nosep,leftmargin=*,topsep=3pt}
+\renewcommand{\arraystretch}{1.12}
 
 \newcommand{\nbar}{\bar n}
 \newcommand{\dtil}{\tilde\delta}
-\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\B}[1]{\textbf{#1}}
 
-\title{\textbf{DV3 classical baselines: results summary}}
-\author{\normalsize point-process-tda}
-\date{\normalsize \today}
+\title{\textbf{Point-process TDA: status and results on the new dataset (DV3)}}
+\date{\today}
 
 \begin{document}
 \maketitle
 
-\begin{abstract}
-\noindent Seven vihrs 1-D CNN arms (Vihrs 2022 architecture, best-validation checkpointing), differing only in which summary functions feed the network, were trained on the DV3 dataset (\code{docs/generation_procedure.tex}) for parameter estimation (per family) and 5-way classification, and evaluated for CSR detection at a calibrated 5\% size. All runs are complete over the target 10 seeds (9371--9380). This note summarises the three tasks, breaks results down by $\dtil$ (distance from CSR, in units of the 5\% critical value of a studentised $L$-envelope test) and $\nbar$ (expected point count), and gives two figures. Every number here is reproduced by \code{scripts/dv3\_matrix.py} from \code{results/} on disk and matches the ``DV3 classical'' sheet of \code{docs/status/experiment\_matrix.xlsx}; figures are written by \code{scripts/dv3\_report\_figures.py}.
-\end{abstract}
+% ============================================================================
+\section{Where things stand}
+
+\begin{itemize}
+  \item A new dataset (DV3) was generated from scratch so that performance can be reported \emph{per regime} (how far from Poisson, how many points) instead of as one averaged number.
+  \item \textbf{Done:} the classical baselines (a neural network reading the standard summary functions), for parameter estimation and 5-way model classification; and the first persistence-homology (PH) feature, the $H_0$ persistence image of the DTM filtration ($k=5$). Every number is an average over 10 training seeds.
+  \item \textbf{Main result so far:} the classical baselines win everywhere. For parameter estimation, the single best model on every family is classical. For classification, the best classical model (all four summary functions) beats the PH model by 7 points of accuracy (0.711 vs.\ 0.641).
+  \item \textbf{Not yet run:} the PH $H_1$ persistence image, Betti curves and persistence landscapes; DTM $k=10, 15$ and the Rips filtration; and the classical non-learned references (minimum-contrast fitting, envelope tests). The $H_1$ image was tried, but it currently fails to train for a technical reason (its pixel values are $\sim$10$\times$ smaller than $H_0$'s and get ignored by the network); it will be rerun with input normalisation.
+\end{itemize}
 
 % ============================================================================
-\section{Arms}\label{sec:arms}
+\section{Data}
 
-Every arm is the same 1-D CNN reading $n(x)$ (point count) plus a subset of the classical summary functions $L(r)-r$, $F(r)$, $G(r)$, $J(r)=\frac{1-G(r)}{1-F(r)}$ evaluated on a radius grid $r\in[0,r_{\max}]$. Two grid resolutions were tried for the multi-function arms ($r_{\max}\in\{0.25,0.08\}$); Table~\ref{tab:arms} lists all seven.
+\textbf{Models.} Five stationary models on the unit square: Poisson (complete spatial randomness, CSR), Thomas (clustered), nested Thomas (clusters of clusters), Mat\'ern type~II (hard-core, i.e.\ repulsive) and the log-Gaussian Cox process (LGCP). The expected number of points $\nbar$ ranges from 100 to 800.
+
+\textbf{How the distance from Poisson is measured ($\dtil$).}
+\begin{itemize}
+  \item The classical way to test a pattern against Poisson is to compare its $L$-function ($L(r)-r$ is zero for Poisson) with its Poisson expectation, taking the largest standardised deviation over a range of radii (a global envelope test).
+  \item For every parameter setting we compute that largest deviation for the model's \emph{theoretical} $L$-function, and divide it by the test's 5\% critical value at the same $\nbar$. That ratio is $\dtil$.
+  \item So $\dtil = 0$ is exactly Poisson, $\dtil \approx 1$ is the edge of what the classical test can detect at the 5\% level, and larger values are more obviously non-Poisson. At a fixed shape, $\dtil$ grows roughly like $\sqrt{\nbar}$.
+  \item Results are broken down into $\dtil$ bands: $[0,0.5)$ and $[0.5,1)$ are "below the classical detection threshold", $\ge 2$ is "clearly structured".
+\end{itemize}
+
+\textbf{How the sets are built.}
+\begin{itemize}
+  \item \textbf{Training:} 10{,}000 patterns per model, parameters drawn at random from a prior (the prior deliberately puts roughly a quarter to a half of its mass at $\dtil \le 1$, depending on the model). A fixed 85/15 train/validation split, identical for every method and seed.
+  \item \textbf{Test set A (average performance):} 5{,}000 fresh patterns per model from the same prior. This is the headline number.
+  \item \textbf{Test set B (fixed settings):} a grid of fixed parameter settings (combinations of $\nbar$, cluster size and $\dtil$), with 400 replicate patterns each. It measures error at specific, controlled settings.
+  \item \textbf{Test set C (paths to Poisson):} for each model, the shape is held fixed while the strength of the structure is turned down in 16 steps until the model is exactly Poisson (300 replicates per step, at two values of $\nbar$). Exact Poisson patterns are added and used to calibrate the 5\% detection threshold. It measures how performance degrades as the pattern approaches Poisson.
+\end{itemize}
+
+% ============================================================================
+\section{Methods compared}
+
+\begin{itemize}
+  \item \textbf{Classical baselines:} the 1-D CNN of Vihrs (2022), reading summary functions sampled on a radius grid, plus the point count $n(x)$. Four input sets: $L$ alone (the published baseline), $L+F+G+J$ (all four standard summary functions), $G$ alone, $F$ alone. $F$, $G$, $J$ were tried on two radius grids ($r_{\max}=0.25$ and $0.08$); the grid was chosen on the validation set, never on the test sets.
+  \item \textbf{PH:} a CNN on the persistence image of the $H_0$ diagram of the DTM filtration ($k=5$), plus $n(x)$ for parameter estimation. It is one filtration and one homology dimension, with no fusion and no summary functions mixed in.
+  \item \textbf{Training:} the same for all: early stopping on validation loss, 10 seeds (9371--9380). Tables report mean $\pm$ standard deviation over seeds.
+\end{itemize}
+
+% ============================================================================
+\section{Parameter estimation (inference)}
+
+\begin{itemize}
+  \item \textbf{Metric:} normalised loss = mean squared error of the log-parameters, standardised with the training statistics, averaged over the model's parameters. Lower is better; $\approx 1$ means predicting the training mean. Values are \emph{not} comparable across models.
+  \item \textbf{Parameters estimated:} Thomas $(\kappa,\mu,\sigma)$; nested $(\kappa,\mu_1,\mu_2,\sigma_1,\sigma)$; Mat\'ern II $(\lambda_p,R)$; LGCP $(\nbar,\sigma^2,s)$.
+  \item \textbf{Bold} marks the single best model per family on test set A.
+\end{itemize}
 
 \begin{table}[ht]
 \centering\small
-\begin{tabularx}{\linewidth}{@{}l L c@{}}
+\begin{tabular}{@{}ll ccc@{}}
 \toprule
-Arm & Inputs & Grid $r_{\max}$\\
+Family & Model & A (prior) & B (fixed settings) & C (paths to Poisson)\\
 \midrule
-L & $L(r)-r$, $n(x)$ & --\\
-LFGJ & $L$, $F$, $G$, $J$, $n(x)$ & 0.25\\
-LFGJ\_r080 & $L$, $F$, $G$, $J$, $n(x)$ & 0.08\\
-G & $G$, $n(x)$ & 0.25\\
-F & $F$, $n(x)$ & 0.25\\
-G\_r080 & $G$, $n(x)$ & 0.08\\
-F\_r080 & $F$, $n(x)$ & 0.08\\
-\bottomrule
-\end{tabularx}
-\caption{Classical-baseline arms. Within a grid pair (LFGJ vs.\ LFGJ\_r080, G vs.\ G\_r080, F vs.\ F\_r080) the grid is selected on validation loss/accuracy, never on the reported test metric; the selected arm is marked with a $\checkmark$ below.}
-\label{tab:arms}
-\end{table}
-
-Evaluation uses three held-out sets: \textbf{A}, 5{,}000 patterns per family drawn from the prior (risk over the prior; used for the headline numbers and all $\dtil$/$\nbar$ breakdowns); \textbf{B}, a grid of fixed parameter cells $\times$ 400 replicates; \textbf{C}, sixteen-level ladders from each structured family down to exact CSR, plus CSR anchors (used for the detection task and, pooled, for the classification $\dtil$ breakdown at the low end). All values below are mean $\pm$ sample SD over the 10 seeds.
-
-% ============================================================================
-\section{Parameter estimation}\label{sec:params}
-
-The target is normalised loss $L$ = MSE on log-then-$z$-scored targets (train-split statistics), averaged over a family's target parameters; lower is better, $L\approx1$ is the train-mean predictor. Losses are \emph{not} comparable across families (different targets, different scales).
-
-\begin{table}[ht]
-\centering\scriptsize
-\begin{tabular}{@{}ll cccc@{}}
-\toprule
-Family & Arm & Val loss (selection) & $A$: all & $B$: whole set & $C$: whole set\\
+Thomas & $L$ & 0.1365 $\pm$ 0.0007 & 0.1371 $\pm$ 0.0054 & 0.2818 $\pm$ 0.0208\\
+ & \B{$L{+}F{+}G{+}J$} & \B{0.1364 $\pm$ 0.0015} & \B{0.1406 $\pm$ 0.0056} & \B{0.2749 $\pm$ 0.0140}\\
+ & $G$ & 0.3308 $\pm$ 0.0031 & 0.4021 $\pm$ 0.0134 & 0.6438 $\pm$ 0.0442\\
+ & $F$ & 0.1926 $\pm$ 0.0020 & 0.2033 $\pm$ 0.0079 & 0.4096 $\pm$ 0.0401\\
+ & PH image $H_0$ & 0.1771 $\pm$ 0.0045 & 0.1931 $\pm$ 0.0078 & 0.3923 $\pm$ 0.0319\\
 \midrule
-thomas & L & 0.1311 $\pm$ 0.0009 & 0.1365 $\pm$ 0.0007 & 0.1371 $\pm$ 0.0054 & 0.2818 $\pm$ 0.0208\\
-thomas & LFGJ & 0.1317 $\pm$ 0.0016 $\checkmark$ & 0.1364 $\pm$ 0.0015 & 0.1406 $\pm$ 0.0056 & 0.2749 $\pm$ 0.0140\\
-thomas & LFGJ\_r080 & 0.1349 $\pm$ 0.0018 & 0.1389 $\pm$ 0.0017 & 0.1444 $\pm$ 0.0067 & 0.2880 $\pm$ 0.0240\\
-thomas & G & 0.3171 $\pm$ 0.0024 $\checkmark$ & 0.3308 $\pm$ 0.0031 & 0.4021 $\pm$ 0.0134 & 0.6438 $\pm$ 0.0442\\
-thomas & F & 0.1793 $\pm$ 0.0019 $\checkmark$ & 0.1926 $\pm$ 0.0020 & 0.2033 $\pm$ 0.0079 & 0.4096 $\pm$ 0.0401\\
-thomas & G\_r080 & 0.3234 $\pm$ 0.0023 & 0.3432 $\pm$ 0.0038 & 0.4196 $\pm$ 0.0127 & 0.6875 $\pm$ 0.0495\\
-thomas & F\_r080 & 0.1797 $\pm$ 0.0024 & 0.1910 $\pm$ 0.0026 & 0.2050 $\pm$ 0.0072 & 0.4180 $\pm$ 0.0290\\
+Nested & $L$ & 0.3645 $\pm$ 0.0023 & 0.2045 $\pm$ 0.0102 & 0.1689 $\pm$ 0.0128\\
+ & \B{$L{+}F{+}G{+}J$} & \B{0.3582 $\pm$ 0.0029} & \B{0.1951 $\pm$ 0.0205} & \B{0.1713 $\pm$ 0.0237}\\
+ & $G$ & 0.4363 $\pm$ 0.0015 & 0.1960 $\pm$ 0.0141 & 0.1572 $\pm$ 0.0163\\
+ & $F$ & 0.4683 $\pm$ 0.0049 & 0.2643 $\pm$ 0.0143 & 0.2544 $\pm$ 0.0242\\
+ & PH image $H_0$ & 0.4540 $\pm$ 0.0111 & 0.2531 $\pm$ 0.0234 & 0.2515 $\pm$ 0.0404\\
 \midrule
-nested & L & 0.3795 $\pm$ 0.0028 & 0.3645 $\pm$ 0.0023 & 0.2045 $\pm$ 0.0102 & 0.1689 $\pm$ 0.0128\\
-nested & LFGJ & 0.3723 $\pm$ 0.0030 $\checkmark$ & 0.3582 $\pm$ 0.0029 & 0.1951 $\pm$ 0.0205 & 0.1713 $\pm$ 0.0237\\
-nested & LFGJ\_r080 & 0.3817 $\pm$ 0.0031 & 0.3667 $\pm$ 0.0024 & 0.1927 $\pm$ 0.0117 & 0.1668 $\pm$ 0.0170\\
-nested & G & 0.4486 $\pm$ 0.0013 & 0.4415 $\pm$ 0.0022 & 0.2061 $\pm$ 0.0137 & 0.1698 $\pm$ 0.0175\\
-nested & F & 0.5025 $\pm$ 0.0039 & 0.4868 $\pm$ 0.0045 & 0.2763 $\pm$ 0.0165 & 0.2726 $\pm$ 0.0259\\
-nested & G\_r080 & 0.4433 $\pm$ 0.0016 $\checkmark$ & 0.4363 $\pm$ 0.0015 & 0.1960 $\pm$ 0.0141 & 0.1572 $\pm$ 0.0163\\
-nested & F\_r080 & 0.4811 $\pm$ 0.0039 $\checkmark$ & 0.4683 $\pm$ 0.0049 & 0.2643 $\pm$ 0.0143 & 0.2544 $\pm$ 0.0242\\
+Mat\'ern II & $L$ & 0.0184 $\pm$ 0.0008 & 0.0166 $\pm$ 0.0008 & 0.0178 $\pm$ 0.0008\\
+ & \B{$L{+}F{+}G{+}J$} & \B{0.0180 $\pm$ 0.0003} & \B{0.0163 $\pm$ 0.0005} & \B{0.0172 $\pm$ 0.0007}\\
+ & $G$ & 0.0185 $\pm$ 0.0003 & 0.0160 $\pm$ 0.0003 & 0.0174 $\pm$ 0.0004\\
+ & $F$ & 0.0995 $\pm$ 0.0044 & 0.0922 $\pm$ 0.0042 & 0.0934 $\pm$ 0.0050\\
+ & PH image $H_0$\,$^\dagger$ & 0.1002 $\pm$ 0.0658 & 0.0868 $\pm$ 0.0588 & 0.0930 $\pm$ 0.0647\\
 \midrule
-matern2 & L & 0.0171 $\pm$ 0.0005 & 0.0184 $\pm$ 0.0008 & 0.0166 $\pm$ 0.0008 & 0.0178 $\pm$ 0.0008\\
-matern2 & LFGJ & 0.0171 $\pm$ 0.0004 & 0.0182 $\pm$ 0.0003 & 0.0168 $\pm$ 0.0006 & 0.0182 $\pm$ 0.0007\\
-matern2 & LFGJ\_r080 & 0.0167 $\pm$ 0.0003 $\checkmark$ & 0.0180 $\pm$ 0.0003 & 0.0163 $\pm$ 0.0005 & 0.0172 $\pm$ 0.0007\\
-matern2 & G & 0.0194 $\pm$ 0.0004 & 0.0208 $\pm$ 0.0005 & 0.0182 $\pm$ 0.0004 & 0.0198 $\pm$ 0.0003\\
-matern2 & F & 0.0954 $\pm$ 0.0023 & 0.1037 $\pm$ 0.0026 & 0.0957 $\pm$ 0.0025 & 0.0958 $\pm$ 0.0036\\
-matern2 & G\_r080 & 0.0169 $\pm$ 0.0002 $\checkmark$ & 0.0185 $\pm$ 0.0003 & 0.0160 $\pm$ 0.0003 & 0.0174 $\pm$ 0.0004\\
-matern2 & F\_r080 & 0.0910 $\pm$ 0.0039 $\checkmark$ & 0.0995 $\pm$ 0.0044 & 0.0922 $\pm$ 0.0042 & 0.0934 $\pm$ 0.0050\\
-\midrule
-lgcp & L & 0.2155 $\pm$ 0.0008 & 0.2203 $\pm$ 0.0011 & 0.1889 $\pm$ 0.0042 & 0.1051 $\pm$ 0.0053\\
-lgcp & LFGJ & 0.2175 $\pm$ 0.0011 $\checkmark$ & 0.2217 $\pm$ 0.0027 & 0.1902 $\pm$ 0.0054 & 0.1052 $\pm$ 0.0071\\
-lgcp & LFGJ\_r080 & 0.2186 $\pm$ 0.0012 & 0.2217 $\pm$ 0.0019 & 0.1886 $\pm$ 0.0046 & 0.0999 $\pm$ 0.0053\\
-lgcp & G & 0.3025 $\pm$ 0.0015 $\checkmark$ & 0.3084 $\pm$ 0.0013 & 0.2637 $\pm$ 0.0051 & 0.1055 $\pm$ 0.0031\\
-lgcp & F & 0.2683 $\pm$ 0.0007 $\checkmark$ & 0.2775 $\pm$ 0.0012 & 0.2357 $\pm$ 0.0056 & 0.0975 $\pm$ 0.0045\\
-lgcp & G\_r080 & 0.3043 $\pm$ 0.0005 & 0.3134 $\pm$ 0.0015 & 0.2646 $\pm$ 0.0027 & 0.1033 $\pm$ 0.0024\\
-lgcp & F\_r080 & 0.2688 $\pm$ 0.0028 & 0.2763 $\pm$ 0.0026 & 0.2390 $\pm$ 0.0040 & 0.0939 $\pm$ 0.0049\\
+LGCP & \B{$L$} & \B{0.2203 $\pm$ 0.0011} & \B{0.1889 $\pm$ 0.0042} & \B{0.1051 $\pm$ 0.0053}\\
+ & $L{+}F{+}G{+}J$ & 0.2217 $\pm$ 0.0027 & 0.1902 $\pm$ 0.0054 & 0.1052 $\pm$ 0.0071\\
+ & $G$ & 0.3084 $\pm$ 0.0013 & 0.2637 $\pm$ 0.0051 & 0.1055 $\pm$ 0.0031\\
+ & $F$ & 0.2775 $\pm$ 0.0012 & 0.2357 $\pm$ 0.0056 & 0.0975 $\pm$ 0.0045\\
+ & PH image $H_0$\,$^\dagger$ & 0.3465 $\pm$ 0.1597 & 0.2611 $\pm$ 0.0874 & 0.1422 $\pm$ 0.0665\\
 \bottomrule
 \end{tabular}
-\caption{Parameter estimation: normalised loss $L$ (lower is better), mean $\pm$ SD over 10 seeds. Full $\dtil$/$\nbar$ breakdowns of set $A$ are in Table~\ref{tab:params-regime}. $\checkmark$ marks the grid winning on validation within its pair.}
-\label{tab:params-summary}
+\caption{Parameter estimation: normalised loss (lower is better), mean $\pm$ SD over 10 seeds. $^\dagger$\,Unstable across seeds; see the notes below.}
+\label{tab:params}
 \end{table}
 
-\textbf{Reading.} L alone is already competitive with LFGJ on every family; the extra summary functions buy at most a few thousandths of loss (thomas, lgcp) and can hurt (nested, where L wins outright). G-only and F-only arms are markedly worse on thomas, nested and lgcp -- $G$ and $F$ underdetermine the shape parameters that $L$'s full second-order profile pins down -- but matern2 is the exception: $L$, $G$ and LFGJ are all near-optimal ($L\approx0.018$) while $F$-only is $\sim$5$\times$ worse (0.10), consistent with $F$ carrying little information about a hard-core radius that $G$ and $L$ both see directly. The $0.25$ vs.\ $0.08$ grid choice barely moves any arm. Set $C$ (paths to CSR) is much harder than $A$ or $B$ for thomas and nested (loss roughly doubles), reflecting the low-amplitude end of the ladder; matern2 and lgcp are comparatively flat across sets.
-
 \begin{table}[ht]
-\centering\scriptsize
-\begin{tabular}{@{}ll cccccc c ccc@{}}
+\centering\small
+\begin{tabular}{@{}ll cccccc@{}}
 \toprule
-Family & Arm & \multicolumn{6}{c}{$A$, by $\dtil$ band} & & \multicolumn{3}{c}{$A$, by $\nbar$ band}\\
-\cmidrule(lr){3-8}\cmidrule(l){10-12}
- & & [0,0.5) & [0.5,1) & [1,2) & [2,4) & [4,8) & [8,$\infty$) & & [100,200) & [200,400) & [400,800)\\
-\midrule
-thomas & L & 0.290 & 0.268 & 0.189 & 0.072 & 0.033 & 0.021 & & 0.177 & 0.142 & 0.093\\
-thomas & LFGJ & 0.283 & 0.278 & 0.192 & 0.070 & 0.033 & 0.020 & & 0.175 & 0.140 & 0.096\\
-thomas & G & 0.382 & 0.459 & 0.442 & 0.370 & 0.318 & 0.160 & & 0.374 & 0.341 & 0.280\\
-thomas & F & 0.317 & 0.387 & 0.321 & 0.147 & 0.068 & 0.033 & & 0.222 & 0.198 & 0.159\\
-\midrule
-nested & L & 0.503 & 0.528 & 0.465 & 0.309 & 0.253 & 0.179 & & 0.389 & 0.364 & 0.342\\
-nested & LFGJ & 0.504 & 0.535 & 0.458 & 0.305 & 0.226 & 0.171 & & 0.376 & 0.363 & 0.335\\
-nested & G & 0.523 & 0.575 & 0.524 & 0.410 & 0.347 & 0.310 & & 0.434 & 0.446 & 0.444\\
-nested & F & 0.545 & 0.596 & 0.571 & 0.461 & 0.415 & 0.371 & & 0.461 & 0.473 & 0.527\\
-\midrule
-matern2 & L & 0.033 & 0.017 & 0.013 & 0.009 & 0.010 & 0.010 & & 0.032 & 0.015 & 0.009\\
-matern2 & LFGJ & 0.032 & 0.017 & 0.015 & 0.010 & 0.009 & 0.009 & & 0.031 & 0.015 & 0.009\\
-matern2 & G & 0.038 & 0.021 & 0.015 & 0.009 & 0.010 & 0.009 & & 0.033 & 0.017 & 0.013\\
-matern2 & F & 0.157 & 0.070 & 0.131 & 0.110 & 0.024 & 0.014 & & 0.130 & 0.098 & 0.082\\
-\midrule
-lgcp & L & 0.275 & 0.290 & 0.252 & 0.180 & 0.142 & 0.139 & & 0.259 & 0.229 & 0.172\\
-lgcp & LFGJ & 0.281 & 0.289 & 0.256 & 0.179 & 0.141 & 0.138 & & 0.261 & 0.232 & 0.172\\
-lgcp & G & 0.342 & 0.306 & 0.343 & 0.316 & 0.269 & 0.254 & & 0.328 & 0.321 & 0.277\\
-lgcp & F & 0.309 & 0.311 & 0.324 & 0.282 & 0.224 & 0.189 & & 0.297 & 0.291 & 0.245\\
-\bottomrule
-\end{tabular}
-\caption{Parameter estimation, set $A$: normalised loss $L$ by $\dtil$ and $\nbar$ band (means over 10 seeds; SDs omitted, all $\le0.02$). Only the 0.25-grid arm of each pair is shown; the 0.08 grid is materially the same (Table~\ref{tab:params-summary}). Loss falls monotonically with $\dtil$ for every arm and family (near-CSR patterns are hardest to place), and with $\nbar$ (more points, less estimation noise), except matern2/F, whose non-monotone $\dtil$ profile reflects $F$'s weak identification of the hard-core scale away from the extremes.}
-\label{tab:params-regime}
-\end{table}
-
-% ============================================================================
-\section{Classification}\label{sec:classify}
-
-5-way accuracy (poisson, thomas, nested, matern2, lgcp); $A$ is class-balanced (5{,}000/family) so \emph{$A$: balanced acc.} is the headline number, $B$ and $C$ mix families by design and are reported for context only.
-
-\begin{table}[ht]
-\centering\scriptsize
-\begin{tabular}{@{}l cccc ccccc@{}}
-\toprule
-Arm & Val acc.\ (sel.) & $A$: balanced acc. & $B$ & $C$ & \multicolumn{5}{c}{$A$ recall by family}\\
-\cmidrule(l){6-10}
- & & & & & poisson & thomas & nested & matern2 & lgcp\\
-\midrule
-L & 0.6871 $\pm$ 0.0029 & 0.6862 $\pm$ 0.0021 & 0.6172 $\pm$ 0.0086 & 0.6143 $\pm$ 0.0076 & 0.813 & 0.503 & 0.599 & 0.906 & 0.610\\
-LFGJ & 0.7108 $\pm$ 0.0031 $\checkmark$ & 0.7109 $\pm$ 0.0019 & 0.6587 $\pm$ 0.0070 & 0.6354 $\pm$ 0.0071 & 0.836 & 0.522 & 0.631 & 0.892 & 0.673\\
-LFGJ\_r080 & 0.7102 $\pm$ 0.0019 & 0.7104 $\pm$ 0.0016 & 0.6594 $\pm$ 0.0067 & 0.6244 $\pm$ 0.0049 & 0.816 & 0.525 & 0.625 & 0.903 & 0.683\\
-G & 0.6019 $\pm$ 0.0035 $\checkmark$ & 0.6063 $\pm$ 0.0031 & 0.5039 $\pm$ 0.0097 & 0.4787 $\pm$ 0.0107 & 0.806 & 0.425 & 0.443 & 0.855 & 0.502\\
-F & 0.5656 $\pm$ 0.0038 & 0.5610 $\pm$ 0.0025 & 0.7695 $\pm$ 0.0088 & 0.4999 $\pm$ 0.0086 & 0.806 & 0.390 & 0.469 & 0.606 & 0.535\\
-G\_r080 & 0.6008 $\pm$ 0.0019 & 0.6079 $\pm$ 0.0021 & 0.7863 $\pm$ 0.0129 & 0.4795 $\pm$ 0.0070 & 0.806 & 0.407 & 0.439 & 0.867 & 0.521\\
-F\_r080 & 0.5733 $\pm$ 0.0044 $\checkmark$ & 0.5728 $\pm$ 0.0023 & 0.8011 $\pm$ 0.0123 & 0.4972 $\pm$ 0.0103 & 0.800 & 0.398 & 0.491 & 0.616 & 0.558\\
-\bottomrule
-\end{tabular}
-\caption{Classification: 5-way accuracy (higher is better), mean $\pm$ SD over 10 seeds. Full $\dtil$ breakdown of $A$ (structured families pooled) is in Table~\ref{tab:classify-regime}, and Figure~\ref{fig:regimes} (left) plots it. $\checkmark$ marks the grid winning on validation within its pair.}
-\label{tab:classify-summary}
-\end{table}
-
-\textbf{Reading.} LFGJ is the best arm on the headline metric ($A$: 0.711), $\sim$2.5 points above L-only (0.686) and $\sim$10 points above the single-function G/F arms ($\sim$0.56--0.61); the 0.25 vs.\ 0.08 grid makes almost no difference for LFGJ. Matern2 is the easiest family to recall for every arm (its hard-core signature is distinctive even from $G$ or $F$ alone, 0.86--0.91), while thomas and nested are hardest, and are exactly where LFGJ's margin over L is largest (thomas: 0.522 vs.\ 0.503; nested: 0.631 vs.\ 0.599). $F$-only is markedly worse at matern2 recall (0.61 vs.\ 0.86--0.91 for every other arm) -- the same blind spot to the hard-core scale seen in parameter estimation (\S\ref{sec:params}). On $B$ (fixed-parameter grid, family mix a design artefact) the $F$/G-only arms score higher than on $A$ or $C$; this is a distributional artefact of $B$'s parameter grid, not evidence the summary functions generalise better there.
-
-\begin{table}[ht]
-\centering\scriptsize
-\begin{tabular}{@{}l cccccc@{}}
-\toprule
-Arm & [0,0.5) & [0.5,1) & [1,2) & [2,4) & [4,8) & [8,$\infty$)\\
-\midrule
-L & 0.349 & 0.505 & 0.676 & 0.790 & 0.845 & 0.880\\
-LFGJ & 0.327 & 0.496 & 0.689 & 0.841 & 0.917 & 0.945\\
-LFGJ\_r080 & 0.344 & 0.502 & 0.695 & 0.838 & 0.911 & 0.943\\
-G & 0.263 & 0.380 & 0.538 & 0.689 & 0.793 & 0.784\\
-F & 0.134 & 0.289 & 0.495 & 0.672 & 0.776 & 0.770\\
-G\_r080 & 0.275 & 0.379 & 0.531 & 0.683 & 0.798 & 0.786\\
-F\_r080 & 0.146 & 0.303 & 0.509 & 0.682 & 0.792 & 0.801\\
-\bottomrule
-\end{tabular}
-\caption{Classification, set $A$: accuracy by $\dtil$ band, structured families pooled by pattern count (means over 10 seeds). Also Figure~\ref{fig:regimes} (left).}
-\label{tab:classify-regime}
-\end{table}
-
-Every arm improves monotonically with $\dtil$, as expected -- near-CSR patterns (the leftmost bands) are, by construction, the hardest to tell apart, and all arms sit close to chance (0.20 for 5-way) below $\dtil<0.5$. LFGJ's advantage over L widens with $\dtil$: at $\dtil\ge2$ it leads by 3--6 points, driven by $F$ and $G$'s complementary sensitivity once structure is visible.
-
-% ============================================================================
-\section{CSR detection}\label{sec:detect}
-
-Each classifier is reused as a detector, scored by $1-\hat P(\text{poisson})$, thresholded at the empirical 5\% level on held-out CSR anchors (set $C$, even replicates) and evaluated for power on the odd replicates.
-
-\begin{table}[ht]
-\centering\scriptsize
-\begin{tabular}{@{}l c cccccc@{}}
-\toprule
-Arm & Size & \multicolumn{6}{c}{Power by $\dtil$ band}\\
+ & & \multicolumn{6}{c}{Test set A, by distance from Poisson $\dtil$}\\
 \cmidrule(l){3-8}
- & & [0,0.5) & [0.5,1) & [1,2) & [2,4) & [4,8) & [8,$\infty$)\\
+Family & Model & [0, 0.5) & [0.5, 1) & [1, 2) & [2, 4) & [4, 8) & $\ge 8$\\
 \midrule
-L & 0.049 $\pm$ 0.003 & 0.274 & 0.581 & 0.899 & 0.990 & 0.999 & 1.000\\
-LFGJ & 0.049 $\pm$ 0.003 & 0.259 & 0.568 & 0.884 & 0.990 & 0.999 & 1.000\\
-LFGJ\_r080 & 0.049 $\pm$ 0.003 & 0.263 & 0.564 & 0.891 & 0.990 & 0.999 & 1.000\\
-G & 0.051 $\pm$ 0.003 & 0.171 & 0.345 & 0.652 & 0.898 & 0.988 & 1.000\\
-F & 0.049 $\pm$ 0.002 & 0.133 & 0.373 & 0.648 & 0.933 & 0.999 & 1.000\\
-G\_r080 & 0.048 $\pm$ 0.003 & 0.176 & 0.341 & 0.662 & 0.886 & 0.986 & 1.000\\
-F\_r080 & 0.048 $\pm$ 0.003 & 0.133 & 0.380 & 0.647 & 0.935 & 0.999 & 1.000\\
+Thomas & $L$ & 0.290 & 0.268 & 0.189 & 0.072 & 0.033 & 0.021\\
+ & \B{$L{+}F{+}G{+}J$} & \B{0.283} & \B{0.278} & \B{0.192} & \B{0.070} & \B{0.033} & \B{0.020}\\
+ & PH image $H_0$ & 0.338 & 0.338 & 0.274 & 0.134 & 0.051 & 0.022\\
+\midrule
+Nested & $L$ & 0.503 & 0.528 & 0.465 & 0.309 & 0.253 & 0.179\\
+ & \B{$L{+}F{+}G{+}J$} & \B{0.504} & \B{0.535} & \B{0.457} & \B{0.305} & \B{0.226} & \B{0.171}\\
+ & PH image $H_0$ & 0.597 & 0.593 & 0.548 & 0.441 & 0.359 & 0.239\\
+\midrule
+Mat\'ern II & $L$ & 0.033 & 0.017 & 0.013 & 0.009 & 0.010 & 0.010\\
+ & \B{$L{+}F{+}G{+}J$} & \B{0.032} & \B{0.016} & \B{0.013} & \B{0.010} & \B{0.009} & \B{0.007}\\
+ & PH image $H_0$ & 0.149 & 0.047 & 0.079 & 0.110 & 0.058 & 0.073\\
+\midrule
+LGCP & \B{$L$} & \B{0.275} & \B{0.290} & \B{0.252} & \B{0.180} & \B{0.142} & \B{0.139}\\
+ & $L{+}F{+}G{+}J$ & 0.281 & 0.289 & 0.256 & 0.179 & 0.141 & 0.138\\
+ & PH image $H_0$ & 0.438 & 0.338 & 0.297 & 0.270 & 0.299 & 0.388\\
 \bottomrule
 \end{tabular}
-\caption{CSR detection: held-out size and power (higher is better) at the calibrated 5\% threshold, mean over 10 seeds. Also Figure~\ref{fig:regimes} (right).}
-\label{tab:detect-regime}
+\caption{Parameter estimation on test set A by $\dtil$ band (normalised loss, mean over 10 seeds). Bold = the family's best model from Table~\ref{tab:params}.}
+\label{tab:params-delta}
 \end{table}
 
-\textbf{Reading.} All seven arms calibrate correctly (size 0.048--0.051 against the 5\% target) and reach essentially perfect power by $\dtil\ge4$. L and LFGJ are statistically indistinguishable and dominate the single-function arms throughout the range that matters, most visibly at $\dtil\in[0.5,2)$ where L/LFGJ already reach 0.56--0.90 power while G/F sit at 0.34--0.66 -- roughly a full $\dtil$ band behind. Adding $F$/$G$/$J$ to $L$ does not improve detection (it is not better than L alone at any band, and marginally worse at $\dtil\in[0.5,2)$), consistent with $L$ alone already carrying most of the departure-from-CSR signal that a global envelope test targets.
+\begin{itemize}
+  \item \textbf{A classical model wins on every family.} $L{+}F{+}G{+}J$ is best on Thomas, nested and Mat\'ern II; $L$ alone is best on LGCP. On Thomas, Mat\'ern II and LGCP, $L$ and $L{+}F{+}G{+}J$ are within about one standard deviation of each other, so adding $F,G,J$ to $L$ buys little; only on nested is the gain clear (0.358 vs.\ 0.365).
+  \item \textbf{PH image $H_0$ is behind the best classical model on every family:} Thomas 0.177 vs.\ 0.136, nested 0.454 vs.\ 0.358. It is better than $G$ alone on Thomas and than $F$ alone on Thomas and nested.
+  \item \textbf{Where PH loses:} near Poisson. On Thomas the gap to the best model is 0.05--0.08 for $\dtil < 4$, and it disappears for strongly clustered patterns ($\dtil \ge 8$: 0.022 vs.\ 0.020).
+  \item $^\dagger$\,\textbf{PH is unstable on Mat\'ern II and LGCP.} On Mat\'ern II, 6 seeds reach 0.046--0.054 but 4 stopped early at 0.14--0.19. On LGCP, 7 seeds reach $\approx$0.25 but 3 got stuck at 0.58, the value obtained from $n(x)$ alone. Even the good seeds are well behind the classical models (Mat\'ern II 0.018, LGCP 0.220), so the conclusion does not depend on the failed seeds.
+  \item Loss broadly falls as $\dtil$ grows (not for PH on Mat\'ern II and LGCP, whose averages mix good and failed seeds). On Mat\'ern II the classical models are almost exact ($\approx$0.01--0.03).
+\end{itemize}
 
 % ============================================================================
-\section{Persistence images, $H_0$ (parameter estimation, preliminary)}\label{sec:pi-h0}
+\section{Classification}
 
-First persistence-feature cell on the same DV3 splits: a CNN (\code{pi_multik}) on a single persistence image of the DTM filtration ($k=5$), $H_0$ only, plus $n(x)$, 10 seeds, same loss and sets as \S\ref{sec:params}. Results in \code{results/dv3_<family>/dtm_k5/pi_multik_h0/}. Classification is still running and $H_1$ is excluded: its raw image intensities ($\sim$10$\times$ below $H_0$'s) are swamped by the encoder's coordinate channels, so the $H_1$ runs collapsed to an $n(x)$-only predictor (parameters) or chance (classification). They are to be rerun with per-channel input normalisation.
+\begin{itemize}
+  \item \textbf{Task:} 5-way classification (Poisson, Thomas, nested, Mat\'ern II, LGCP). All models are trained on the same pooled training set (50{,}000 patterns).
+  \item \textbf{Metric:} accuracy (higher is better; chance is 0.20). Test set A has 5{,}000 patterns per model, so its accuracy is the headline. B and C mix the models unevenly by design and are shown for completeness.
+  \item \textbf{Bold} marks, for each family, the single model that recognises it best (recall on A).
+\end{itemize}
 
 \begin{table}[ht]
-\centering\scriptsize
-\begin{tabular}{@{}ll cccc@{}}
+\centering\small
+\begin{tabular}{@{}l ccc ccccc@{}}
 \toprule
-Family & Arm (seeds) & Val loss & $A$: all & $B$: whole set & $C$: whole set\\
+ & \multicolumn{3}{c}{Overall accuracy} & \multicolumn{5}{c}{Test set A: recall per family}\\
+\cmidrule(lr){2-4}\cmidrule(l){5-9}
+Model & A & B & C & Poisson & Thomas & Nested & Mat\'ern II & LGCP\\
 \midrule
-thomas & PI H0 (10) & 0.1651 $\pm$ 0.0058 & 0.1771 $\pm$ 0.0045 & 0.1931 $\pm$ 0.0078 & 0.3923 $\pm$ 0.0319\\
-thomas & \emph{L (ref.)} & 0.1311 $\pm$ 0.0009 & 0.1365 $\pm$ 0.0007 & 0.1371 $\pm$ 0.0054 & 0.2818 $\pm$ 0.0208\\
-\midrule
-nested & PI H0 (10) & 0.4676 $\pm$ 0.0100 & 0.4540 $\pm$ 0.0111 & 0.2531 $\pm$ 0.0234 & 0.2515 $\pm$ 0.0404\\
-nested & \emph{L (ref.)} & 0.3795 $\pm$ 0.0028 & 0.3645 $\pm$ 0.0023 & 0.2045 $\pm$ 0.0102 & 0.1689 $\pm$ 0.0128\\
-\midrule
-matern2 & PI H0 (10) & 0.0969 $\pm$ 0.0633 & 0.1002 $\pm$ 0.0658 & 0.0868 $\pm$ 0.0588 & 0.0930 $\pm$ 0.0647\\
-matern2 & \emph{L (ref.)} & 0.0171 $\pm$ 0.0005 & 0.0184 $\pm$ 0.0008 & 0.0166 $\pm$ 0.0008 & 0.0178 $\pm$ 0.0008\\
-\midrule
-lgcp & PI H0 (10) & 0.3430 $\pm$ 0.1613 & 0.3465 $\pm$ 0.1597 & 0.2611 $\pm$ 0.0874 & 0.1422 $\pm$ 0.0665\\
-lgcp & \emph{L (ref.)} & 0.2155 $\pm$ 0.0008 & 0.2203 $\pm$ 0.0011 & 0.1889 $\pm$ 0.0042 & 0.1051 $\pm$ 0.0053\\
+$L$ & 0.686 $\pm$ 0.002 & 0.617 & 0.614 & 0.813 & 0.503 & 0.599 & \B{0.906} & 0.610\\
+$L{+}F{+}G{+}J$ & 0.711 $\pm$ 0.002 & 0.659 & 0.635 & \B{0.836} & \B{0.522} & \B{0.631} & 0.892 & \B{0.673}\\
+$G$ & 0.606 $\pm$ 0.003 & 0.504 & 0.479 & 0.806 & 0.425 & 0.443 & 0.855 & 0.502\\
+$F$ & 0.573 $\pm$ 0.002 & 0.498 & 0.497 & 0.800 & 0.398 & 0.492 & 0.616 & 0.558\\
+PH image $H_0$ & 0.641 $\pm$ 0.005 & 0.585 & 0.571 & 0.808 & 0.445 & 0.625 & 0.666 & 0.663\\
 \bottomrule
 \end{tabular}
-\caption{Persistence image ($H_0$, DTM $k=5$) vs.\ the L-only classical arm (Table~\ref{tab:params-summary}): normalised loss $L$, mean $\pm$ SD over 10 seeds. The matern2 and lgcp SDs reflect bimodal training, not noise: see text.}
-\label{tab:pi-h0-summary}
+\caption{Classification accuracy, mean over 10 seeds (SD shown for A; B and C SDs are $\le 0.02$).}
+\label{tab:classify}
 \end{table}
 
 \begin{table}[ht]
-\centering\scriptsize
-\begin{tabular}{@{}ll cccccc c ccc@{}}
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}l cccccc c c cccccc@{}}
 \toprule
-Family & Arm & \multicolumn{6}{c}{$A$, by $\dtil$ band} & & \multicolumn{3}{c}{$A$, by $\nbar$ band}\\
-\cmidrule(lr){3-8}\cmidrule(l){10-12}
- & & [0,0.5) & [0.5,1) & [1,2) & [2,4) & [4,8) & [8,$\infty$) & & [100,200) & [200,400) & [400,800)\\
+ & \multicolumn{6}{c}{Accuracy on A, by $\dtil$ (structured models)} & & & \multicolumn{6}{c}{Detection power on C, by $\dtil$}\\
+\cmidrule(lr){2-7}\cmidrule(l){10-15}
+Model & [0,.5) & [.5,1) & [1,2) & [2,4) & [4,8) & $\ge$8 & & size & [0,.5) & [.5,1) & [1,2) & [2,4) & [4,8) & $\ge$8\\
 \midrule
-thomas & PI H0 & 0.338 & 0.338 & 0.274 & 0.134 & 0.051 & 0.022 & & 0.222 & 0.185 & 0.126\\
-nested & PI H0 & 0.597 & 0.593 & 0.548 & 0.441 & 0.359 & 0.239 & & 0.448 & 0.450 & 0.464\\
-matern2 & PI H0 & 0.149 & 0.047 & 0.079 & 0.110 & 0.058 & 0.073 & & 0.131 & 0.090 & 0.080\\
-lgcp & PI H0 & 0.438 & 0.338 & 0.297 & 0.270 & 0.299 & 0.388 & & 0.361 & 0.361 & 0.319\\
+$L$ & 0.349 & 0.505 & 0.676 & 0.790 & 0.845 & 0.880 & & 0.049 & 0.274 & 0.581 & 0.899 & 0.990 & 0.999 & 1.000\\
+$L{+}F{+}G{+}J$ & 0.327 & 0.496 & 0.689 & 0.841 & 0.917 & 0.945 & & 0.049 & 0.259 & 0.568 & 0.884 & 0.990 & 0.999 & 1.000\\
+$G$ & 0.263 & 0.380 & 0.538 & 0.689 & 0.793 & 0.784 & & 0.051 & 0.171 & 0.345 & 0.652 & 0.898 & 0.988 & 1.000\\
+$F$ & 0.146 & 0.303 & 0.509 & 0.682 & 0.792 & 0.801 & & 0.048 & 0.133 & 0.380 & 0.647 & 0.935 & 0.999 & 1.000\\
+PH image $H_0$ & 0.151 & 0.406 & 0.632 & 0.791 & 0.869 & 0.927 & & 0.051 & 0.155 & 0.445 & 0.766 & 0.979 & 0.999 & 1.000\\
 \bottomrule
 \end{tabular}
-\caption{Persistence image ($H_0$, DTM $k=5$), set $A$: normalised loss by $\dtil$ and $\nbar$ band (means over 10 seeds, all seeds included). Compare the L rows of Table~\ref{tab:params-regime}.}
-\label{tab:pi-h0-regime}
+\caption{Left: classification accuracy on A by $\dtil$ band, pooling the four non-Poisson models. Right: the classifiers reused as tests of "Poisson vs.\ not Poisson" (score $=1-P(\text{Poisson})$), with the threshold set at 5\% on exact-Poisson patterns; "size" is the achieved false-alarm rate on held-out Poisson patterns, then the power on the paths to Poisson.}
+\label{tab:classify-delta}
 \end{table}
 
-\textbf{Reading.} On every family the $H_0$ persistence image is worse than the L-only baseline on all three sets. On thomas and nested, where training is stable (SD $\le0.011$), the gap is 0.04 (thomas, 0.177 vs.\ 0.137) and 0.09 (nested, 0.454 vs.\ 0.365) on $A$. PI~H0 shares L's regime profile: loss falls with $\dtil$, and at $\dtil\ge8$ on thomas it matches L (0.022 vs.\ 0.021). The gap is therefore concentrated near CSR. Matern2 and lgcp are bimodal across seeds. On matern2, 6 seeds reach $A$ = 0.046--0.054, but 4 stopped early (epochs 55--66) at 0.14--0.19. On lgcp, 7 seeds reach 0.244--0.251, but 3 are stuck at 0.578, the $n(x)$-only value. Even the good seeds trail L (matern2 0.018, lgcp 0.220), so the ordering does not depend on the failures, but the means above overstate the typical gap on these two families.
+\begin{itemize}
+  \item \textbf{$L{+}F{+}G{+}J$ is the best classifier:} 0.711 on A, and it recognises four of the five families best. $L$ alone recognises Mat\'ern II best (0.906).
+  \item \textbf{PH image $H_0$ (0.641) is third of the five models on A,} 7 points behind $L{+}F{+}G{+}J$ and 4.5 points behind $L$ alone. It is ahead of $G$ and $F$ alone. It is nearly as good as the best on nested (0.625 vs.\ 0.631) and LGCP (0.663 vs.\ 0.673), but clearly worse on Thomas (0.445) and especially Mat\'ern II (0.666 vs.\ 0.89--0.91).
+  \item \textbf{By distance from Poisson:} every model is weak below $\dtil = 0.5$ (0.15--0.35, chance being 0.20) and improves steadily. PH is weakest near Poisson (0.151 below $\dtil=0.5$, vs.\ 0.349 for $L$). For strongly structured patterns it overtakes $L$ alone ($\dtil \ge 4$: 0.869--0.927 vs.\ 0.845--0.880), but stays behind $L{+}F{+}G{+}J$.
+  \item \textbf{Detecting departures from Poisson:} all models hold the 5\% false-alarm rate (0.048--0.051). $L$ and $L{+}F{+}G{+}J$ are the most powerful where it matters ($\dtil < 2$): about 0.57--0.58 power at $\dtil\in[0.5,1)$, vs.\ 0.445 for PH and 0.35--0.38 for $G$ or $F$ alone. Above $\dtil \approx 4$ every model detects essentially everything.
+\end{itemize}
 
 % ============================================================================
-\section{Visual summary}\label{sec:figs}
+\section{Next steps}
 
-\begin{figure}[ht]
-\centering
-\includegraphics[width=0.95\linewidth]{figs/params_by_family}
-\caption{Parameter-estimation loss (set $A$, lower is better) by family and arm. L, LFGJ and LFGJ\_r080 track each other closely on every family; G and F alone are worse on thomas, nested and lgcp, and F alone is markedly worse on matern2, where the hard-core radius is not well identified from $F$ without $G$ or $L$.}
-\label{fig:params-fig}
-\end{figure}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figs/regime_results}
-\caption{Regime results vs.\ $\dtil$, one line per arm. \emph{Left:} classification accuracy, set $A$ (Table~\ref{tab:classify-regime}). \emph{Right:} CSR-detection power on set $C$ (Table~\ref{tab:detect-regime}); the dashed line marks the 5\% target size. L and the LFGJ arms (blue/black) pull ahead of the single-function G/F arms (red/green/orange) in both tasks, with the largest gap in the mid range $\dtil\in[0.5,2)$ where a pattern is not yet obviously non-Poisson.}
-\label{fig:regimes}
-\end{figure}
-
-% ============================================================================
-\section{Summary}\label{sec:summary}
-
-Across all three tasks the same pattern holds: $L(r)-r$ alone is a strong baseline, adding $F$, $G$, $J$ (LFGJ) helps classification meaningfully (+2.5 pts balanced accuracy on $A$, widening with $\dtil$) but not detection or, mostly, parameter estimation; and the single-function G-only/F-only arms are consistently the weakest, with $F$-only specifically blind to matern2's hard-core scale in both parameter estimation and classification. The 0.25 vs.\ 0.08 radius grid choice is a non-factor everywhere it was tried. These are the classical-baseline numbers against which the persistence-based (PH) estimators/classifiers on the same DV3 splits should be compared.
+\begin{itemize}
+  \item Fix the $H_1$ persistence image (normalise the input intensities) and rerun it.
+  \item Run the remaining PH features: Betti curves and persistence landscapes, $H_0$ and $H_1$ separately; then DTM $k=10, 15$ and the Rips filtration (these diagrams still have to be computed).
+  \item Investigate the unstable PH training on Mat\'ern II and LGCP (seeds that stop early or collapse to the $n(x)$-only solution).
+  \item Add the non-learned classical references: minimum-contrast parameter fits and the classical envelope tests for detection.
+\end{itemize}
 
 \end{document}
