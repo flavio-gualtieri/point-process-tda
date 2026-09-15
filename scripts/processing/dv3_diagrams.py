@@ -565,8 +565,8 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("plan", help="dry run: chunking and per-job balance")
     common(p)
     p.add_argument("--n-jobs", type=int, required=True)
-    p.add_argument("--cpus", type=int, default=96)
-    p.add_argument("--mem-gb", type=float, default=376)  # compute QOS per-job cap
+    p.add_argument("--cpus", type=int, default=48)
+    p.add_argument("--mem-gb", type=float, default=180)  # matches slurm/dv3_diagrams_compute.sh
 
     p = sub.add_parser("groups", help="list merge group indices")
     common(p)
