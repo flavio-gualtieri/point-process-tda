@@ -48,6 +48,35 @@ class MethodConfig:
 
 
 @dataclass
+class DataConfig:
+    """Where a run's clouds come from, and how they are split and evaluated.
+
+    source: legacy (default) keeps the pre-DV3 behaviour exactly: one
+    data/<process.name>/clouds.pkl, a random train_val_test_indices(n, seed)
+    cut, and one scalar test loss. source: dv3 reads the DV3 products
+    instead (cloudforger.evaluation.dv3): trains on data/dv3/train/<group>/
+    with the split assigned at generation, and evaluates on each of
+    `eval_sets` separately, writing one per-pattern predictions_<set>.npz
+    each for scripts/evaluate_regimes.py.
+
+    group is the per-set subdirectory: a family (thomas, nested, matern2,
+    lgcp) for parameter estimation, or the merged multi-family bundle
+    written by scripts/processing/dv3_classification_bundle.py (default
+    name "_classify") for classification."""
+
+    source: str = "legacy"                     # legacy | dv3
+    root: str | None = None                    # None -> evaluation.dv3.DEFAULT_DV3_ROOT
+    group: str | None = None                   # None -> process.name
+    train_set: str = "train"
+    eval_sets: list[str] = field(default_factory=lambda: ["A", "B", "C"])
+    split_reshuffle_seed: int | None = None    # None -> the pre-registered generation split
+
+    @property
+    def is_dv3(self) -> bool:
+        return self.source == "dv3"
+
+
+@dataclass
 class RunConfig:
     process: ProcessConfig
     filtration: list[FiltrationConfig] = field(default_factory=list)  # empty for raw_pc/vihrs/mincontrast/palm
@@ -61,6 +90,7 @@ class RunConfig:
     use_adversarial: bool = True
     data_root: str | None = None  # None -> paths.DEFAULT_DATA_ROOT
     results_root: str | None = None  # None -> paths.DEFAULT_RESULTS_ROOT
+    data: DataConfig = field(default_factory=DataConfig)
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "RunConfig":
@@ -95,7 +125,13 @@ class RunConfig:
             for b in bifiltration_raw
         ]
 
-        return cls(process=process, filtration=filtration, features=features, method=method, bifiltration=bifiltration, **d)
+        data_raw = d.pop("data", None) or {}
+        data = data_raw if isinstance(data_raw, DataConfig) else DataConfig(**data_raw)
+        if data.source not in ("legacy", "dv3"):
+            raise ValueError(f"data.source must be 'legacy' or 'dv3', got {data.source!r}")
+
+        return cls(process=process, filtration=filtration, features=features, method=method,
+                   bifiltration=bifiltration, data=data, **d)
 
 
 def _set_by_dotted_path(target: dict[str, Any], dotted_key: str, value: Any) -> None:

@@ -33,7 +33,7 @@ from cloudforger.paths import DEFAULT_RESULTS_ROOT, ResultsPaths
 # the two new nested-Thomas baselines so a mincontrast* method mixed into a --methods list under
 # a filtration-bearing config (e.g. comparing against pi_multik) resolves to the right directory.
 RAW_TAG_METHODS = {
-    "raw_pc", "pairwise", "vihrs", "vihrs_checkpointed", "vihrs_500",
+    "raw_pc", "pairwise", "vihrs", "vihrs_checkpointed", "vihrs_500", "vihrs_lfgj",
     "mincontrast", "mincontrast_g", "mincontrast_nested", "mincontrast_g_nested", "palm",
 }
 
@@ -99,10 +99,21 @@ def collect_method_results(
 # Statistics
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _lookup(result: dict[str, Any], metric: str) -> Any:
+    """metric is a plain key ("test_loss") or a dotted path into a nested
+    dict ("eval_sets.B.loss" -- the per-set summaries DV3 runs write)."""
+    node: Any = result
+    for part in metric.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
 def _metric_values(by_seed: dict[int, dict[str, Any]], metric: str) -> dict[int, float]:
     out = {}
     for seed, result in by_seed.items():
-        value = result.get(metric)
+        value = _lookup(result, metric)
         if value is not None and np.isfinite(value):
             out[seed] = float(value)
     return out
@@ -385,6 +396,20 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     test_comparison = print_paired_comparison(results, "test_loss")
     adv_comparison = print_paired_comparison(results, "adversarial_loss")
 
+    # DV3 runs: whole-set headline per evaluation product. test_loss above is
+    # set A; B and C only make sense per regime -- see scripts/evaluate_regimes.py.
+    eval_set_names = sorted({s for by_seed in results.values() for r in by_seed.values()
+                             for s in (r.get("eval_sets") or {})})
+    eval_summaries: dict[str, Any] = {}
+    for set_name in eval_set_names:
+        for metric in ("loss", "accuracy"):
+            key = f"eval_sets.{set_name}.{metric}"
+            summary = method_loss_summary(results, key)
+            if any(v["n"] for v in summary.values()):
+                print_loss_summary(f"DV3 set {set_name}: whole-set {metric} (per-regime tables: "
+                                   f"scripts/evaluate_regimes.py)", summary)
+                eval_summaries[key] = summary
+
     plot_training_curves(results, methods_present, out_dir / "training_curves.png")
     plot_loss_distribution(results, methods_present, out_dir / "loss_distribution.png")
 
@@ -396,6 +421,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         "adversarial_loss": adv_summary,
         "test_loss_paired": test_comparison,
         "adversarial_loss_paired": adv_comparison,
+        "eval_sets": eval_summaries,
     }
     import json
 

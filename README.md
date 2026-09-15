@@ -215,6 +215,17 @@ python scripts/train.py     configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml
 python scripts/evaluate.py  configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml --methods pi_multik
 ```
 
+**On DV3, evaluate across regimes, not on one pooled test loss.** The configs
+in `configs/runs/dv3/` (`data.source: dv3`) train on the fixed DV3 train/val
+split, then score every method separately on set A (prior-averaged risk), set
+B (fixed-θ cells: bias and s.d. at given n̄, scale, δ̃) and set C (ladders down
+to CSR: error and calibrated detection power as δ̃ → 0). Each method writes
+per-pattern `predictions_<set>.npz` files, and `scripts/evaluate_regimes.py`
+turns them into paired regime tables. This includes the classical baselines:
+the L / L+F+G+J summary-function CNNs, minimum contrast, and the studentised
+envelope test on L, G and F (`scripts/classical_detection.py`). The run order
+is in [`configs/runs/dv3/README.md`](configs/runs/dv3/README.md).
+
 Nested Thomas uses `configs/runs/nested_thomas/pi_multik.yaml` (fused
 DTM `k = 5,10,15`). Baselines are ordinary configs in the same folders:
 `*_vihrs.yaml`, `mincontrast.yaml`, `mincontrast_g.yaml`. Classification

@@ -1,0 +1,50 @@
+# python scripts/train.py configs/runs/dv3/classify/fusion_k5_pca2.yaml --seed 9371
+#
+# DV3 -- 5-way classification: ParamNet + L(r) PCA-2 (the best pre-DV3 classification arm).
+# Trains on data/dv3/train/<group>/ with the generation-time train/val split
+# and writes predictions_<set>.npz for every set in data.eval_sets; compare
+# across regimes with scripts/evaluate_regimes.py (see configs/runs/dv3/README.md).
+#
+# Needs the merged bundle: python scripts/processing/dv3_classification_bundle.py
+# (after the per-family diagrams exist for the filtrations below).
+# include_lfunc reads clouds.lfunc_classify_cache.npz in every set's _classify dir:
+# run classify/vihrs.yaml first (it builds them).
+process:
+  name: dv3_classify
+
+data:
+  source: dv3
+  group: _classify
+  eval_sets: [A, B, C]
+
+filtration:
+  - {name: dtm, params: {k: 5,  q: 2.0, maxdim: 1}}
+
+method:
+  name: pi_multik
+  params:
+    task: classify
+    include_log_n: false
+    homology_dims: [0, 1]
+    include_entropy: false
+    resolution: 64
+    sigma_pixels: 0.5
+    pd_calibration_coverage: 0.95
+    embedding_dim: 64
+    conv_channels: [32, 64, 128]
+    dropout: 0.2
+    pool_type: avg
+    head_hidden_dims: [64, 32]
+    head_dropout: 0.1
+    include_lfunc: 16
+    lfunc_pca: 2
+    encoder_mode: shared
+    fusion_mode: concat
+    batch_size: 128
+    n_epochs: 200
+    lr: 0.001
+    weight_decay: 0.0003
+    early_stopping_patience: 30
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [poisson, thomas, nested, matern2, lgcp]

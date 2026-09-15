@@ -41,3 +41,30 @@ def train_val_test_indices(
     generator = torch.Generator().manual_seed(seed)
     perm = torch.randperm(n, generator=generator).numpy()
     return perm[:n_train], perm[n_train : n_train + n_val], perm[n_train + n_val :]
+
+
+def resolve_split(
+    n: int,
+    seed: int,
+    split_labels: "np.ndarray | list[str] | None" = None,
+    reshuffle_seed: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(train, val, test) indices for one training pool.
+
+    split_labels None: the legacy random cut, train_val_test_indices(n, seed).
+    split_labels given (the DV3 `split` column, aligned to the pool's rows):
+    train/val come from it -- fixed at generation, identical for every seed
+    and method -- and test is EMPTY, because under DV3 the test data are the
+    separate products A/B/C, never a slice of the training pool (see
+    cloudforger.evaluation.dv3)."""
+    if split_labels is None:
+        return train_val_test_indices(n, seed)
+    from ..evaluation.dv3 import split_indices_from_records  # local: evaluation imports paths -> filtration
+
+    labels = list(split_labels)
+    if len(labels) != n:
+        raise ValueError(f"{len(labels)} split labels for a pool of {n} rows")
+    train_idx, val_idx = split_indices_from_records(
+        [{"split": s} for s in labels], reshuffle_seed=reshuffle_seed,
+    )
+    return train_idx, val_idx, np.empty(0, dtype=np.int64)

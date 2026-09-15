@@ -27,6 +27,17 @@ trained method uses, and reports loss on the same standardized (log+zscore,
 fit on that seed's TRAIN split) scale trained methods use -- not raw units,
 which would make "test_loss" numbers incomparable across methods.
 
+DV3 (data.source: dv3 in the config; see cloudforger.evaluation.dv3):
+training reads data/dv3/<train_set>/<group>/ with the train/val split fixed
+at generation (no in-pool test slice), and every method is evaluated on
+each of data.eval_sets (A, B, C) separately, writing one per-pattern
+predictions_<set>.npz per set next to results.pt. Classical baselines fit
+every pattern of every evaluation set -- the fits are deterministic (one
+rng stream per case_id) and cached once under <method>/_fits/, so each seed
+directory holds identical predictions, which is what a deterministic
+method's seed-paired comparison should see. scripts/evaluate_regimes.py
+turns the bundles into per-regime tables.
+
 Usage:
     python scripts/train.py configs/runs/thomas/thomas_pi_multik_k5k10k15.yaml
     python scripts/train.py configs/runs/foo.yaml --seed 9371   # single seed, for SLURM array jobs
@@ -39,6 +50,8 @@ from __future__ import annotations
 import argparse
 import sys
 import traceback
+import zlib
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
@@ -50,12 +63,13 @@ sys.path.insert(0, str(ROOT / "src"))
 from cloudforger import baselines
 from cloudforger.config import RunConfig, load_config
 from cloudforger.core.io import load_pickle
-from cloudforger.core.splits import train_val_test_indices
+from cloudforger.core.splits import resolve_split, train_val_test_indices
 from cloudforger.data_generation.filtration import BIFILTRATION_REGISTRY, REGISTRY as FILTRATION_REGISTRY
 from cloudforger.data_generation.filtration.base import Filtration
 from cloudforger.experiments.base import build_experiment
 from cloudforger.experiments.common import MultiSourceExperiment, save_results
-from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, DataPaths, ExplicitTag, ResultsPaths, is_done
+from cloudforger.evaluation import dv3
+from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, PROJECT_ROOT, DataPaths, ExplicitTag, ResultsPaths, is_done
 
 MULTI_K_METHODS = {
     "pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers", "pi_multik_earlyfusion",
@@ -68,6 +82,43 @@ FILE_KEY_TO_FEATURE_NAME = {"pi": "persistence_image", "images": "persistence_im
 # `filtration:`, so a raw_pc run never misleadingly looks like it used
 # whatever filtration happened to be in the config.
 FILTRATION_INDEPENDENT_FILE_KEYS = {"raw_pc", "pairwise"}
+
+# Classical estimators report their own parameter names; DV3 records carry
+# the model's (docs/generation_procedure.tex, Table "Models and prior").
+# Nested Thomas's `sigma` is the inner (child) scale sigma2, `sigma1` the outer.
+_THOMAS_NAMES = {"parent_intensity": "kappa", "mean_offspring": "mu", "cluster_scale": "sigma"}
+_NESTED_NAMES = {"parent_intensity": "kappa", "meta_offspring": "mu1", "meta_cluster_scale": "sigma1",
+                 "mean_offspring": "mu2", "cluster_scale": "sigma"}
+DV3_CLASSICAL_NAMES = {
+    "mincontrast": _THOMAS_NAMES, "mincontrast_g": _THOMAS_NAMES, "palm": _THOMAS_NAMES,
+    "mincontrast_nested": _NESTED_NAMES, "mincontrast_g_nested": _NESTED_NAMES,
+}
+
+
+def _dv3_root(cfg: RunConfig) -> Path:
+    if cfg.data.root is None:
+        return dv3.DEFAULT_DV3_ROOT
+    root = Path(cfg.data.root)
+    return root if root.is_absolute() else PROJECT_ROOT / root
+
+
+def resolve_data_paths(cfg: RunConfig) -> tuple[DataPaths, dict[str, DataPaths]]:
+    """(training-pool DataPaths, {eval set -> DataPaths}). Legacy configs get
+    data/<process.name>/ and no eval sets, exactly as before."""
+    if not cfg.data.is_dv3:
+        return DataPaths(cfg.process.name, root=cfg.data_root or DEFAULT_DATA_ROOT), {}
+    root, group = _dv3_root(cfg), cfg.data.group or cfg.process.name
+    unknown = [s for s in cfg.data.eval_sets if s not in dv3.EVAL_SETS]
+    if unknown:
+        raise ValueError(f"data.eval_sets {unknown} are not DV3 evaluation sets {list(dv3.EVAL_SETS)}")
+    train = dv3.data_paths(cfg.data.train_set, group, root)
+    if not train.clouds().exists():
+        raise FileNotFoundError(
+            f"no DV3 training clouds at {train.clouds()} -- generate DV3 "
+            f"(scripts/generation/dv3.py) or, for classification, build the merged bundle "
+            f"(scripts/processing/dv3_classification_bundle.py)."
+        )
+    return train, {s: dv3.data_paths(s, group, root) for s in cfg.data.eval_sets}
 
 
 def build_filtrations(cfg: RunConfig) -> list[Filtration]:
@@ -94,6 +145,12 @@ def build_method_cfg(cfg: RunConfig, seed: int) -> dict[str, Any]:
         cfg_dict["target_label_names"] = cfg.target_label_names
     if cfg.log_label_names is not None:
         cfg_dict["log_label_names"] = cfg.log_label_names
+    if cfg.data.is_dv3:
+        cfg_dict["split"] = "dv3"
+        cfg_dict["data_group"] = cfg.data.group or cfg.process.name
+        cfg_dict["eval_sets"] = list(cfg.data.eval_sets)
+        if cfg.data.split_reshuffle_seed is not None:
+            cfg_dict["split_reshuffle_seed"] = int(cfg.data.split_reshuffle_seed)
     return cfg_dict
 
 
@@ -163,6 +220,7 @@ def run_experiment_method(
     filtrations: list[Filtration],
     force: bool,
     run_tag: str | None = None,
+    eval_data_paths: dict[str, DataPaths] | None = None,
 ) -> None:
     cfg_dict = build_method_cfg(cfg, seed)
     cfg_dict["results_root"] = str(results_paths.root)
@@ -189,7 +247,25 @@ def run_experiment_method(
 
     adversarial_available = cfg.use_adversarial and data_paths.clouds(adversarial=True).exists()
 
-    if is_multi_source:
+    if cfg.data.is_dv3:
+        # Only methods whose run() honours the DV3 split and writes the
+        # per-set prediction bundles may run on DV3; anything else would
+        # silently fall back to a random split of the training pool and
+        # produce no regime output at all.
+        if not getattr(exp, "supports_dv3", False):
+            raise NotImplementedError(
+                f"method {cfg.method.name!r} ({type(exp).__name__}) is not wired for data.source: dv3 yet. "
+                "DV3-ready: the pi_multik family (pi_multik, _towers, _scaleconv, _earlyfusion, _dimsplit), "
+                "vihrs (L / L+F+G+J), and the classical baselines. Port it by honouring cfg['split'] == "
+                "'dv3' and eval_paths the way experiments/pi_multik/pi_multik.py does."
+            )
+        dataset_paths = _multi_source_dataset_paths(exp, cfg, data_paths, filtrations, adversarial=False)
+        eval_paths = {
+            set_name: _multi_source_dataset_paths(exp, cfg, dp, filtrations, adversarial=False)
+            for set_name, dp in (eval_data_paths or {}).items()
+        }
+        exp.run(dataset_paths, output_dir, adversarial_paths=None, eval_paths=eval_paths)
+    elif is_multi_source:
         dataset_paths = _multi_source_dataset_paths(exp, cfg, data_paths, filtrations, adversarial=False)
         adversarial_paths = (
             _multi_source_dataset_paths(exp, cfg, data_paths, filtrations, adversarial=True) if adversarial_available else None
@@ -211,6 +287,7 @@ def run_vihrs_classify_method(
     filtrations: list[Filtration],
     force: bool,
     run_tag: str | None = None,
+    eval_data_paths: dict[str, DataPaths] | None = None,
 ) -> None:
     """vihrs adapted to the classification task (method.params.task: classify).
 
@@ -233,7 +310,7 @@ def run_vihrs_classify_method(
             "classification vihrs needs `target_label_names` set to the ordered class-name list "
             "(index i == class i), matching the diagram bundle's own label_names."
         )
-    if not filtrations:
+    if not filtrations and not cfg.data.is_dv3:
         raise ValueError(
             "classification vihrs reads the per-k diagram bundles only to reproduce pi_multik's "
             "train/val/test split -- set the same `filtration:` block the pi_multik classify config uses."
@@ -245,10 +322,20 @@ def run_vihrs_classify_method(
     adversarial_clouds_path = data_paths.clouds(adversarial=True)
     adversarial_diagram_paths = [data_paths.diagrams([f], adversarial=True) for f in filtrations]
     use_adv = (
-        cfg.use_adversarial
+        not cfg.data.is_dv3
+        and cfg.use_adversarial
         and adversarial_clouds_path.exists()
         and all(p.exists() for p in adversarial_diagram_paths)
     )
+    # DV3: the split is the generator's, so the diagram bundles are only
+    # consulted (when a filtration is configured) to restrict every set to
+    # exactly the clouds the PH methods could use; without one, all clouds.
+    eval_sets_spec = None
+    if cfg.data.is_dv3:
+        eval_sets_spec = {
+            set_name: {"clouds": dp.clouds(), "diagrams": [dp.diagrams([f]) for f in filtrations]}
+            for set_name, dp in (eval_data_paths or {}).items()
+        }
 
     # summary_channels: which summary functions become CNN input channels.
     # ["L"] (the default) is the published vihrs feature set; adding F/G/J
@@ -272,6 +359,7 @@ def run_vihrs_classify_method(
         n_r=params.get("n_r", baselines.vihrs.N_R),
         force=bool(params.get("recompute_features", False)),
         fg_r_max=fg_r_max,
+        eval_sets=eval_sets_spec,
     )
     baselines.vihrs.run_one_seed_classify(
         seed,
@@ -289,6 +377,10 @@ def run_vihrs_classify_method(
         results_root=results_paths.root,
         run_tag=run_tag,
         summary_channels=summary_channels,
+        use_dv3_split=cfg.data.is_dv3,
+        split_reshuffle_seed=cfg.data.split_reshuffle_seed,
+        eval_features=data.get("eval_features") or None,
+        method_name=subdir,
     )
 
 
@@ -300,10 +392,12 @@ def run_vihrs_method(
     filtrations: list[Filtration],
     force: bool,
     run_tag: str | None = None,
+    eval_data_paths: dict[str, DataPaths] | None = None,
 ) -> None:
     params = cfg.method.params
     if str(params.get("task", "params")) == "classify":
-        run_vihrs_classify_method(cfg, seed, data_paths, results_paths, filtrations, force, run_tag=run_tag)
+        run_vihrs_classify_method(cfg, seed, data_paths, results_paths, filtrations, force, run_tag=run_tag,
+                                  eval_data_paths=eval_data_paths)
         return
     checkpoint_best = bool(params.get("checkpoint_best", False))
     subdir = "vihrs_checkpointed" if checkpoint_best else "vihrs"
@@ -321,7 +415,10 @@ def run_vihrs_method(
     # assuming the original paper's fixed 3-parameter Thomas set.
     label_names = tuple(cfg.target_label_names) if cfg.target_label_names else None
     adversarial_clouds_path = data_paths.clouds(adversarial=True)
-    adversarial_path = adversarial_clouds_path if cfg.use_adversarial and adversarial_clouds_path.exists() else None
+    adversarial_path = (
+        adversarial_clouds_path
+        if not cfg.data.is_dv3 and cfg.use_adversarial and adversarial_clouds_path.exists() else None
+    )
 
     # See run_vihrs_classify_method: ["L"] (the default) is the published
     # feature set and touches neither the F/G code path nor a new cache.
@@ -335,6 +432,8 @@ def run_vihrs_method(
         data_paths.clouds(), adversarial_path, label_names=label_names,
         r_max=params.get("r_max", baselines.vihrs.R_MAX), n_r=params.get("n_r", baselines.vihrs.N_R),
         fg_r_max=fg_r_max,
+        force=bool(params.get("recompute_features", False)),
+        eval_paths={s: dp.clouds() for s, dp in (eval_data_paths or {}).items()} or None,
     )
     label_names = tuple(data["label_names"])
     baselines.vihrs.run_one_seed(
@@ -351,10 +450,19 @@ def run_vihrs_method(
         early_stopping_patience=params.get("early_stopping_patience"),
         label_names=label_names,
         checkpoint_best=checkpoint_best,
-        skip_mincontrast=params.get("skip_mincontrast", False),
+        # Under DV3 the in-run "bonus" minimum-contrast comparison is off: it
+        # would refit every set-A cloud under the legacy parameter names.
+        # The standalone mincontrast* configs cover it, with regime tables.
+        skip_mincontrast=params.get("skip_mincontrast", False) or cfg.data.is_dv3,
         results_root=results_paths.root,
         run_tag=run_tag,
         summary_channels=summary_channels,
+        split_labels=(np.array([r.get("split") or "" for r in data["train_records"]], dtype=object)
+                      if cfg.data.is_dv3 else None),
+        split_reshuffle_seed=cfg.data.split_reshuffle_seed,
+        eval_features=data.get("eval_features") or None,
+        eval_records=data.get("eval_records") or None,
+        method_name=subdir,
     )
 
 
@@ -433,6 +541,145 @@ def run_classical_baseline(
     )
 
 
+# ---------------------------------------------------------------------------
+# Classical baselines on DV3
+# ---------------------------------------------------------------------------
+
+def _case_rng(case_id: str) -> np.random.Generator:
+    """One multistart stream per pattern, from its identity alone -- so a fit
+    does not depend on which other patterns ran, in what order, or in which
+    worker, and the cached fits are reusable by every seed."""
+    return np.random.default_rng(zlib.crc32(case_id.encode()))
+
+
+def _fit_one(task: tuple[str, str, np.ndarray, int, dict[str, Any]]) -> dict[str, float] | None:
+    module_name, case_id, points, n_starts, fit_kwargs = task
+    module = getattr(baselines, module_name)
+    if len(points) < 5:
+        return None
+    try:
+        # DV3 patterns already live on W = [0,1]^2, so they are fit as-is:
+        # crop_and_rescale's sub-window (for n > 900) would return estimates in
+        # the rescaled window's units -- kappa off by window^2, sigma by
+        # 1/window -- which the legacy path never converted back.
+        return module.fit_multistart(points, n_starts=n_starts, rng=_case_rng(case_id), **fit_kwargs)
+    except Exception as exc:  # noqa: BLE001 -- a failed fit is a reportable outcome (NaN row), not a crash
+        print(f"  [{module_name}] fit failed for {case_id}: {exc!r}")
+        return None
+
+
+def _dv3_classical_fits(
+    method_name: str, clouds: list[dict[str, Any]], label_names: list[str], cache_path: Path,
+    n_starts: int, fit_kwargs: dict[str, Any], jobs: int,
+) -> np.ndarray:
+    """(N, T) raw estimates for `clouds` in DV3 names, NaN where the fit failed
+    or the estimator has no such parameter. Cached by case_id + settings."""
+    name_map = DV3_CLASSICAL_NAMES.get(method_name, {})
+    ids = np.array([str(c["case_id"]) for c in clouds], dtype=np.str_)
+    settings = f"{method_name}|{n_starts}|{sorted(fit_kwargs.items())}|{','.join(label_names)}"
+    if cache_path.exists():
+        with np.load(cache_path, allow_pickle=False) as z:
+            if np.array_equal(z["case_id"], ids) and str(z["settings"]) == settings:
+                print(f"  [{method_name}] cached fits <- {cache_path}")
+                return z["estimates"]
+    tasks = [(method_name, str(c["case_id"]), np.asarray(c["points"], dtype=float), n_starts, fit_kwargs)
+             for c in clouds]
+    if jobs > 1:
+        with get_context("spawn").Pool(jobs) as pool:
+            results = pool.map(_fit_one, tasks, chunksize=16)
+    else:
+        results = [_fit_one(t) for t in tasks]
+    estimates = np.full((len(clouds), len(label_names)), np.nan)
+    for i, res in enumerate(results):
+        if res is None:
+            continue
+        renamed = {name_map.get(k, k): v for k, v in res.items()}
+        estimates[i] = [renamed.get(name, np.nan) for name in label_names]
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(cache_path, case_id=ids, estimates=estimates, settings=np.asarray(settings))
+    n_ok = int(np.isfinite(estimates).all(axis=1).sum())
+    print(f"  [{method_name}] fit {n_ok}/{len(clouds)} patterns -> {cache_path}")
+    return estimates
+
+
+def run_classical_baseline_dv3(
+    method_name: str,
+    cfg: RunConfig,
+    seed: int,
+    data_paths: DataPaths,
+    eval_data_paths: dict[str, DataPaths],
+    results_paths: ResultsPaths,
+    force: bool,
+    run_tag: str | None = None,
+) -> None:
+    """Fit every pattern of every DV3 evaluation set and write the same
+    prediction bundles the trained methods do.
+
+    Standardization: log + z-score with statistics fit on the DV3 TRAINING
+    rows (split == "train") of the training pool -- the exact label_norm a
+    trained method fits -- so the normalised loss is on one scale for every
+    method. A non-positive or failed estimate stays NaN and is counted as a
+    failure per regime cell rather than dropped."""
+    from cloudforger.experiments.common import record_eval_set
+
+    output_dir = results_paths.seed_dir([], method_name, seed, run_tag=run_tag)
+    if is_done(output_dir) and not force:
+        print(f"[{method_name} seed={seed}] already done, skipping ({output_dir}).")
+        return
+    if not cfg.target_label_names:
+        raise ValueError(f"{method_name} on DV3 needs target_label_names (DV3 parameter names, e.g. kappa, mu, sigma).")
+    label_names = list(cfg.target_label_names)
+    unknown = [n for n in label_names if n not in DV3_CLASSICAL_NAMES.get(method_name, {}).values()]
+    if unknown:
+        raise ValueError(f"{method_name} does not estimate {unknown}; it reports "
+                         f"{sorted(DV3_CLASSICAL_NAMES.get(method_name, {}).values())}.")
+
+    train_clouds = load_pickle(data_paths.clouds())
+    train_targets = np.array([[c["params"][n] for n in label_names] for c in train_clouds], dtype=float)
+    train_idx, _, _ = resolve_split(
+        len(train_clouds), seed, [c.get("split") or "" for c in train_clouds],
+        reshuffle_seed=cfg.data.split_reshuffle_seed,
+    )
+    label_norm = baselines.vihrs.fit_log_zscore(train_targets[train_idx])
+
+    params = cfg.method.params
+    n_starts = int(params.get("n_starts", 10))
+    fit_kwargs = {"c": float(params["c"])} if "c" in params else {}
+    jobs = int(params.get("jobs", 1))
+    fits_dir = results_paths.method_dir([], method_name, run_tag=run_tag) / "_fits"
+
+    eval_sets: dict[str, dict[str, Any]] = {}
+    for set_name, dp in eval_data_paths.items():
+        clouds = load_pickle(dp.clouds())
+        est = _dv3_classical_fits(method_name, clouds, label_names, fits_dir / f"{set_name}.npz",
+                                  n_starts, fit_kwargs, jobs)
+        truth_raw = np.array([[c["params"][n] for n in label_names] for c in clouds], dtype=float)
+        valid = np.isfinite(est).all(axis=1) & (est > 0).all(axis=1)
+        pred_std = np.full_like(est, np.nan)
+        pred_std[valid] = baselines.vihrs.apply_log_zscore(est[valid], label_norm)
+        eval_sets[set_name] = record_eval_set(
+            output_dir, set_name, task="params", outputs=pred_std,
+            truth=baselines.vihrs.apply_log_zscore(truth_raw, label_norm),
+            case_id=np.array([c["case_id"] for c in clouds], dtype=object),
+            family=np.array([c["process"] for c in clouds], dtype=object),
+            names=label_names, label_norm=label_norm, truth_raw=truth_raw, method=method_name, seed=seed,
+        )
+        s_ = eval_sets[set_name]
+        print(f"[{method_name} seed={seed}] eval set {set_name}: loss {s_['loss']:.4f} "
+              f"({s_['n_ok']}/{s_['n']} fits usable)")
+
+    cfg_dict = {"task": "params", "method": method_name, "seed": seed, "n_starts": n_starts,
+                "results_root": str(results_paths.root), "split": "dv3", "deterministic": True, **fit_kwargs}
+    if run_tag:
+        cfg_dict["run_tag"] = run_tag
+    a = eval_sets.get("A", {})
+    save_results(
+        output_dir, model=None, best_state=None, history={}, cfg=cfg_dict,
+        test_loss=a.get("loss"), label_names=label_names, label_norm=label_norm,
+        test_loss_per_target=a.get("loss_per_target"), eval_sets=eval_sets,
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("config", type=Path, help="RunConfig YAML path")
@@ -454,7 +701,10 @@ def main(argv: list[str] | None = None) -> None:
     if cfg.method is None:
         raise ValueError(f"{args.config} has no `method:` section -- nothing to train.")
 
-    data_paths = DataPaths(cfg.process.name, root=cfg.data_root or DEFAULT_DATA_ROOT)
+    data_paths, eval_data_paths = resolve_data_paths(cfg)
+    if cfg.data.is_dv3:
+        print(f"DV3: training pool {data_paths.process_dir}; evaluation sets "
+              + ", ".join(f"{s} -> {dp.process_dir}" for s, dp in eval_data_paths.items()))
     results_paths = ResultsPaths(cfg.process.name, root=cfg.results_root or DEFAULT_RESULTS_ROOT)
     filtrations = build_filtrations(cfg)
     bifiltrations = build_bifiltrations(cfg)
@@ -473,11 +723,16 @@ def main(argv: list[str] | None = None) -> None:
         print(f"\n{'#' * 90}\n### {cfg.method.name} | {cfg.process.name} | seed {seed}\n{'#' * 90}")
         try:
             if cfg.method.name == "vihrs":
-                run_vihrs_method(cfg, seed, data_paths, results_paths, filtrations, args.force, run_tag=args.run_tag)
+                run_vihrs_method(cfg, seed, data_paths, results_paths, filtrations, args.force, run_tag=args.run_tag,
+                                 eval_data_paths=eval_data_paths)
+            elif cfg.method.name in CLASSICAL_BASELINE_NAMES and cfg.data.is_dv3:
+                run_classical_baseline_dv3(cfg.method.name, cfg, seed, data_paths, eval_data_paths, results_paths,
+                                           args.force, run_tag=args.run_tag)
             elif cfg.method.name in CLASSICAL_BASELINE_NAMES:
                 run_classical_baseline(cfg.method.name, cfg, seed, data_paths, results_paths, args.force, run_tag=args.run_tag)
             else:
-                run_experiment_method(cfg, seed, data_paths, results_paths, path_filtrations, args.force, run_tag=args.run_tag)
+                run_experiment_method(cfg, seed, data_paths, results_paths, path_filtrations, args.force,
+                                      run_tag=args.run_tag, eval_data_paths=eval_data_paths)
         except Exception:
             print(f"[{cfg.method.name} seed={seed}] FAILED:")
             traceback.print_exc()

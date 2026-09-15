@@ -114,7 +114,7 @@ import matplotlib.pyplot as plt
 from ..core import metrics as classical_evaluate  # marginal/paired metric formulas, shared with every method
 from ..core.io import intersect_seeds
 from ..core.records import load_diagram_bundle
-from ..core.splits import train_val_test_indices
+from ..core.splits import resolve_split, train_val_test_indices
 from ..provenance import append_ledger_entry, provenance_stamp
 from . import mincontrast as mc
 from . import summstats
@@ -658,7 +658,18 @@ def run_one_seed(
     results_root: Path | None = None,
     run_tag: str | None = None,
     summary_channels: tuple[str, ...] = ("L",),
+    split_labels: np.ndarray | None = None,
+    split_reshuffle_seed: int | None = None,
+    eval_features: dict[str, dict[str, np.ndarray]] | None = None,
+    eval_records: dict[str, list[dict[str, Any]]] | None = None,
+    method_name: str = "vihrs",
 ) -> dict[str, Any]:
+    """split_labels (DV3): the training pool's generation-time `split`
+    column; train/val are read off it and there is no in-pool test slice.
+    eval_features/eval_records (DV3): {set -> prepare_data's features /
+    records} for each evaluation product; each gets a predictions_<set>.npz
+    and a summary under results.json's eval_sets, and set A stands in for
+    the legacy scalar test_loss."""
     output_dir = output_root / f"seed_{seed}"
     output_dir.mkdir(parents=True, exist_ok=True)
     mc_cache = {} if mc_cache is None else mc_cache
@@ -676,7 +687,7 @@ def run_one_seed(
         device = "cpu"
 
     n = len(train_features["targets"])
-    train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
+    train_idx, val_idx, test_idx = resolve_split(n, seed, split_labels, reshuffle_seed=split_reshuffle_seed)
 
     # Fit every normalization statistic on the train split ONLY, then apply
     # the frozen stats to val/test/adversarial below.
@@ -747,9 +758,38 @@ def run_one_seed(
     else:
         final_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
-    test_loss = evaluate_loss(model, test_loader, loss_fn, device)
-    test_loss_per_target = dict(zip(label_names, evaluate_per_target_loss(model, test_loader, device).tolist()))
-    print(f"\n[vihrs seed={seed}] test loss {test_loss:.4f}")
+    test_loss, test_loss_per_target = None, None
+    if len(test_idx):
+        test_loss = evaluate_loss(model, test_loader, loss_fn, device)
+        test_loss_per_target = dict(zip(label_names, evaluate_per_target_loss(model, test_loader, device).tolist()))
+        print(f"\n[vihrs seed={seed}] test loss {test_loss:.4f}")
+
+    # ---- DV3 evaluation products (same frozen train-split statistics) ----
+    from ..experiments.common import print_eval_set, record_eval_set  # local: experiments imports baselines
+
+    eval_sets: dict[str, dict[str, Any]] = {}
+    eval_outputs: dict[str, np.ndarray] = {}
+    for set_name, feats in (eval_features or {}).items():
+        recs = eval_records[set_name]
+        ev_targets_std = apply_log_zscore(feats["targets"], label_norm).astype(np.float32)
+        ev_n_std = apply_log_zscore(feats["n_points"], n_norm).astype(np.float32)
+        ev_seq = apply_zscore_per_channel(summstats.stack_channels(feats, channels), lr_norm).astype(np.float32)
+        ev_loader = DataLoader(
+            TensorDataset(torch.from_numpy(ev_seq), torch.from_numpy(ev_n_std), torch.from_numpy(ev_targets_std)),
+            batch_size=batch_size, shuffle=False,
+        )
+        eval_outputs[set_name] = predict_all(model, ev_loader, device)
+        eval_sets[set_name] = record_eval_set(
+            output_dir, set_name, task="params", outputs=eval_outputs[set_name], truth=ev_targets_std,
+            case_id=np.array([r["case_id"] for r in recs], dtype=object),
+            family=np.array([r["process"] for r in recs], dtype=object),
+            names=list(label_names), label_norm=label_norm, truth_raw=feats["targets"],
+            method=method_name, seed=seed,
+        )
+        print_eval_set(f"vihrs seed={seed}", set_name, eval_sets[set_name])
+    if test_loss is None and "A" in eval_sets:
+        test_loss = eval_sets["A"]["loss"]
+        test_loss_per_target = eval_sets["A"]["loss_per_target"]
 
     adversarial_loss = None
     adversarial_loss_per_target = None
@@ -810,6 +850,7 @@ def run_one_seed(
             "adversarial_loss": adversarial_loss,
             "adversarial_loss_per_target": adversarial_loss_per_target,
             "adversarial_path": str(adversarial_path) if adversarial_path else None,
+            "eval_sets": eval_sets or None,
             **stamp,
         },
         output_dir / "results.pt",
@@ -830,6 +871,8 @@ def run_one_seed(
     if checkpoint_best:
         json_payload["best_epoch"] = best_epoch
         json_payload["best_val_loss"] = best_val_loss
+    if eval_sets:
+        json_payload["eval_sets"] = eval_sets
     if adversarial_loss is not None:
         json_payload["adversarial_loss"] = adversarial_loss
         json_payload["adversarial_loss_per_target"] = adversarial_loss_per_target
@@ -848,10 +891,21 @@ def run_one_seed(
     )
 
     # ---- same marginal metrics as cloudforger.core.metrics, on de-standardized test predictions ----
-    test_pred_std = predict_all(model, test_loader, device)
+    # (under DV3 there is no in-pool test slice: set A -- the prior-drawn
+    # product the random slice used to approximate -- takes its place)
+    if len(test_idx):
+        test_pred_std = predict_all(model, test_loader, device)
+        test_true_raw = train_features["targets"][test_idx]
+        test_n_points = train_features["n_points"][test_idx]
+        test_records = [train_records[i] for i in test_idx]
+    elif "A" in eval_outputs:
+        test_pred_std = eval_outputs["A"]
+        test_true_raw = eval_features["A"]["targets"]
+        test_n_points = eval_features["A"]["n_points"]
+        test_records = eval_records["A"]
+    else:
+        return {"seed": seed, "test_loss": test_loss, "eval_sets": eval_sets}
     test_pred_raw = invert_log_zscore(test_pred_std, label_norm)
-    test_true_raw = train_features["targets"][test_idx]
-    test_n_points = train_features["n_points"][test_idx]
 
     marginal_metrics = {
         name: classical_evaluate.compute_marginal_metrics(test_true_raw[:, j], test_pred_raw[:, j])
@@ -865,11 +919,11 @@ def run_one_seed(
         "adversarial_loss": adversarial_loss,
         "adversarial_loss_per_target": adversarial_loss_per_target,
         "marginal_metrics": marginal_metrics,
+        "eval_sets": eval_sets,
     }
 
     if not skip_mincontrast:
         try:
-            test_records = [train_records[i] for i in test_idx]
             mc_comparison = _mincontrast_comparison(
                 output_dir / "plots",
                 test_records,
@@ -910,9 +964,14 @@ def prepare_data(
     force: bool = False,
     max_clouds: int | None = None,
     fg_r_max: float | None = None,
+    eval_paths: dict[str, Path] | None = None,
 ) -> dict[str, Any]:
     """Load clouds_path (+ adversarial_path, if given) and extract/cache the
     L(r)-r + n(x) feature set that run_one_seed needs.
+
+    eval_paths (DV3): {set -> clouds.pkl} of each evaluation product; each
+    is featurized (cached next to its own clouds.pkl under the same name
+    the training cache uses) and returned under eval_features/eval_records.
 
     label_names=None adapts to whatever labels this process's clouds
     actually carry (every key in the first record's `params`, in that
@@ -948,6 +1007,21 @@ def prepare_data(
         train_records, r_grid, label_names=label_names, cache_path=train_cache, force=force,
         tag="train_test", fg_grid=fg_grid,
     )
+    _refresh_targets(train_features, train_records, label_names, train_cache)
+
+    eval_features: dict[str, dict[str, np.ndarray]] = {}
+    eval_records: dict[str, list[dict[str, Any]]] = {}
+    for set_name, set_clouds in (eval_paths or {}).items():
+        set_clouds = Path(set_clouds)
+        print(f"Loading eval set {set_name} clouds from {set_clouds} ...")
+        recs = load_cloud_records(set_clouds)
+        if max_clouds is not None:
+            recs = recs[:max_clouds]
+        set_cache = set_clouds.parent / (set_clouds.stem + cache_suffix)
+        feats = get_features(recs, r_grid, label_names=label_names, cache_path=set_cache, force=force,
+                             tag=f"eval_{set_name}", fg_grid=fg_grid)
+        _refresh_targets(feats, recs, label_names, set_cache)
+        eval_features[set_name], eval_records[set_name] = feats, recs
 
     adversarial_features: dict[str, np.ndarray] | None = None
     if adversarial_path is not None and adversarial_path.exists():
@@ -971,7 +1045,30 @@ def prepare_data(
         "adversarial_path": adversarial_path if adversarial_features is not None else None,
         "r_grid": r_grid,
         "label_names": label_names,
+        "eval_features": eval_features,
+        "eval_records": eval_records,
     }
+
+
+def _refresh_targets(
+    features: dict[str, np.ndarray], records: list[dict[str, Any]], label_names: tuple[str, ...], cache_path: Path,
+) -> None:
+    """Re-read targets from the records instead of trusting the cache's.
+
+    The feature cache is keyed on the radius grids only, not on label_names,
+    so a cache written by a run with a different target list hands back
+    `targets` for THAT list -- wrong columns, silently. The curves are the
+    expensive part and label-independent; the targets are one dict lookup
+    per cloud, so rebuild them and keep only the curves from the cache. Also
+    refuses a cache whose row count no longer matches the clouds."""
+    if len(features["n_points"]) != len(records):
+        raise ValueError(
+            f"{cache_path}: cache holds {len(features['n_points'])} rows but the clouds file has "
+            f"{len(records)} -- delete the cache (or pass recompute_features=true)."
+        )
+    features["targets"] = np.array(
+        [[rec["params"][name] for name in label_names] for rec in records], dtype=np.float64,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1049,6 +1146,20 @@ def _load_classification_alignment(
         "class_names": class_names,
         "seed_offset": seed_offset,
     }
+
+
+def _dv3_classification_alignment(clouds_path: Path, class_names: list[str], tag: str) -> dict[str, Any]:
+    """The DV3 counterpart of _load_classification_alignment for when no
+    diagram bundle is consulted: every cloud of the merged classification
+    clouds.pkl (scripts/processing/dv3_classification_bundle.py), in file
+    order, with the class index each record carries in `label`. Seeds there
+    are globally unique, so the later seed join is direct."""
+    payload = _load_pickle(clouds_path)
+    clouds = payload["clouds"] if isinstance(payload, dict) and "clouds" in payload else payload
+    seeds = np.array([int(c["seed"]) for c in clouds], dtype=np.int64)
+    targets = np.array([int(c["label"]) for c in clouds], dtype=np.int64)
+    print(f"  [{tag}] {len(seeds)} clouds (DV3 merged bundle, no diagram alignment).")
+    return {"common_seeds": seeds, "targets": targets, "class_names": list(class_names), "seed_offset": 0}
 
 
 def extract_cloud_features(
@@ -1242,11 +1353,18 @@ def prepare_data_classify(
     cache_dir: Path | None = None,
     force: bool = False,
     fg_r_max: float | None = None,
+    eval_sets: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Classification counterpart of prepare_data: build the L(r)-r + n(x)
     feature set for the clouds/split pi_multik's classify run uses, plus the
     matching adversarial set. `diagram_paths` are per-k diagram bundles,
-    read only for their `seeds`/`labels` (to reproduce the exact split)."""
+    read only for their `seeds`/`labels` (to reproduce the exact split).
+
+    DV3: diagram_paths may be empty, in which case every cloud of the merged
+    bundle is used (labels from the records). eval_sets = {set -> {"clouds":
+    Path, "diagrams": [Path] | []}} adds one featurized evaluation product
+    per entry, each carrying its rows' case_id / family / split so
+    run_one_seed_classify can write per-pattern predictions."""
     r_grid = default_r_grid(r_max, n_r)
     cache_dir = Path(cache_dir) if cache_dir is not None else Path(clouds_path).parent
 
@@ -1262,7 +1380,14 @@ def prepare_data_classify(
         cache_name = f"clouds.{stem}_classify_cache.npz"
         adv_cache_name = f"adversarial_clouds.{stem}_classify_cache.npz"
 
-    align = _load_classification_alignment(diagram_paths, k_values, tag="train_test")
+    def _align(paths: list[Path], clouds: Path, tag: str) -> dict[str, Any]:
+        if paths:
+            return _load_classification_alignment(paths, k_values, tag=tag)
+        if label_names is None:
+            raise ValueError("classification vihrs without diagram bundles needs target_label_names (class list).")
+        return _dv3_classification_alignment(Path(clouds), list(label_names), tag=tag)
+
+    align = _align(list(diagram_paths), clouds_path, "train_test")
     class_names = align["class_names"]
     if label_names is not None and list(label_names) != class_names:
         raise ValueError(
@@ -1275,6 +1400,23 @@ def prepare_data_classify(
         clouds_path, align, r_grid, cache_dir, force, tag="train_test", cache_name=cache_name,
         fg_grid=fg_grid,
     )
+
+    eval_features: dict[str, dict[str, np.ndarray]] = {}
+    if eval_sets is not None:  # DV3 (even with no eval sets: the training rows still need their split)
+        from ..experiments.common import dv3_row_meta  # local: experiments imports baselines
+
+        train_features.update({k: v for k, v in dv3_row_meta(clouds_path, train_features["seeds"]).items()})
+        for set_name, spec in eval_sets.items():
+            set_clouds = Path(spec["clouds"])
+            set_align = _align(list(spec.get("diagrams") or []), set_clouds, f"eval_{set_name}")
+            if set_align["class_names"] != class_names:
+                raise ValueError(f"eval set {set_name}: class list differs from the training bundle's.")
+            feats = _classification_features_for_alignment(
+                set_clouds, set_align, r_grid, set_clouds.parent, force,
+                tag=f"eval_{set_name}", cache_name=cache_name, fg_grid=fg_grid,
+            )
+            feats.update(dv3_row_meta(set_clouds, feats["seeds"]))
+            eval_features[set_name] = feats
 
     adversarial_features = None
     have_adv = (
@@ -1301,6 +1443,7 @@ def prepare_data_classify(
         "adversarial_path": Path(adversarial_clouds_path) if adversarial_features is not None else None,
         "class_names": class_names,
         "r_grid": r_grid,
+        "eval_features": eval_features,
     }
 
 
@@ -1411,7 +1554,15 @@ def run_one_seed_classify(
     results_root: Path | None = None,
     run_tag: str | None = None,
     summary_channels: tuple[str, ...] = ("L",),
+    use_dv3_split: bool = False,
+    split_reshuffle_seed: int | None = None,
+    eval_features: dict[str, dict[str, np.ndarray]] | None = None,
+    method_name: str = "vihrs",
 ) -> dict[str, Any]:
+    """use_dv3_split: train/val from train_features["split"] (the generation
+    split; no in-pool test slice). eval_features: {set -> features from
+    prepare_data_classify(eval_sets=...)}, each written as a per-pattern
+    predictions_<set>.npz; set A then stands in for the scalar test metrics."""
     output_dir = Path(output_root) / f"seed_{seed}"
     output_dir.mkdir(parents=True, exist_ok=True)
     adversarial_path = Path(adversarial_path) if adversarial_path is not None else None
@@ -1436,7 +1587,9 @@ def run_one_seed_classify(
         )
 
     n = len(targets)
-    train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
+    train_idx, val_idx, test_idx = resolve_split(
+        n, seed, train_features["split"] if use_dv3_split else None, reshuffle_seed=split_reshuffle_seed,
+    )
 
     # Every normalization statistic fit on the train split ONLY, then frozen
     # for val/test/adversarial -- same discipline as the regression path.
@@ -1504,13 +1657,38 @@ def run_one_seed_classify(
         best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
     print(f"[vihrs classify seed={seed}] best checkpoint: epoch {best_epoch}/{n_epochs}, val_loss {best_val_loss:.4f}")
 
-    test_loss, test_acc, test_acc_per_class, test_true, test_pred = _classify_report(
-        model, test_loader, device, n_classes, class_names
-    )
-    print(
-        f"\n[vihrs classify seed={seed}] test cross-entropy {test_loss:.4f} | test accuracy {test_acc:.4f}\n"
-        f"  per-class accuracy: " + ", ".join(f"{name}={acc:.3f}" for name, acc in test_acc_per_class.items())
-    )
+    test_loss = test_acc = test_acc_per_class = test_true = test_pred = None
+    if len(test_idx):
+        test_loss, test_acc, test_acc_per_class, test_true, test_pred = _classify_report(
+            model, test_loader, device, n_classes, class_names
+        )
+        print(
+            f"\n[vihrs classify seed={seed}] test cross-entropy {test_loss:.4f} | test accuracy {test_acc:.4f}\n"
+            f"  per-class accuracy: " + ", ".join(f"{name}={acc:.3f}" for name, acc in test_acc_per_class.items())
+        )
+
+    # ---- DV3 evaluation products (frozen train-split statistics) ----
+    from ..experiments.common import print_eval_set, record_eval_set  # local: experiments imports baselines
+
+    eval_sets: dict[str, dict[str, Any]] = {}
+    for set_name, feats in (eval_features or {}).items():
+        ev_targets = np.asarray(feats["targets"], dtype=np.int64)
+        ev_n_std = apply_log_zscore(feats["n_points"], n_norm).astype(np.float32)
+        ev_seq = apply_zscore_per_channel(summstats.stack_channels(feats, channels), lr_norm).astype(np.float32)
+        ev_loader = DataLoader(
+            TensorDataset(torch.from_numpy(ev_seq), torch.from_numpy(ev_n_std), torch.from_numpy(ev_targets)),
+            batch_size=batch_size, shuffle=False,
+        )
+        eval_sets[set_name] = record_eval_set(
+            output_dir, set_name, task="classify", outputs=predict_all(model, ev_loader, device),
+            truth=ev_targets, case_id=feats["case_id"], family=feats["family"], names=list(class_names),
+            method=method_name, seed=seed,
+        )
+        print_eval_set(f"vihrs classify seed={seed}", set_name, eval_sets[set_name])
+    if test_loss is None and "A" in eval_sets:
+        test_loss = eval_sets["A"]["loss"]
+        test_acc = eval_sets["A"]["accuracy"]
+        test_acc_per_class = eval_sets["A"]["accuracy_per_class"]
 
     adversarial_loss = None
     adversarial_acc = None
@@ -1588,6 +1766,7 @@ def run_one_seed_classify(
             "adversarial_accuracy": adversarial_acc,
             "adversarial_accuracy_per_class": adversarial_acc_per_class,
             "adversarial_path": str(adversarial_path) if adversarial_path else None,
+            "eval_sets": eval_sets or None,
             **stamp,
         },
         output_dir / "results.pt",
@@ -1607,6 +1786,8 @@ def run_one_seed_classify(
         "test_accuracy": test_acc,
         "test_accuracy_per_class": test_acc_per_class,
     }
+    if eval_sets:
+        json_payload["eval_sets"] = eval_sets
     if adversarial_loss is not None:
         json_payload["adversarial_accuracy"] = adversarial_acc
         json_payload["adversarial_accuracy_per_class"] = adversarial_acc_per_class
@@ -1627,7 +1808,8 @@ def run_one_seed_classify(
     )
 
     try:
-        _confusion_png(output_dir / "plots" / "confusion_matrix.png", test_true, test_pred, class_names)
+        if test_true is not None:
+            _confusion_png(output_dir / "plots" / "confusion_matrix.png", test_true, test_pred, class_names)
         if adversarial_features is not None:
             _confusion_png(output_dir / "plots" / "confusion_matrix_adversarial.png", adv_true, adv_pred, class_names)
     except Exception as exc:  # noqa: BLE001 -- a plotting failure must not lose a finished run
@@ -1641,6 +1823,7 @@ def run_one_seed_classify(
         "adversarial_loss": adversarial_loss,
         "adversarial_accuracy": adversarial_acc,
         "adversarial_accuracy_per_class": adversarial_acc_per_class,
+        "eval_sets": eval_sets,
     }
 
 

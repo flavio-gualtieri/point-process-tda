@@ -13,7 +13,7 @@ from .data import (
     CorrelationFeatureDataset,
 )
 from .splits import train_val_test_split
-from .train import train_one_epoch, evaluate, evaluate_per_target
+from .train import train_one_epoch, evaluate, evaluate_per_target, predict_outputs
 
 __all__ = [
     "PersistenceImageDataset",
@@ -23,4 +23,5 @@ __all__ = [
     "train_one_epoch",
     "evaluate",
     "evaluate_per_target",
+    "predict_outputs",
 ]

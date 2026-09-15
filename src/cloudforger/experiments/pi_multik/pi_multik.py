@@ -16,20 +16,23 @@ from cloudforger.baselines import summstats, vihrs
 from cloudforger.core.diagram import PersistenceDiagram
 from cloudforger.core.io import intersect_seeds
 from cloudforger.core.records import load_diagrams
-from cloudforger.core.splits import train_val_test_indices
+from cloudforger.core.splits import resolve_split
 from cloudforger.encoders.encoder_bank import EncoderBank
 from cloudforger.encoders.scaleconv_pi import ConvFusion
 from cloudforger.experiments.base import register
 from cloudforger.experiments.common import (
     MultiSourceExperiment,
     apply_zscore,
+    dv3_row_meta,
     fit_zscore,
     prepare_device,
+    print_eval_set,
+    record_eval_set,
     save_results,
 )
 from cloudforger.models.heads.classifier import ClassificationHead
 from cloudforger.models.heads.paramest import ParameterEstimator
-from cloudforger.training.train import evaluate, evaluate_per_target, train_one_epoch
+from cloudforger.training.train import evaluate, evaluate_per_target, predict_outputs, train_one_epoch
 from cloudforger.vectorization.persistence_images.calibrated import build_calibrated_imager
 from cloudforger.vectorization.persistence_images.multi_channel import MultiChannelImager
 from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
@@ -805,6 +808,7 @@ def _per_class_accuracy(
 @register("pi_multik")
 class PIMultiKExperiment(MultiSourceExperiment):
     file_keys = ("clouds", "images")
+    supports_dv3 = True
 
     @property
     def subdir(self) -> str:
@@ -825,9 +829,14 @@ class PIMultiKExperiment(MultiSourceExperiment):
         dataset_paths: dict[str, Any],
         output_dir: Path,
         adversarial_paths: dict[str, Any] | None = None,
+        eval_paths: dict[str, dict[str, Any]] | None = None,
     ) -> dict:
         # fetch configs
         task = str(self.cfg.get("task", "params"))
+        # split: "random" (legacy train_val_test_indices(n, seed)) or "dv3"
+        # (train/val read off the generator's `split` column, no in-pool test
+        # rows; evaluation happens on the DV3 products in eval_paths instead).
+        use_dv3 = str(self.cfg.get("split", "random")) == "dv3"
         is_classify = task == "classify"
         label_names = tuple(self.cfg.get("target_label_names"))
         k_values = list(self.cfg["k_values"])
@@ -917,7 +926,12 @@ class PIMultiKExperiment(MultiSourceExperiment):
             )
 
         n = len(train_split["targets"])
-        train_idx, val_idx, test_idx = train_val_test_indices(n, seed)
+        split_labels = dv3_row_meta(dataset_paths["clouds"], train_split["seeds"])["split"] if use_dv3 else None
+        train_idx, val_idx, test_idx = resolve_split(
+            n, seed, split_labels, reshuffle_seed=self.cfg.get("split_reshuffle_seed"),
+        )
+        print(f"[{self.tag} seed={seed}] split ({'dv3' if use_dv3 else 'random'}): "
+              f"{len(train_idx)} train / {len(val_idx)} val / {len(test_idx)} in-pool test")
 
         if is_classify:
             # Class indices pass through verbatim (CrossEntropyLoss wants raw
@@ -1035,19 +1049,19 @@ class PIMultiKExperiment(MultiSourceExperiment):
                 break
 
         model.load_state_dict(best_state)
-        test_loss, test_acc = evaluate(model, test_loader, loss_fn, device)
-        if is_classify:
-            test_loss_per_target = None
-            test_acc_per_class = _per_class_accuracy(model, test_loader, device, len(label_names), label_names)
-            print(
-                f"\n[{self.tag} seed={seed}] test cross-entropy {test_loss:.4f} | test accuracy {test_acc:.4f}\n"
-                f"  per-class accuracy: "
-                + ", ".join(f"{name}={acc:.3f}" for name, acc in test_acc_per_class.items())
-            )
-        else:
-            test_loss_per_target = dict(zip(label_names, evaluate_per_target(model, test_loader, device).tolist()))
-            test_acc_per_class = None
-            print(f"\n[{self.tag} seed={seed}] test loss {test_loss:.4f}")
+        test_loss, test_acc, test_loss_per_target, test_acc_per_class = None, None, None, None
+        if len(test_idx):
+            test_loss, test_acc = evaluate(model, test_loader, loss_fn, device)
+            if is_classify:
+                test_acc_per_class = _per_class_accuracy(model, test_loader, device, len(label_names), label_names)
+                print(
+                    f"\n[{self.tag} seed={seed}] test cross-entropy {test_loss:.4f} | test accuracy {test_acc:.4f}\n"
+                    f"  per-class accuracy: "
+                    + ", ".join(f"{name}={acc:.3f}" for name, acc in test_acc_per_class.items())
+                )
+            else:
+                test_loss_per_target = dict(zip(label_names, evaluate_per_target(model, test_loader, device).tolist()))
+                print(f"\n[{self.tag} seed={seed}] test loss {test_loss:.4f}")
 
         adversarial_loss = None
         adversarial_loss_per_target = None
@@ -1086,6 +1100,60 @@ class PIMultiKExperiment(MultiSourceExperiment):
                 )
                 print(f"[{self.tag} seed={seed}] adversarial loss {adversarial_loss:.4f}")
 
+        # DV3 evaluation products: every set goes through exactly the frozen
+        # train-fit transforms the adversarial set above does (imagers,
+        # n/entropy/L/F/G normalisations, label_norm), then its per-pattern
+        # outputs are written to predictions_<set>.npz for the regime
+        # analysis (cloudforger.evaluation.regimes).
+        eval_sets: dict[str, dict[str, Any]] = {}
+        for set_name, set_paths in (eval_paths or {}).items():
+            ev = load_multik_split(
+                k_values, list(set_paths["images"]), Path(set_paths["clouds"]),
+                label_names, tag=f"eval_{set_name}", homology_dims=homology_dims, task=task,
+                lfunc_n_radii=lfunc_n_radii, fg_n_radii=fg_n_radii, fg_r_max=fg_r_max,
+                curve_channels=curve_channels,
+            )
+            if ev is None:
+                raise FileNotFoundError(
+                    f"[{self.tag} seed={seed}] eval set {set_name}: diagrams missing under "
+                    f"{set_paths['images']} -- compute them (scripts/processing/dv3_diagrams.py) or drop "
+                    f"{set_name!r} from data.eval_sets."
+                )
+            ev_truth = (ev["targets"].astype(np.int64) if is_classify
+                        else vihrs.apply_log_zscore(ev["targets"], label_norm).astype(np.float32))
+            ev_img, _ = build_pi_tensor(
+                ev, k_values, homology_dims=homology_dims, resolution=resolution,
+                sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, imagers=imagers,
+            )
+            ev_extra, _, _ = build_extra(
+                ev, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
+                include_log_n=include_log_n, include_lfunc=include_lfunc, lfunc_pca=lfunc_pca,
+                include_fg=include_fg, include_curves=include_curves,
+            )
+            ev_loader = DataLoader(
+                TensorDataset(torch.from_numpy(ev_img), torch.from_numpy(ev_extra), torch.from_numpy(ev_truth)),
+                batch_size=self.cfg["batch_size"], shuffle=False,
+            )
+            meta = dv3_row_meta(set_paths["clouds"], ev["seeds"])
+            eval_sets[set_name] = record_eval_set(
+                output_dir, set_name, task="classify" if is_classify else "params",
+                outputs=predict_outputs(model, ev_loader, device), truth=ev_truth,
+                case_id=meta["case_id"], family=meta["family"], names=list(label_names),
+                label_norm=None if is_classify else label_norm,
+                truth_raw=None if is_classify else ev["targets"], method=self.subdir, seed=seed,
+            )
+            print_eval_set(f"{self.tag} seed={seed}", set_name, eval_sets[set_name])
+
+        # Under DV3 there is no in-pool test slice; the legacy scalar
+        # test_loss/test_accuracy fields carry set A (the prior-integrated
+        # risk, i.e. what the old random test slice estimated), so
+        # scripts/evaluate.py and the results ledger keep working unchanged.
+        if test_loss is None and "A" in eval_sets:
+            test_loss = eval_sets["A"]["loss"]
+            test_acc = eval_sets["A"].get("accuracy")
+            test_loss_per_target = eval_sets["A"].get("loss_per_target")
+            test_acc_per_class = eval_sets["A"].get("accuracy_per_class")
+
         cfg_meta = {
             **self.cfg,
             "channels": [f"k{k}_h{d}" for k in k_values for d in homology_dims],
@@ -1117,10 +1185,11 @@ class PIMultiKExperiment(MultiSourceExperiment):
             test_loss_per_target=test_loss_per_target, adversarial_loss=adversarial_loss,
             adversarial_loss_per_target=adversarial_loss_per_target,
             adversarial_path=adversarial_paths.get("clouds") if adversarial_paths else None,
-            extra_meta=extra_meta,
+            extra_meta=extra_meta, eval_sets=eval_sets or None,
         )
 
-        result: dict[str, Any] = {"seed": seed, "test_loss": test_loss, "test_loss_per_target": test_loss_per_target}
+        result: dict[str, Any] = {"seed": seed, "test_loss": test_loss, "test_loss_per_target": test_loss_per_target,
+                                  "eval_sets": eval_sets}
         if is_classify:
             result["test_accuracy"] = test_acc
             result["test_accuracy_per_class"] = test_acc_per_class

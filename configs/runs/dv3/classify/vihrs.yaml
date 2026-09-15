@@ -1,0 +1,36 @@
+# python scripts/train.py configs/runs/dv3/classify/vihrs.yaml --seed 9371
+#
+# DV3 -- 5-way classification: vihrs 1-D CNN on L(r)-r + n(x).
+# Trains on data/dv3/train/<group>/ with the generation-time train/val split
+# and writes predictions_<set>.npz for every set in data.eval_sets; compare
+# across regimes with scripts/evaluate_regimes.py (see configs/runs/dv3/README.md).
+#
+# No `filtration:` block: under DV3 the split is the generator's, so the
+# diagram bundles are not needed to reproduce it. Uses every cloud of the
+# merged bundle (clouds only: dv3_classification_bundle.py --clouds-only suffices).
+# Add the PH configs' filtration block to restrict to exactly their clouds.
+process:
+  name: dv3_classify
+
+data:
+  source: dv3
+  group: _classify
+  eval_sets: [A, B, C]
+
+method:
+  name: vihrs
+  params:
+    task: classify
+    summary_channels: [L]
+    fg_r_max: 0.25
+    results_subdir: vihrs
+    r_max: 0.25
+    n_r: 513
+    batch_size: 128
+    n_epochs: 600
+    lr: 0.001
+    weight_decay: 0.0
+    early_stopping_patience: 60
+
+seeds: [9371, 9372, 9373, 9374, 9375, 9376, 9377, 9378, 9379, 9380]
+target_label_names: [poisson, thomas, nested, matern2, lgcp]

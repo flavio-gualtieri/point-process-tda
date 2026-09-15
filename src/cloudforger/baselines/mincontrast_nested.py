@@ -75,7 +75,11 @@ __all__ = [
 # [15,120], mu1 in [1.5,7], meta_cluster_scale in ~[0.005,0.12],
 # cluster_scale in ~[0.0005,0.04]), chosen so exp() at either edge is nowhere
 # near float64 overflow (exp(8) ~ 2981, exp(-9) ~ 1.2e-4).
-LOG_KAPPA_BOUNDS = (-2.0, 8.0)     # kappa  in [0.135, 2981]
+# Upper edge raised from 8.0 (2981) for DV3, whose nested prior reaches
+# kappa ~ 1.3e4 (kappa = nbar / (mu1 mu2) with mu2 down to 0.03): 5% of set
+# A sat above the old edge, all in the near-CSR corner, where a clipped
+# estimate would read as a regime effect rather than a box constraint.
+LOG_KAPPA_BOUNDS = (-2.0, 10.0)    # kappa  in [0.135, 22026]
 LOG_MU1_BOUNDS = (-2.0, 4.0)       # mu1    in [0.135, 54.6]
 LOG_SIGMA1_BOUNDS = (-8.0, -0.5)   # sigma1 in [3.4e-4, 0.607]
 LOG_SIGMA2_BOUNDS = (-9.0, -1.0)   # sigma2 in [1.2e-4, 0.368]

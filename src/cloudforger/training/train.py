@@ -138,3 +138,18 @@ def train_and_eval(model, loaders, cfg: dict, device: str, tag: str):
     test_loss, _ = evaluate(model, test_loader, loss_fn, device)
     print(f"\n[{tag}] Test loss: {test_loss:.4f}")
     return history, best_state, test_loss
+
+@torch.no_grad()
+def predict_outputs(model, loader: DataLoader, device) -> np.ndarray:
+    """Raw model outputs for every row of `loader`, in loader order (no
+    shuffling assumed): standardized predictions for a regressor, logits for
+    a classifier. What the per-pattern prediction bundles are made of."""
+    model.eval()
+    parts = []
+    for batch in loader:
+        inputs, covariates, _labels = _unpack_batch(batch)
+        inputs = _to_device(inputs, device)
+        if covariates is not None:
+            covariates = covariates.to(device)
+        parts.append(model(inputs, covariates).detach().cpu().numpy())
+    return np.concatenate(parts, axis=0) if parts else np.empty((0, 0))

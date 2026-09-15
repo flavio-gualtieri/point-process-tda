@@ -63,7 +63,11 @@ __all__ = [
 # _LOG_BOUNDS -- see that module's comment. Kept as a separate copy (not a
 # shared import) so each module's bounds can be retuned independently if the
 # K- and g-contrast surfaces turn out to need different margins.
-LOG_KAPPA_BOUNDS = (-2.0, 8.0)     # kappa  in [0.135, 2981]
+# Upper edge raised from 8.0 (2981) for DV3, whose nested prior reaches
+# kappa ~ 1.3e4 (kappa = nbar / (mu1 mu2) with mu2 down to 0.03): 5% of set
+# A sat above the old edge, all in the near-CSR corner, where a clipped
+# estimate would read as a regime effect rather than a box constraint.
+LOG_KAPPA_BOUNDS = (-2.0, 10.0)    # kappa  in [0.135, 22026]
 LOG_MU1_BOUNDS = (-2.0, 4.0)       # mu1    in [0.135, 54.6]
 LOG_SIGMA1_BOUNDS = (-8.0, -0.5)   # sigma1 in [3.4e-4, 0.607]
 LOG_SIGMA2_BOUNDS = (-9.0, -1.0)   # sigma2 in [1.2e-4, 0.368]
