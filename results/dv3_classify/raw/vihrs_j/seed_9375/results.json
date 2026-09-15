@@ -1,0 +1,98 @@
+{
+  "task": "classify",
+  "method": "vihrs",
+  "test_loss": 0.9042980394551978,
+  "test_loss_per_target": null,
+  "seed": 9375,
+  "git_commit": "c4bc3fba6d891fe2ca41be5619b547a67a774230",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T15:41:48.746984+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "classify",
+    "method": "vihrs",
+    "paper": "Vihrs (2022), feature set + CNN adapted to classification",
+    "batch_size": 128,
+    "n_epochs": 600,
+    "lr": 0.001,
+    "weight_decay": 0.0,
+    "early_stopping_patience": 60,
+    "checkpoint_best": true,
+    "best_epoch": 34,
+    "embedding_dim": 833,
+    "seed": 9375,
+    "r_max": 0.25,
+    "n_r": 513,
+    "class_names": [
+      "poisson",
+      "thomas",
+      "nested",
+      "matern2",
+      "lgcp"
+    ],
+    "n_train": 42500,
+    "n_val": 7500,
+    "n_test": 0,
+    "output_dir": "/gpfs/scratch/qp252676/globus/point-process-tda/results/dv3_classify/raw/vihrs_j/seed_9375",
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "run_tag": null
+  },
+  "class_names": [
+    "poisson",
+    "thomas",
+    "nested",
+    "matern2",
+    "lgcp"
+  ],
+  "test_accuracy": 0.6194,
+  "test_accuracy_per_class": {
+    "poisson": 0.73,
+    "thomas": 0.4204,
+    "nested": 0.501,
+    "matern2": 0.8822,
+    "lgcp": 0.5634
+  },
+  "best_epoch": 34,
+  "best_val_loss": 0.9144833673477173,
+  "best_val_accuracy": 0.6106666666666667,
+  "eval_sets": {
+    "A": {
+      "n": 25000,
+      "loss": 0.9042980394551978,
+      "accuracy": 0.6194,
+      "accuracy_per_class": {
+        "poisson": 0.73,
+        "thomas": 0.4204,
+        "nested": 0.501,
+        "matern2": 0.8822,
+        "lgcp": 0.5634
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 46400,
+      "loss": 0.9675638276472833,
+      "accuracy": 0.5392025862068965,
+      "accuracy_per_class": {
+        "thomas": 0.40077380952380953,
+        "nested": 0.41,
+        "matern2": 0.8956666666666667,
+        "lgcp": 0.61225
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 44400,
+      "loss": 1.0375610106899618,
+      "accuracy": 0.5203153153153153,
+      "accuracy_per_class": {
+        "poisson": 0.7261666666666666,
+        "thomas": 0.2321875,
+        "nested": 0.25625,
+        "matern2": 0.8930208333333334,
+        "lgcp": 0.5711458333333334
+      },
+      "predictions": "predictions_C.npz"
+    }
+  }
+}

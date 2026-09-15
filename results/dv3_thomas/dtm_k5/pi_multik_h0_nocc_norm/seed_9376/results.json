@@ -1,0 +1,140 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.1747537141783763,
+  "test_loss_per_target": {
+    "kappa": 0.12132427864659251,
+    "mu": 0.13118767207642082,
+    "sigma": 0.2717491918121155
+  },
+  "seed": 9376,
+  "git_commit": "cf0b736ecbd5b59fa8692c67175fed163b8fb377",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T16:18:27.116416+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9376,
+    "homology_dims": [
+      0
+    ],
+    "results_subdir": "pi_multik_h0_nocc_norm",
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "coordconv": false,
+    "pi_normalize": "channel",
+    "target_label_names": [
+      "kappa",
+      "mu",
+      "sigma"
+    ],
+    "log_label_names": [
+      "kappa",
+      "mu",
+      "sigma"
+    ],
+    "split": "dv3",
+    "data_group": "thomas",
+    "eval_sets": [
+      "A",
+      "B",
+      "C"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.004817156256886451,
+            0.44675697587152813
+          ],
+          "pers_range": [
+            0.0,
+            0.4082862959240074
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.003452654840739388,
+          "sigma_pers": 0.0031897366869063077,
+          "weight_fn": "linear_weight"
+        }
+      }
+    },
+    "pi_norm": {
+      "mean": [
+        [
+          0.001982642124130111
+        ]
+      ],
+      "std": [
+        [
+          0.013840380391390185
+        ]
+      ]
+    }
+  },
+  "best_val_loss": 0.16370390939712526,
+  "n_epochs_run": 109,
+  "eval_sets": {
+    "A": {
+      "n": 5000,
+      "n_ok": 5000,
+      "loss": 0.1747537141783763,
+      "loss_per_target": {
+        "kappa": 0.12132427864659251,
+        "mu": 0.13118767207642082,
+        "sigma": 0.2717491918121155
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 16800,
+      "n_ok": 16800,
+      "loss": 0.20047052756725905,
+      "loss_per_target": {
+        "kappa": 0.17926183762139986,
+        "mu": 0.19192147017455816,
+        "sigma": 0.23022827490581915
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 9600,
+      "n_ok": 9600,
+      "loss": 0.3778141399588047,
+      "loss_per_target": {
+        "kappa": 0.3397869959414588,
+        "mu": 0.3541111998430914,
+        "sigma": 0.43954422409186394
+      },
+      "predictions": "predictions_C.npz"
+    }
+  }
+}

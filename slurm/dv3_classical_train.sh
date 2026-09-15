@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=80G
 #SBATCH -t 02:00:00
-#SBATCH --array=0-34
+#SBATCH --array=0-89
 #SBATCH --output=logs/dv3_cl_train_%A_%a.out
 #SBATCH --error=logs/dv3_cl_train_%A_%a.err
 
@@ -17,6 +17,11 @@
 # the standard summary functions, for parameter estimation (4 families) and
 # 5-way classification, 10 seeds each, scored on DV3 sets A, B and C.
 # Needs NO persistence diagrams -- runnable while the DTM diagrams compute.
+#
+# Arms cover all 15 non-empty subsets of {L, F, G, J}. The four original
+# arms (L, LFGJ, G, F) additionally have an 0.08 F/G/J grid variant (the
+# informative range for F/G at DV3 intensities, see below); the 11 arms
+# added for full-combination coverage run at the 0.25 grid only.
 #
 #   arm  tag        channels + n(x)  F/G/J grid   results subdir
 #   0    L          L(r)-r           --           vihrs_checkpointed (params) / vihrs (classify)
@@ -26,14 +31,25 @@
 #   4    F          F                0.25         vihrs_f
 #   5    G_r080     G                0.08         vihrs_g_r080
 #   6    F_r080     F                0.08         vihrs_f_r080
+#   7    J          J                0.25         vihrs_j
+#   8    LF         L, F             0.25         vihrs_lf
+#   9    LG         L, G             0.25         vihrs_lg
+#   10   LJ         L, J             0.25         vihrs_lj
+#   11   FG         F, G             0.25         vihrs_fg
+#   12   FJ         F, J             0.25         vihrs_fj
+#   13   GJ         G, J             0.25         vihrs_gj
+#   14   LFG        L, F, G          0.25         vihrs_lfg
+#   15   LFJ        L, F, J          0.25         vihrs_lfj
+#   16   LGJ        L, G, J          0.25         vihrs_lgj
+#   17   FGJ        F, G, J          0.25         vihrs_fgj
 #
-#   tasks 0-27   PARAMETER ESTIMATION (inference): t = arm * 4 + family,
+#   tasks 0-71   PARAMETER ESTIMATION (inference): t = arm * 4 + family,
 #                family 0 thomas  1 nested  2 matern2  3 lgcp
 #                (arm-major, so L and L+F+G+J -- tasks 0-7 -- start first)
-#   tasks 28-34  CLASSIFICATION: t = 28 + arm
+#   tasks 72-89  CLASSIFICATION: t = 72 + arm
 #
-# Inference goes first. slurm/dv3_classical_submit.sh submits 0-27 as soon as
-# the params caches exist and 28-34 only after every inference task has ended,
+# Inference goes first. slurm/dv3_classical_submit.sh submits 0-71 as soon as
+# the params caches exist and 72-89 only after every inference task has ended,
 # so classification never takes one of the 12 GPUs inference could use.
 #
 # Configs: configs/runs/dv3/<group>/vihrs.yaml (arm L) and
@@ -84,13 +100,13 @@ SEEDS=(9371 9372 9373 9374 9375 9376 9377 9378 9379 9380)
 FAMILY_LIST=(thomas nested matern2 lgcp)
 
 # Keep in step with NEURAL_ARMS in scripts/dv3_matrix.py.
-ARM_TAG=(L    LFGJ        LFGJ_r080       G        F        G_r080        F_r080)
-ARM_CH=(""    "[L,F,G,J]" "[L,F,G,J]"     "[G]"    "[F]"    "[G]"         "[F]")
-ARM_FG=(""    0.25        0.08            0.25     0.25     0.08          0.08)
-ARM_SUB=(""   vihrs_lfgj  vihrs_lfgj_r080 vihrs_g  vihrs_f  vihrs_g_r080  vihrs_f_r080)
+ARM_TAG=(L    LFGJ        LFGJ_r080       G        F        G_r080        F_r080       J       LF       LG       LJ       FG       FJ       GJ       LFG        LFJ        LGJ        FGJ)
+ARM_CH=(""    "[L,F,G,J]" "[L,F,G,J]"     "[G]"    "[F]"    "[G]"         "[F]"        "[J]"   "[L,F]"  "[L,G]"  "[L,J]"  "[F,G]"  "[F,J]"  "[G,J]"  "[L,F,G]"  "[L,F,J]"  "[L,G,J]"  "[F,G,J]")
+ARM_FG=(""    0.25        0.08            0.25     0.25     0.08          0.08         0.25    0.25     0.25     0.25     0.25     0.25     0.25     0.25       0.25       0.25       0.25)
+ARM_SUB=(""   vihrs_lfgj  vihrs_lfgj_r080 vihrs_g  vihrs_f  vihrs_g_r080  vihrs_f_r080 vihrs_j vihrs_lf vihrs_lg vihrs_lj vihrs_fg vihrs_fj vihrs_gj vihrs_lfg  vihrs_lfj  vihrs_lgj  vihrs_fgj)
 N_ARMS=${#ARM_TAG[@]}
 N_FAM=${#FAMILY_LIST[@]}
-N_PARAMS=$(( N_ARMS * N_FAM ))   # 28
+N_PARAMS=$(( N_ARMS * N_FAM ))   # 72
 
 t="${SLURM_ARRAY_TASK_ID:?run this as an array job (sbatch slurm/dv3_classical_train.sh)}"
 if (( t < N_PARAMS )); then

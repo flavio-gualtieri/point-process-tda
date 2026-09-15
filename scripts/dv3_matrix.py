@@ -87,6 +87,8 @@ class Arm:
 
 
 # Keep in the order (and with the subdirs) of slurm/dv3_classical_train.sh.
+# The 11 pair/triple/J arms below cover the rest of the 15 non-empty subsets
+# of {L,F,G,J}; only the original 4 (L, LFGJ, G, F) also have an 0.08 grid.
 NEURAL_ARMS = [
     Arm("L", "L(r)−r + n(x)", "—", None),
     Arm("LFGJ", "L, F, G, J + n(x)", "0.25", "vihrs_lfgj", "LFGJ"),
@@ -95,6 +97,17 @@ NEURAL_ARMS = [
     Arm("F", "F + n(x)", "0.25", "vihrs_f", "F"),
     Arm("G_r080", "G + n(x)", "0.08", "vihrs_g_r080", "G"),
     Arm("F_r080", "F + n(x)", "0.08", "vihrs_f_r080", "F"),
+    Arm("J", "J + n(x)", "0.25", "vihrs_j"),
+    Arm("LF", "L, F + n(x)", "0.25", "vihrs_lf"),
+    Arm("LG", "L, G + n(x)", "0.25", "vihrs_lg"),
+    Arm("LJ", "L, J + n(x)", "0.25", "vihrs_lj"),
+    Arm("FG", "F, G + n(x)", "0.25", "vihrs_fg"),
+    Arm("FJ", "F, J + n(x)", "0.25", "vihrs_fj"),
+    Arm("GJ", "G, J + n(x)", "0.25", "vihrs_gj"),
+    Arm("LFG", "L, F, G + n(x)", "0.25", "vihrs_lfg"),
+    Arm("LFJ", "L, F, J + n(x)", "0.25", "vihrs_lfj"),
+    Arm("LGJ", "L, G, J + n(x)", "0.25", "vihrs_lgj"),
+    Arm("FGJ", "F, G, J + n(x)", "0.25", "vihrs_fgj"),
 ]
 L_SUBDIR = {"params": "vihrs_checkpointed", "classify": "vihrs"}
 

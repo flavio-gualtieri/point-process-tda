@@ -12,10 +12,10 @@
 # The chain (--parsable ids, all dependencies set at submit time):
 #
 #   1  prep   tasks 0-11  CPU  params feature caches (4 families x 3 passes, 8 CPUs each)
-#   2  train  tasks 0-27  GPU  inference, afterok:1  (7 arms x 4 families x 10 seeds)
+#   2  train  tasks 0-71  GPU  inference, afterok:1  (18 arms x 4 families x 10 seeds)
 #   3  prep   task  12    CPU  _classify bundle + caches, afterany:1 (16 CPUs;
 #                              never competes with 1 for CPU slots)
-#   4  train  tasks 28-34 GPU  classification, afterok:3 AND afterany:2 -- starts
+#   4  train  tasks 72-89 GPU  classification, afterok:3 AND afterany:2 -- starts
 #                              only once every inference task has ended, so it
 #                              never holds one of the 12 GPUs inference could use.
 #                              afterany, not afterok, on 2: a failed inference
@@ -37,8 +37,8 @@ mode="${1:-all}"
 submit_params() {
   local prep train
   prep=$(sbatch --parsable --array=0-11 "$PREP")
-  train=$(sbatch --parsable --array=0-27 --dependency="afterok:${prep}" "$TRAIN")
-  echo "inference:       prep ${prep} (tasks 0-11)  ->  train ${train} (tasks 0-27)" >&2
+  train=$(sbatch --parsable --array=0-71 --dependency="afterok:${prep}" "$TRAIN")
+  echo "inference:       prep ${prep} (tasks 0-11)  ->  train ${train} (tasks 0-71)" >&2
   PARAMS_PREP=$prep PARAMS_TRAIN=$train
 }
 
@@ -47,8 +47,8 @@ submit_classify() {  # submit_classify <prep-after-dep> <train-after-dep>  (eith
   [[ -n "$1" ]] && prep_dep=(--dependency="$1")
   prep=$(sbatch --parsable --array=12 --cpus-per-task=16 --mem=64G "${prep_dep[@]}" "$PREP")
   train_dep="afterok:${prep}${2:+,$2}"
-  train=$(sbatch --parsable --array=28-34 --dependency="$train_dep" "$TRAIN")
-  echo "classification:  prep ${prep} (task 12)  ->  train ${train} (tasks 28-34, --dependency=${train_dep})" >&2
+  train=$(sbatch --parsable --array=72-89 --dependency="$train_dep" "$TRAIN")
+  echo "classification:  prep ${prep} (task 12)  ->  train ${train} (tasks 72-89, --dependency=${train_dep})" >&2
 }
 
 case "$mode" in

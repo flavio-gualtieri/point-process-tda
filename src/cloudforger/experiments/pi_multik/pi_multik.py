@@ -442,6 +442,39 @@ def build_pi_tensor(
     return np.stack(per_k, axis=1).astype(np.float32), imagers
 
 
+PI_NORMALIZE_MODES = ("none", "channel")
+
+
+def fit_pi_norm(pi_img: np.ndarray, train_idx: np.ndarray, chunk: int = 2048) -> dict[str, np.ndarray]:
+    """Per-channel z-score of persistence-image pixels -- one (mean, std) per
+    (k, homology dim) channel of the (N, n_k, C, H, W) tensor, pooled over the
+    TRAIN rows' pixels only (fit-once/apply-frozen, like every other
+    normalization here). Raw pixel scales differ by ~10x between H0 and H1
+    (H1 features are fewer and shorter-lived, and the weight function is
+    linear in persistence), and nothing in the CNN rescales its input, so an
+    unnormalized H1 channel is near-invisible next to anything O(1).
+    Accumulated in row chunks, in float64, so the train tensor is never copied whole."""
+    n_k, n_c = pi_img.shape[1], pi_img.shape[2]
+    total = np.zeros((n_k, n_c))
+    total_sq = np.zeros((n_k, n_c))
+    count = 0
+    for start in range(0, len(train_idx), chunk):
+        block = pi_img[np.sort(train_idx[start:start + chunk])].astype(np.float64)
+        total += block.sum(axis=(0, 3, 4))
+        total_sq += np.square(block).sum(axis=(0, 3, 4))
+        count += block.shape[0] * block.shape[3] * block.shape[4]
+    mean = total / count
+    std = np.sqrt(np.maximum(total_sq / count - mean ** 2, 0.0))
+    return {"mean": mean, "std": np.where(std > 0, std, 1.0)}
+
+
+def apply_pi_norm(pi_img: np.ndarray, norm: dict[str, np.ndarray]) -> np.ndarray:
+    """fit_pi_norm's statistics applied IN PLACE (float32), returned for chaining."""
+    pi_img -= norm["mean"][None, :, :, None, None].astype(np.float32)
+    pi_img /= norm["std"][None, :, :, None, None].astype(np.float32)
+    return pi_img
+
+
 def build_extra(
     split: dict[str, Any],
     train_idx: np.ndarray | None,
@@ -882,6 +915,11 @@ class PIMultiKExperiment(MultiSourceExperiment):
         sigma_pixels = float(self.cfg.get("sigma_pixels", 0.5))
         coverage = float(self.cfg.get("pd_calibration_coverage", 0.95))
         pad = float(self.cfg.get("pad", 1.05))
+        # pi_normalize: "none" (default -- raw pixels, every existing config)
+        # or "channel" (fit_pi_norm: per-(k, dim) z-score fit on train rows).
+        pi_normalize = str(self.cfg.get("pi_normalize", "none"))
+        if pi_normalize not in PI_NORMALIZE_MODES:
+            raise ValueError(f"pi_normalize must be one of {PI_NORMALIZE_MODES}, got {pi_normalize!r}")
         seed = self.cfg["seed"]
         # init_offset: perturb weight init / dropout / batch order for a
         # RESTART without touching the data split. train_val_test_indices
@@ -958,6 +996,11 @@ class PIMultiKExperiment(MultiSourceExperiment):
             train_split, k_values, homology_dims=homology_dims, resolution=resolution,
             sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, train_idx=train_idx,
         )
+        pi_norm = fit_pi_norm(pi_img, train_idx) if pi_normalize == "channel" else None
+        if pi_norm is not None:
+            apply_pi_norm(pi_img, pi_norm)
+            print(f"[{self.tag} seed={seed}] pi_normalize=channel: pixel mean {pi_norm['mean'].ravel().tolist()} "
+                  f"std {pi_norm['std'].ravel().tolist()} (train rows)")
         extra, n_norm, entropy_norms = build_extra(
             train_split, train_idx, include_entropy=include_entropy, include_log_n=include_log_n,
             include_lfunc=include_lfunc, lfunc_pca=lfunc_pca, include_fg=include_fg,
@@ -1078,6 +1121,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
                 adv_split, k_values, homology_dims=homology_dims, resolution=resolution,
                 sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, imagers=imagers,
             )
+            if pi_norm is not None:
+                apply_pi_norm(adv_pi_img, pi_norm)
             adv_extra, _, _ = build_extra(
                 adv_split, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
                 include_log_n=include_log_n, include_lfunc=include_lfunc, lfunc_pca=lfunc_pca,
@@ -1127,6 +1172,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
                 ev, k_values, homology_dims=homology_dims, resolution=resolution,
                 sigma_pixels=sigma_pixels, coverage=coverage, pad=pad, imagers=imagers,
             )
+            if pi_norm is not None:
+                apply_pi_norm(ev_img, pi_norm)
             ev_extra, _, _ = build_extra(
                 ev, None, n_norm=n_norm, entropy_norms=entropy_norms, include_entropy=include_entropy,
                 include_log_n=include_log_n, include_lfunc=include_lfunc, lfunc_pca=lfunc_pca,
@@ -1163,6 +1210,8 @@ class PIMultiKExperiment(MultiSourceExperiment):
             # (birth_range/pers_range/sigma_pixels -- now seed-specific, see
             # module docstring) is recoverable from results.json alone.
             "imager_params": {k: imager.params for k, imager in zip(k_values, imagers)},
+            "pi_norm": ({"mean": pi_norm["mean"].tolist(), "std": pi_norm["std"].tolist()}
+                        if pi_norm is not None else None),
         }
         # best_val_loss is the selection statistic for restart arms
         # (slurm/strauss_restarts.sh -> scripts/collect_restarts.py) and the
