@@ -30,9 +30,8 @@
 
 \begin{itemize}
   \item A new dataset (DV3) was generated from scratch so that performance can be reported \emph{per regime} (how far from Poisson, how many points) instead of as one averaged number.
-  \item \textbf{Done:} the classical baselines (a neural network reading the standard summary functions), for parameter estimation and 5-way model classification, now covering all 15 non-empty subsets of the four summary functions $\{L,F,G,J\}$ (previously only $L$, $L{+}F{+}G{+}J$, $G$ and $F$ alone); and the first persistence-homology (PH) features: persistence images of the DTM filtration ($k=5$), $H_0$ and $H_1$ as separate models. Every number is an average over 10 training seeds.
-  \item \textbf{Main result so far:} the classical baselines win everywhere, but the full-union model $L{+}F{+}G{+}J$ is not always the best classical model. Sweeping all 15 subsets turns up a different, only narrowly better winner per parameter-estimation family ($L{+}F{+}G$ on Thomas and nested, $L{+}J$ on Mat\'ern~II, $L{+}F$ on LGCP -- always within about one seed SD of $L{+}F{+}G{+}J$) and for classification too ($L{+}F{+}G$, edging out $L{+}F{+}G{+}J$). For classification, the best classical model ($L{+}F{+}G$) beats the best PH model ($H_0$) by 6.7 points of accuracy (0.712 vs.\ 0.645). $H_1$ carries real but weaker information than $H_0$.
-  \item \textbf{Running:} $H_0$ and $H_1$ together in one persistence-image model.
+  \item \textbf{Done:} the classical baselines (a neural network reading the standard summary functions), for parameter estimation and 5-way model classification, now covering all 15 non-empty subsets of the four summary functions $\{L,F,G,J\}$ (previously only $L$, $L{+}F{+}G{+}J$, $G$ and $F$ alone); and the first persistence-homology (PH) features: persistence images of the DTM filtration ($k=5$): $H_0$ and $H_1$ as separate models, and both together in one model. Every number is an average over 10 training seeds.
+  \item \textbf{Main result so far:} the classical baselines win everywhere, but the full-union model $L{+}F{+}G{+}J$ is not always the best classical model. Sweeping all 15 subsets turns up a different, only narrowly better winner per parameter-estimation family ($L{+}F{+}G$ on Thomas and nested, $L{+}J$ on Mat\'ern~II, $L{+}F$ on LGCP -- always within about one seed SD of $L{+}F{+}G{+}J$) and for classification too ($L{+}F{+}G$, edging out $L{+}F{+}G{+}J$). For classification, the best classical model ($L{+}F{+}G$) beats the best PH model ($H_0{+}H_1$) by 6.4 points of accuracy (0.712 vs.\ 0.648). $H_1$ carries real but weaker information than $H_0$; adding it to $H_0$ helps a little.
   \item \textbf{Not yet run:} Betti curves and persistence landscapes; DTM $k=10, 15$ and the Rips filtration; and the classical non-learned references (minimum-contrast fitting, envelope tests).
 \end{itemize}
 
@@ -62,7 +61,7 @@
 
 \begin{itemize}
   \item \textbf{Classical baselines:} the 1-D CNN of Vihrs (2022), reading summary functions sampled on a radius grid, plus the point count $n(x)$. All 15 non-empty subsets of $\{L,F,G,J\}$ were tried, from a single function ($L$ alone is the published baseline) up to the full union $L{+}F{+}G{+}J$. $L$, $L{+}F{+}G{+}J$, $G$ and $F$ alone were additionally tried on two radius grids for $F/G/J$ ($r_{\max}=0.25$ and $0.08$; the grid was chosen on the validation set, never on the test sets) -- the other 11 subsets ran only at $r_{\max}=0.25$.
-  \item \textbf{PH:} a CNN on the persistence image of one homology dimension ($H_0$ or $H_1$, separate models) of the DTM filtration ($k=5$), plus $n(x)$ for parameter estimation. It is one filtration and one dimension, with no fusion and no summary functions mixed in. Image pixels are standardised per channel with training-set statistics ($H_1$ pixels are $\sim$10$\times$ smaller than $H_0$'s), and the CNN has no coordinate channels: an earlier ``CoordConv'' design destabilised training and has been retired.
+  \item \textbf{PH:} a CNN on the persistence image of the DTM filtration ($k=5$): $H_0$ or $H_1$ alone (separate models), or both as the two channels of one image. Plus $n(x)$ for parameter estimation. One filtration, no summary functions mixed in. Image pixels are standardised per channel with training-set statistics ($H_1$ pixels are $\sim$10$\times$ smaller than $H_0$'s), and the CNN has no coordinate channels: an earlier ``CoordConv'' design destabilised training and has been retired.
   \item \textbf{Training:} the same for all: early stopping on validation loss, 10 seeds (9371--9380). Tables report mean $\pm$ standard deviation over seeds.
 \end{itemize}
 
@@ -109,6 +108,7 @@ Thomas & $L$ & 0.1365 $\pm$ 0.0007 & 0.1371 $\pm$ 0.0054 & 0.2818 $\pm$ 0.0208\\
  & $F{+}G{+}J$ & 0.1814 $\pm$ 0.0024 & 0.2049 $\pm$ 0.0114 & 0.3971 $\pm$ 0.0462\\
  & PH image $H_0$ & 0.1753 $\pm$ 0.0017 & 0.1988 $\pm$ 0.0065 & 0.3838 $\pm$ 0.0231\\
  & PH image $H_1$ & 0.2840 $\pm$ 0.0076 & 0.2907 $\pm$ 0.0100 & 0.5643 $\pm$ 0.0410\\
+ & PH image $H_0{+}H_1$ & 0.1665 $\pm$ 0.0027 & 0.1845 $\pm$ 0.0095 & 0.3664 $\pm$ 0.0366\\
 \midrule
 Nested & $L$ & 0.3645 $\pm$ 0.0023 & 0.2045 $\pm$ 0.0102 & 0.1689 $\pm$ 0.0128\\
  & $L{+}F{+}G{+}J$ & 0.3582 $\pm$ 0.0029 & 0.1951 $\pm$ 0.0205 & 0.1713 $\pm$ 0.0237\\
@@ -127,6 +127,7 @@ Nested & $L$ & 0.3645 $\pm$ 0.0023 & 0.2045 $\pm$ 0.0102 & 0.1689 $\pm$ 0.0128\\
  & $F{+}G{+}J$ & 0.4127 $\pm$ 0.0019 & 0.1983 $\pm$ 0.0147 & 0.1653 $\pm$ 0.0233\\
  & PH image $H_0$ & 0.4335 $\pm$ 0.0019 & 0.2331 $\pm$ 0.0130 & 0.2070 $\pm$ 0.0227\\
  & PH image $H_1$ & 0.5746 $\pm$ 0.0029 & 0.3788 $\pm$ 0.0181 & 0.3176 $\pm$ 0.0268\\
+ & PH image $H_0{+}H_1$ & 0.4331 $\pm$ 0.0039 & 0.2523 $\pm$ 0.0142 & 0.2324 $\pm$ 0.0164\\
 \midrule
 Mat\'ern II & $L$ & 0.0184 $\pm$ 0.0008 & 0.0166 $\pm$ 0.0008 & 0.0178 $\pm$ 0.0008\\
  & $L{+}F{+}G{+}J$ & 0.0180 $\pm$ 0.0003 & 0.0163 $\pm$ 0.0005 & 0.0172 $\pm$ 0.0007\\
@@ -145,6 +146,7 @@ Mat\'ern II & $L$ & 0.0184 $\pm$ 0.0008 & 0.0166 $\pm$ 0.0008 & 0.0178 $\pm$ 0.0
  & $F{+}G{+}J$ & 0.0233 $\pm$ 0.0006 & 0.0209 $\pm$ 0.0008 & 0.0223 $\pm$ 0.0011\\
  & PH image $H_0$ & 0.0441 $\pm$ 0.0006 & 0.0399 $\pm$ 0.0012 & 0.0418 $\pm$ 0.0020\\
  & PH image $H_1$ & 0.3067 $\pm$ 0.0205 & 0.2722 $\pm$ 0.0150 & 0.2708 $\pm$ 0.0132\\
+ & PH image $H_0{+}H_1$ & 0.0450 $\pm$ 0.0008 & 0.0411 $\pm$ 0.0013 & 0.0428 $\pm$ 0.0017\\
 \midrule
 LGCP & $L$ & 0.2203 $\pm$ 0.0011 & 0.1889 $\pm$ 0.0042 & 0.1051 $\pm$ 0.0053\\
  & $L{+}F{+}G{+}J$ & 0.2217 $\pm$ 0.0027 & 0.1902 $\pm$ 0.0054 & 0.1052 $\pm$ 0.0071\\
@@ -163,6 +165,7 @@ LGCP & $L$ & 0.2203 $\pm$ 0.0011 & 0.1889 $\pm$ 0.0042 & 0.1051 $\pm$ 0.0053\\
  & $F{+}G{+}J$ & 0.2728 $\pm$ 0.0017 & 0.2363 $\pm$ 0.0048 & 0.1032 $\pm$ 0.0039\\
  & PH image $H_0$ & 0.2498 $\pm$ 0.0009 & 0.2125 $\pm$ 0.0071 & 0.0978 $\pm$ 0.0051\\
  & PH image $H_1$ & 0.3048 $\pm$ 0.0034 & 0.2580 $\pm$ 0.0054 & 0.1175 $\pm$ 0.0064\\
+ & PH image $H_0{+}H_1$ & 0.2440 $\pm$ 0.0016 & 0.2084 $\pm$ 0.0042 & 0.0960 $\pm$ 0.0040\\
 \end{longtable}
 
 \begin{table}[ht]
@@ -177,21 +180,25 @@ Thomas & $L$ & 0.290 & 0.268 & 0.189 & 0.072 & 0.033 & 0.021\\
  & \B{$L{+}F{+}G$} & \B{0.283} & \B{0.275} & \B{0.191} & \B{0.068} & \B{0.031} & \B{0.019}\\
  & PH image $H_0$ & 0.309 & 0.341 & 0.280 & 0.146 & 0.053 & 0.024\\
  & PH image $H_1$ & 0.433 & 0.427 & 0.399 & 0.317 & 0.210 & 0.068\\
+ & PH image $H_0{+}H_1$ & 0.309 & 0.325 & 0.253 & 0.123 & 0.051 & 0.024\\
 \midrule
 Nested & $L$ & 0.503 & 0.528 & 0.465 & 0.309 & 0.253 & 0.179\\
  & \B{$L{+}F{+}G$} & \B{0.501} & \B{0.537} & \B{0.453} & \B{0.300} & \B{0.226} & \B{0.171}\\
  & PH image $H_0$ & 0.539 & 0.583 & 0.556 & 0.417 & 0.341 & 0.227\\
  & PH image $H_1$ & 0.627 & 0.604 & 0.633 & 0.591 & 0.547 & 0.471\\
+ & PH image $H_0{+}H_1$ & 0.548 & 0.578 & 0.546 & 0.415 & 0.341 & 0.228\\
 \midrule
 Mat\'ern II & $L$ & 0.033 & 0.017 & 0.013 & 0.009 & 0.010 & 0.010\\
  & \B{$L{+}J$} & \B{0.032} & \B{0.017} & \B{0.013} & \B{0.009} & \B{0.009} & \B{0.008}\\
  & PH image $H_0$ & 0.068 & 0.054 & 0.056 & 0.025 & 0.015 & 0.012\\
  & PH image $H_1$ & 0.357 & 0.038 & 0.086 & 0.388 & 0.455 & 0.302\\
+ & PH image $H_0{+}H_1$ & 0.069 & 0.055 & 0.058 & 0.024 & 0.016 & 0.017\\
 \midrule
 LGCP & $L$ & 0.275 & 0.290 & 0.252 & 0.180 & 0.142 & 0.139\\
  & \B{$L{+}F$} & \B{0.279} & \B{0.288} & \B{0.247} & \B{0.174} & \B{0.140} & \B{0.135}\\
  & PH image $H_0$ & 0.312 & 0.298 & 0.294 & 0.221 & 0.171 & 0.158\\
  & PH image $H_1$ & 0.373 & 0.319 & 0.331 & 0.308 & 0.246 & 0.210\\
+ & PH image $H_0{+}H_1$ & 0.297 & 0.295 & 0.292 & 0.217 & 0.167 & 0.154\\
 \bottomrule
 \end{tabular}
 \caption{Parameter estimation on test set A by $\dtil$ band (normalised loss, mean over 10 seeds). Bold = the family's best model from Table~\ref{tab:params}.}
@@ -204,6 +211,7 @@ LGCP & $L$ & 0.275 & 0.290 & 0.252 & 0.180 & 0.142 & 0.139\\
   \item \textbf{PH image $H_0$ is behind the best classical model on every family:} Thomas 0.175 vs.\ 0.135, nested 0.434 vs.\ 0.356, Mat\'ern~II 0.044 vs.\ 0.018, LGCP 0.250 vs.\ 0.218. Every subset containing $L$ beats it on every family. Against the subsets without $L$ it is mixed: it beats all of them on LGCP, is level with the best of them on Thomas ($F{+}G$, 0.175), and trails most of them on nested and Mat\'ern~II. Training is stable: seed-to-seed SD $\le 0.002$ on A.
   \item \textbf{Where PH loses:} near Poisson. On Thomas the gap to the best model is 0.03--0.09 for $\dtil < 4$, and it nearly disappears for strongly clustered patterns ($\dtil \ge 8$: 0.024 vs.\ 0.019).
   \item \textbf{PH image $H_1$ learns, but is clearly weaker than $H_0$} on every family (Thomas 0.284, nested 0.575, Mat\'ern~II 0.307, LGCP 0.305). On Mat\'ern~II its loss is not monotone in $\dtil$, unlike every other model.
+  \item \textbf{$H_0$ and $H_1$ together help a little over $H_0$ alone} on Thomas (0.167 vs.\ 0.175) and LGCP (0.244 vs.\ 0.250), and change nothing on nested and Mat\'ern~II. The joint model is equally stable (seed SD $\le 0.004$) and still behind every subset containing $L$; on Thomas and LGCP it now beats every subset without $L$.
   \item Loss broadly falls as $\dtil$ grows. On Mat\'ern II the classical models are almost exact ($\approx$0.01--0.03).
 \end{itemize}
 
@@ -241,6 +249,7 @@ $L{+}G{+}J$ & 0.711 $\pm$ 0.002 & 0.659 & 0.639 & 0.808 & 0.516 & \B{0.652} & 0.
 $F{+}G{+}J$ & 0.648 $\pm$ 0.003 & 0.566 & 0.548 & 0.799 & 0.484 & 0.546 & 0.854 & 0.556\\
 PH image $H_0$ & 0.645 $\pm$ 0.001 & 0.581 & 0.564 & 0.822 & 0.446 & 0.608 & 0.686 & 0.661\\
 PH image $H_1$ & 0.434 $\pm$ 0.003 & 0.346 & 0.354 & 0.673 & 0.263 & 0.356 & 0.385 & 0.494\\
+PH image $H_0{+}H_1$ & 0.648 $\pm$ 0.001 & 0.585 & 0.568 & 0.831 & 0.458 & 0.616 & 0.676 & 0.657\\
 \bottomrule
 \end{tabular}
 \caption{Classification accuracy, mean over 10 seeds (SD shown for A; B and C SDs are $\le 0.02$). All 15 non-empty subsets of $\{L,F,G,J\}$; $L$, $L{+}F{+}G{+}J$, $G$ and $F$ report whichever $F/G/J$ grid won on validation accuracy. \textbf{Bold}: overall best model on A, and per column the model with the best recall on that family.}
@@ -272,6 +281,7 @@ $L{+}G{+}J$ & 0.349 & 0.510 & 0.690 & 0.841 & 0.913 & 0.943 & & 0.049 & 0.262 & 
 $F{+}G{+}J$ & 0.276 & 0.425 & 0.612 & 0.755 & 0.856 & 0.862 & & 0.046 & 0.168 & 0.410 & 0.742 & 0.963 & 0.999 & 1.000\\
 PH image $H_0$ & 0.149 & 0.404 & 0.633 & 0.792 & 0.873 & 0.931 & & 0.050 & 0.156 & 0.438 & 0.775 & 0.974 & 0.998 & 1.000\\
 PH image $H_1$ & 0.136 & 0.197 & 0.279 & 0.397 & 0.610 & 0.701 & & 0.049 & 0.115 & 0.276 & 0.452 & 0.631 & 0.815 & 1.000\\
+PH image $H_0{+}H_1$ & 0.145 & 0.403 & 0.640 & 0.795 & 0.877 & 0.934 & & 0.048 & 0.159 & 0.444 & 0.786 & 0.974 & 0.999 & 1.000\\
 \bottomrule
 \end{tabular}
 \caption{Left: classification accuracy on A by $\dtil$ band, pooling the four non-Poisson models. Right: the classifiers reused as tests of "Poisson vs.\ not Poisson" (score $=1-P(\text{Poisson})$), with the threshold set at 5\% on exact-Poisson patterns; "size" is the achieved false-alarm rate on held-out Poisson patterns, then the power on the paths to Poisson. All 15 non-empty subsets of $\{L,F,G,J\}$ shown, grid-selected as in Table~\ref{tab:classify}.}
@@ -282,6 +292,7 @@ PH image $H_1$ & 0.136 & 0.197 & 0.279 & 0.397 & 0.610 & 0.701 & & 0.049 & 0.115
   \item \textbf{$L{+}F{+}G$ is the best overall classifier} (0.712 on A), but only just: $L{+}F{+}G{+}J$, $L{+}J$, $L{+}F{+}J$ and $L{+}G{+}J$ all sit at 0.711, within one SD. No single model recognises every family best: $L{+}F{+}G{+}J$ still wins on Poisson (0.836) and LGCP (0.673), $L{+}G$ wins on Thomas (0.541) and Mat\'ern~II (0.912), and $L{+}G{+}J$ wins on nested (0.652).
   \item \textbf{PH image $H_0$ (0.645) beats only some of the models without $L$} ($G$, $F$, $J$, $G{+}J$: 0.573--0.637), ties $F{+}J$ (0.645), and trails every subset containing $L$ (including $L$ alone, 0.686) as well as $F{+}G$ and $F{+}G{+}J$. It is close to the best on LGCP (0.661 vs.\ 0.673), further behind on nested (0.608 vs.\ 0.652), and clearly worse on Thomas (0.446 vs.\ 0.541) and especially Mat\'ern II (0.686 vs.\ 0.89--0.91).
   \item \textbf{PH image $H_1$ (0.434) is well above chance (0.20) but the weakest classifier} and the weakest detector.
+  \item \textbf{$H_0{+}H_1$ together (0.648) is the best PH classifier, but only just} (+0.3 points over $H_0$): level with $F{+}G{+}J$, still behind $F{+}G$ (0.656) and every subset containing $L$. Its detection power matches $H_0$'s.
   \item \textbf{By distance from Poisson:} every model is weak below $\dtil = 0.5$ (0.15--0.35, chance being 0.20) and improves steadily. PH $H_0$ is weakest near Poisson (0.149 below $\dtil=0.5$, vs.\ 0.349 for $L$). For strongly structured patterns it overtakes $L$ alone ($\dtil \ge 4$: 0.873--0.931 vs.\ 0.845--0.880), but stays behind the $L$-containing triples ($L{+}F{+}G$: 0.917--0.944).
   \item \textbf{Detecting departures from Poisson:} all models hold the 5\% false-alarm rate (0.045--0.051). $L$ and the $L$-containing subsets are the most powerful where it matters ($\dtil < 2$): about 0.56--0.58 power at $\dtil\in[0.5,1)$, vs.\ 0.44 for PH $H_0$, 0.35--0.42 for the $F/G/J$-only combinations and 0.28 for PH $H_1$. Above $\dtil \approx 4$ every model detects essentially everything.
 \end{itemize}
@@ -290,7 +301,6 @@ PH image $H_1$ & 0.136 & 0.197 & 0.279 & 0.397 & 0.610 & 0.701 & & 0.049 & 0.115
 \section{Next steps}
 
 \begin{itemize}
-  \item Finish $H_0{+}H_1$ in a single persistence-image model (running).
   \item Run the remaining PH features: Betti curves and persistence landscapes, $H_0$ and $H_1$ separately; then DTM $k=10, 15$ and the Rips filtration (these diagrams still have to be computed).
   \item Add the non-learned classical references: minimum-contrast parameter fits and the classical envelope tests for detection.
 \end{itemize}
