@@ -1,7 +1,7 @@
 {
   "task": "classify",
   "method": "vihrs",
-  "test_loss": 0.8583701144304718,
+  "test_loss": 0.8430683060580314,
   "test_loss_per_target": null,
   "seed": 9373,
   "git_commit": "c4bc3fba6d891fe2ca41be5619b547a67a774230",
@@ -44,7 +44,7 @@
     "matern2",
     "lgcp"
   ],
-  "test_accuracy": 0.64164,
+  "test_accuracy": 0.62978,
   "test_accuracy_per_class": {
     "poisson": 0.7724,
     "thomas": 0.4784,
@@ -93,6 +93,57 @@
         "lgcp": 0.538125
       },
       "predictions": "predictions_C.npz"
+    }
+  },
+  "superseded_prior_set": {
+    "test_loss": 0.8583701144304718,
+    "test_loss_per_target": null,
+    "test_accuracy": 0.64164,
+    "best_val_accuracy": 0.6404,
+    "basis": "prior-draw set A only (superseded by the stratified test set)"
+  },
+  "test_recall": {
+    "poisson": 0.7669,
+    "thomas": 0.4258,
+    "nested": 0.3966,
+    "matern2": 0.9419,
+    "lgcp": 0.6177
+  },
+  "evaluation_basis": "stratified test set (configs/testset.csv)",
+  "test_set": {
+    "n_covered": 50000,
+    "n_testset": 50000,
+    "families": [
+      "lgcp",
+      "matern2",
+      "nested",
+      "poisson",
+      "thomas"
+    ],
+    "metric": "accuracy",
+    "overall": 0.62978,
+    "clustered_se": 0.003900745860832867,
+    "strata": {
+      "below": {
+        "n": 12500,
+        "accuracy": 0.41024,
+        "clustered_se": 0.007901168000557637
+      },
+      "weak": {
+        "n": 12500,
+        "accuracy": 0.58952,
+        "clustered_se": 0.008538820651831015
+      },
+      "moderate": {
+        "n": 12500,
+        "accuracy": 0.71584,
+        "clustered_se": 0.007621340920606867
+      },
+      "strong": {
+        "n": 12500,
+        "accuracy": 0.80352,
+        "clustered_se": 0.005867887676359004
+      }
     }
   }
 }

@@ -2,14 +2,8 @@
   "task": "params",
   "method": "vihrs",
   "paper": "Vihrs (2022)",
-  "test_loss": 0.48884148647471415,
-  "test_loss_per_target": {
-    "kappa": 0.12359599466874836,
-    "mu1": 0.9210617083129746,
-    "mu2": 0.11083274988690525,
-    "sigma1": 0.7318531430807895,
-    "sigma": 0.5568638364241528
-  },
+  "test_loss": 0.36859185510148196,
+  "test_loss_per_target": null,
   "seed": 9380,
   "git_commit": "6ea5a8fb1dd9e6a288e019870a9db10dbbf9c0fe",
   "git_dirty": true,
@@ -73,6 +67,50 @@
         "sigma": 0.5190193120380362
       },
       "predictions": "predictions_C.npz"
+    }
+  },
+  "superseded_prior_set": {
+    "test_loss": 0.48884148647471415,
+    "test_loss_per_target": {
+      "kappa": 0.12359599466874836,
+      "mu1": 0.9210617083129746,
+      "mu2": 0.11083274988690525,
+      "sigma1": 0.7318531430807895,
+      "sigma": 0.5568638364241528
+    },
+    "basis": "prior-draw set A only (superseded by the stratified test set)"
+  },
+  "evaluation_basis": "stratified test set (configs/testset.csv)",
+  "test_set": {
+    "n_covered": 10000,
+    "n_testset": 50000,
+    "families": [
+      "nested"
+    ],
+    "metric": "loss",
+    "overall": 0.36859185510148196,
+    "clustered_se": 0.006210509453172045,
+    "strata": {
+      "below": {
+        "n": 2500,
+        "loss": 0.37941032621579224,
+        "clustered_se": 0.010709236974141929
+      },
+      "weak": {
+        "n": 2500,
+        "loss": 0.45246563713852483,
+        "clustered_se": 0.01668383313125087
+      },
+      "moderate": {
+        "n": 2500,
+        "loss": 0.3514988006534085,
+        "clustered_se": 0.012244652325199326
+      },
+      "strong": {
+        "n": 2500,
+        "loss": 0.29099265639819716,
+        "clustered_se": 0.010988660950888123
+      }
     }
   }
 }

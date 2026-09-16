@@ -1,11 +1,8 @@
 {
   "task": "params",
   "method": "pi_multik",
-  "test_loss": 0.04393886195562421,
-  "test_loss_per_target": {
-    "lam_p": 0.015597554391615793,
-    "R": 0.07228016951963262
-  },
+  "test_loss": 0.03303542341426946,
+  "test_loss_per_target": null,
   "seed": 9378,
   "git_commit": "cf0b736ecbd5b59fa8692c67175fed163b8fb377",
   "git_dirty": true,
@@ -129,6 +126,47 @@
         "R": 0.06754567982816458
       },
       "predictions": "predictions_C.npz"
+    }
+  },
+  "superseded_prior_set": {
+    "test_loss": 0.04393886195562421,
+    "test_loss_per_target": {
+      "lam_p": 0.015597554391615793,
+      "R": 0.07228016951963262
+    },
+    "basis": "prior-draw set A only (superseded by the stratified test set)"
+  },
+  "evaluation_basis": "stratified test set (configs/testset.csv)",
+  "test_set": {
+    "n_covered": 10000,
+    "n_testset": 50000,
+    "families": [
+      "matern2"
+    ],
+    "metric": "loss",
+    "overall": 0.03303542341426946,
+    "clustered_se": 0.001386333988107004,
+    "strata": {
+      "below": {
+        "n": 2500,
+        "loss": 0.06137183671396821,
+        "clustered_se": 0.003925613040899676
+      },
+      "weak": {
+        "n": 2500,
+        "loss": 0.036743181194767355,
+        "clustered_se": 0.003091254825452189
+      },
+      "moderate": {
+        "n": 2500,
+        "loss": 0.02331229738647779,
+        "clustered_se": 0.0013393670650734917
+      },
+      "strong": {
+        "n": 2500,
+        "loss": 0.010714378361865565,
+        "clustered_se": 0.001024021434342375
+      }
     }
   }
 }

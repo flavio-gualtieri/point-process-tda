@@ -1,0 +1,211 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+\setlist{nosep,leftmargin=*,topsep=3pt}
+\renewcommand{\arraystretch}{1.12}
+
+\newcommand{\nbar}{\bar n}
+\newcommand{\dtil}{\tilde\delta}
+\newcommand{\B}[1]{\textbf{#1}}
+
+\title{\textbf{Point-process TDA: status on the DV3 dataset}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+% ============================================================================
+\section{Summary}
+
+\begin{itemize}
+  \item Classical summary functions beat persistence images on every parameter-estimation family and on classification (accuracy 0.712 vs.\ 0.648).
+  \item Adding $F$, $G$, $J$ to $L$ helps little: the best subset is within about one seed SD of $L$ alone for parameter estimation (except nested Thomas), and +2.6 points for classification.
+  \item $H_0$ carries most of the persistence information; $H_1$ adds little on top.
+  \item The PH gap depends on the regime. Parameter estimation: it is largest at intermediate distance from Poisson. Classification: it is largest near Poisson.
+\end{itemize}
+
+% ============================================================================
+\section{Data and methods}
+
+\begin{itemize}
+  \item \textbf{Models:} Poisson, Thomas, nested Thomas, Mat\'ern~II (hard-core), LGCP on the unit square, with expected count $\nbar \in [100, 800]$.
+  \item \textbf{Distance from Poisson, $\dtil$:} the largest standardised deviation of the model's theoretical $L$-function from Poisson, divided by the 5\% critical value of the classical global envelope test. $\dtil = 0$ is Poisson; $\dtil \approx 1$ is the edge of classical detectability.
+  \item \textbf{Sets:} 10{,}000 training patterns per model (fixed 85/15 train/validation split); 5{,}000 test patterns per model from the same prior. All results are on the test set, overall and by $\dtil$ band.
+  \item \textbf{Classical:} 1-D CNN of Vihrs (2022) on summary functions plus the point count. All 15 subsets of $\{L,F,G,J\}$ were run; shown are $L$ (the published baseline) and the subsets that are ever best ($L{+}F$, $L{+}J$, $L{+}F{+}G$).
+  \item \textbf{PH:} CNN on persistence images of the DTM filtration ($k=5$): $H_0$, $H_1$, or both as two channels.
+  \item \textbf{Training:} early stopping on validation loss; mean $\pm$ SD over 10 seeds.
+\end{itemize}
+
+% ============================================================================
+\section{Parameter estimation}
+
+Metric: MSE of the standardised log-parameters, averaged over parameters. Lower is better; $\approx 1$ means predicting the training mean. Not comparable across families.
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}l cccc@{}}
+\toprule
+Model & Thomas & Nested & Mat\'ern II & LGCP\\
+\midrule
+$L$ & 0.1365 $\pm$ 0.0007 & 0.3645 $\pm$ 0.0023 & 0.0184 $\pm$ 0.0008 & 0.2203 $\pm$ 0.0011\\
+$L{+}F$ & 0.1364 $\pm$ 0.0010 & 0.3635 $\pm$ 0.0015 & 0.0179 $\pm$ 0.0004 & \B{0.2182 $\pm$ 0.0015}\\
+$L{+}J$ & 0.1360 $\pm$ 0.0019 & 0.3634 $\pm$ 0.0017 & \B{0.0177 $\pm$ 0.0004} & 0.2212 $\pm$ 0.0020\\
+$L{+}F{+}G$ & \B{0.1351 $\pm$ 0.0012} & \B{0.3563 $\pm$ 0.0030} & 0.0182 $\pm$ 0.0003 & 0.2190 $\pm$ 0.0021\\
+\midrule
+PH $H_0$ & 0.1753 $\pm$ 0.0017 & 0.4335 $\pm$ 0.0019 & 0.0441 $\pm$ 0.0006 & 0.2498 $\pm$ 0.0009\\
+PH $H_1$ & 0.2840 $\pm$ 0.0076 & 0.5746 $\pm$ 0.0029 & 0.3067 $\pm$ 0.0205 & 0.3048 $\pm$ 0.0034\\
+PH $H_0{+}H_1$ & 0.1665 $\pm$ 0.0027 & 0.4331 $\pm$ 0.0039 & 0.0450 $\pm$ 0.0008 & 0.2440 $\pm$ 0.0016\\
+\bottomrule
+\end{tabular}
+\caption{Parameter estimation, normalised loss on the test set (mean $\pm$ SD over 10 seeds). Bold: best per family.}
+\label{tab:params}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}ll cccccc@{}}
+\toprule
+ & & \multicolumn{6}{c}{Distance from Poisson $\dtil$}\\
+\cmidrule(l){3-8}
+Family & Model & [0, 0.5) & [0.5, 1) & [1, 2) & [2, 4) & [4, 8) & $\ge 8$\\
+\midrule
+Thomas & $L$ & 0.290 & 0.268 & 0.189 & 0.072 & 0.033 & 0.021\\
+ & $L{+}F{+}G$ (best) & 0.283 & 0.275 & 0.191 & 0.068 & 0.031 & 0.020\\
+ & PH $H_0$ & 0.309 & 0.341 & 0.280 & 0.146 & 0.053 & 0.024\\
+ & PH $H_1$ & 0.433 & 0.427 & 0.399 & 0.317 & 0.210 & 0.068\\
+ & PH $H_0{+}H_1$ & 0.309 & 0.325 & 0.253 & 0.123 & 0.051 & 0.024\\
+\midrule
+Nested & $L$ & 0.503 & 0.528 & 0.465 & 0.309 & 0.253 & 0.179\\
+ & $L{+}F{+}G$ (best) & 0.501 & 0.537 & 0.453 & 0.300 & 0.226 & 0.171\\
+ & PH $H_0$ & 0.539 & 0.583 & 0.556 & 0.417 & 0.341 & 0.227\\
+ & PH $H_1$ & 0.627 & 0.604 & 0.633 & 0.591 & 0.547 & 0.471\\
+ & PH $H_0{+}H_1$ & 0.548 & 0.578 & 0.546 & 0.415 & 0.341 & 0.228\\
+\midrule
+Mat\'ern II & $L$ & 0.033 & 0.017 & 0.013 & 0.009 & 0.010 & 0.010\\
+ & $L{+}J$ (best) & 0.031 & 0.017 & 0.013 & 0.009 & 0.009 & 0.008\\
+ & PH $H_0$ & 0.068 & 0.054 & 0.056 & 0.025 & 0.015 & 0.012\\
+ & PH $H_1$ & 0.357 & 0.038 & 0.086 & 0.388 & 0.455 & 0.302\\
+ & PH $H_0{+}H_1$ & 0.069 & 0.055 & 0.058 & 0.024 & 0.016 & 0.017\\
+\midrule
+LGCP & $L$ & 0.275 & 0.290 & 0.252 & 0.180 & 0.142 & 0.139\\
+ & $L{+}F$ (best) & 0.278 & 0.288 & 0.248 & 0.174 & 0.140 & 0.135\\
+ & PH $H_0$ & 0.312 & 0.298 & 0.294 & 0.221 & 0.171 & 0.158\\
+ & PH $H_1$ & 0.373 & 0.319 & 0.331 & 0.308 & 0.246 & 0.210\\
+ & PH $H_0{+}H_1$ & 0.297 & 0.295 & 0.292 & 0.217 & 0.167 & 0.154\\
+\bottomrule
+\end{tabular}
+\caption{Parameter estimation by $\dtil$ band (normalised loss, mean over 10 seeds).}
+\label{tab:params-delta}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}l cccccc@{}}
+\toprule
+ & \multicolumn{6}{c}{Distance from Poisson $\dtil$}\\
+\cmidrule(l){2-7}
+Family & [0, 0.5) & [0.5, 1) & [1, 2) & [2, 4) & [4, 8) & $\ge 8$\\
+\midrule
+Thomas & 1.09 & 1.18 & 1.33 & \B{1.82} & 1.64 & 1.25\\
+Nested & 1.09 & 1.08 & 1.20 & 1.39 & \B{1.51} & 1.34\\
+Mat\'ern II & 2.19 & 3.28 & \B{4.45} & 2.71 & 1.77 & 2.19\\
+LGCP & 1.07 & 1.03 & 1.18 & \B{1.25} & 1.19 & 1.14\\
+\bottomrule
+\end{tabular}
+\caption{Gap between PH and the best classical model: loss of PH $H_0{+}H_1$ divided by loss of the family's best classical model (1 = parity). Bold: largest gap per family. $H_0$ alone gives nearly the same ratios (largest difference: Mat\'ern~II at $\dtil \ge 8$, 1.59).}
+\label{tab:params-gap}
+\end{table}
+
+\begin{itemize}
+  \item The best classical subset differs by family ($L{+}F{+}G$, $L{+}J$, $L{+}F$), but all are within about one seed SD of $L$ alone, except nested (0.356 vs.\ 0.365).
+  \item PH ($H_0{+}H_1$) has 1.1$\times$ (LGCP) to 2.5$\times$ (Mat\'ern~II) the loss of the best classical model.
+  \item The gap (Table~\ref{tab:params-gap}) peaks at intermediate $\dtil$ (1--8) and narrows for strong structure. Near Poisson, where no model learns much, it is small ($\approx$1.1) except on Mat\'ern~II (2.2). It is nearly flat on LGCP.
+  \item $H_1$ alone is weak. Adding it to $H_0$ helps a little on Thomas and LGCP and nothing on nested and Mat\'ern~II.
+\end{itemize}
+
+% ============================================================================
+\section{Classification}
+
+5-way classification (Poisson, Thomas, nested, Mat\'ern~II, LGCP), all models trained on the same pooled training set. Metric: accuracy (chance 0.20).
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}l c ccccc@{}}
+\toprule
+ & & \multicolumn{5}{c}{Recall per family}\\
+\cmidrule(l){3-7}
+Model & Accuracy & Poisson & Thomas & Nested & Mat\'ern II & LGCP\\
+\midrule
+$L$ & 0.686 $\pm$ 0.002 & 0.813 & 0.503 & 0.599 & \B{0.906} & 0.610\\
+$L{+}F$ & 0.702 $\pm$ 0.002 & 0.825 & \B{0.528} & 0.617 & 0.899 & 0.639\\
+$L{+}J$ & 0.711 $\pm$ 0.001 & 0.827 & 0.527 & 0.642 & 0.897 & 0.661\\
+$L{+}F{+}G$ & \B{0.712 $\pm$ 0.002} & 0.819 & \B{0.528} & \B{0.645} & 0.900 & \B{0.669}\\
+\midrule
+PH $H_0$ & 0.645 $\pm$ 0.001 & 0.822 & 0.446 & 0.608 & 0.686 & 0.661\\
+PH $H_1$ & 0.434 $\pm$ 0.003 & 0.673 & 0.263 & 0.356 & 0.385 & 0.494\\
+PH $H_0{+}H_1$ & 0.648 $\pm$ 0.001 & \B{0.831} & 0.458 & 0.616 & 0.676 & 0.657\\
+\bottomrule
+\end{tabular}
+\caption{Classification on the test set (mean over 10 seeds; SD shown for accuracy). Bold: best per column among the models shown.}
+\label{tab:classify}
+\end{table}
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}l cccccc c cccccc@{}}
+\toprule
+ & \multicolumn{6}{c}{Accuracy, by $\dtil$} & & \multicolumn{6}{c}{Detection power, by $\dtil$}\\
+\cmidrule(lr){2-7}\cmidrule(l){9-14}
+Model & [0,.5) & [.5,1) & [1,2) & [2,4) & [4,8) & $\ge$8 & & [0,.5) & [.5,1) & [1,2) & [2,4) & [4,8) & $\ge$8\\
+\midrule
+$L$ & 0.349 & 0.505 & 0.676 & 0.790 & 0.845 & 0.880 & & 0.273 & 0.644 & 0.932 & 0.995 & 1.000 & 1.000\\
+$L{+}F$ & 0.338 & 0.493 & 0.678 & 0.818 & 0.892 & 0.931 & & 0.276 & 0.638 & 0.929 & 0.995 & 1.000 & 1.000\\
+$L{+}J$ & 0.337 & 0.501 & 0.689 & 0.837 & 0.914 & 0.944 & & 0.269 & 0.624 & 0.927 & 0.995 & 1.000 & 1.000\\
+$L{+}F{+}G$ & 0.344 & 0.500 & 0.692 & 0.844 & 0.917 & 0.944 & & 0.278 & 0.644 & 0.933 & 0.996 & 1.000 & 1.000\\
+\midrule
+PH $H_0$ & 0.149 & 0.404 & 0.633 & 0.792 & 0.873 & 0.931 & & 0.143 & 0.474 & 0.831 & 0.989 & 1.000 & 1.000\\
+PH $H_1$ & 0.136 & 0.197 & 0.279 & 0.397 & 0.610 & 0.701 & & 0.098 & 0.226 & 0.408 & 0.578 & 0.754 & 0.993\\
+PH $H_0{+}H_1$ & 0.145 & 0.403 & 0.640 & 0.795 & 0.877 & 0.934 & & 0.144 & 0.487 & 0.840 & 0.989 & 1.000 & 1.000\\
+\bottomrule
+\end{tabular}
+\caption{Left: accuracy by $\dtil$ band, pooling the four non-Poisson models. Right: the classifiers used as tests of ``Poisson vs.\ not Poisson'' (score $1-P(\text{Poisson})$), with the threshold set at 5\% false alarms on half of the test set's Poisson patterns; the false-alarm rate on the other half is 0.044--0.057 for every model.}
+\label{tab:classify-delta}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}l cccccc@{}}
+\toprule
+ & \multicolumn{6}{c}{Distance from Poisson $\dtil$}\\
+\cmidrule(l){2-7}
+ & [0, 0.5) & [0.5, 1) & [1, 2) & [2, 4) & [4, 8) & $\ge 8$\\
+\midrule
+Accuracy & \B{$-$19.9} & $-$9.7 & $-$5.3 & $-$4.8 & $-$4.0 & $-$1.0\\
+Detection power & $-$13.4 & \B{$-$15.8} & $-$9.3 & $-$0.7 & 0.0 & 0.0\\
+\bottomrule
+\end{tabular}
+\caption{Gap between PH and the best classical model: PH $H_0{+}H_1$ minus $L{+}F{+}G$, in percentage points (negative = PH worse). Bold: largest gap per row.}
+\label{tab:classify-gap}
+\end{table}
+
+\begin{itemize}
+  \item $L{+}F{+}G$ is the best classifier (0.712), tied with $L{+}J$ (0.711). $L$ alone: 0.686.
+  \item PH $H_0{+}H_1$ is 6.4 points behind (0.648). The deficit is on Thomas ($-$7 points recall) and Mat\'ern~II ($-$22); PH is level on Poisson and LGCP.
+  \item The accuracy gap is largest near Poisson ($-$20 points at $\dtil < 0.5$) and shrinks to $-$1 point at $\dtil \ge 8$. Near Poisson, PH labels 69\% of structured patterns as Poisson, vs.\ 48\% for $L{+}F{+}G$.
+  \item As a Poisson test, every model holds the 5\% false-alarm rate. PH has 13--16 points less power below $\dtil = 2$; from $\dtil = 2$ all models detect essentially everything.
+  \item $H_1$ alone is above chance (0.434) but the weakest classifier and detector.
+\end{itemize}
+
+\end{document}
