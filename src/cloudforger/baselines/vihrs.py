@@ -26,7 +26,18 @@ import matplotlib.pyplot as plt
 from ..core import metrics as classical_evaluate  # marginal/paired metric formulas, shared with every method
 from ..core.io import intersect_seeds
 from ..core.records import load_diagram_bundle
-from ..core.splits import resolve_split, train_val_test_indices
+
+
+def _retired_split(*args, **kwargs):
+    """core.splits went with the DV3 test sets. vihrs' own run path still calls it, so it fails
+    here rather than at import: porting this baseline onto simulation.split.split_of and the new
+    diagrams is its own brick. The estimator and network below are unaffected."""
+    raise NotImplementedError(
+        "vihrs' DV3 run path is retired; the split is now simulation.split.split_of (see scripts/train.py)"
+    )
+
+
+resolve_split = train_val_test_indices = _retired_split
 from ..provenance import append_ledger_entry, provenance_stamp
 from . import mincontrast as mc
 from . import summstats

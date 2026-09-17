@@ -1,307 +1,169 @@
-# src/cloudforger/training/data.py
+"""Diagrams on disk -> persistence images, targets and splits, in memory.
+
+    data/simulation/<family>/manifest.csv          one row per pattern (case_id, theta, nbar, n, ...)
+    data/featurization/<family>/<tag>/diagrams.npz  its diagrams, h<d> + h<d>_offsets in manifest order
+
+Rows are ordered by (family, manifest order), and every array here keeps that order, so `case_id`
+identifies a row all the way to predictions.npz.
+
+Imagers are fitted on TRAIN rows only, once per (tag, dim), and applied frozen to every row; the
+per-channel z-score likewise. The birth axis exists only where the filtration gives H0 a non-trivial
+birth (DTM), so rips/alpha H0 images are 1-D -- see birth_axis.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from dataclasses import dataclass
 
 import numpy as np
-import torch
-from torch.utils.data import Dataset
+import pandas as pd
+import torch.utils.data
 
-from ..core.cloud import PointCloud
-from ..core.features import CorrelationFeatures
+from ..featurization.sweep import DATA as FEATURIZATION, SIMULATION
+from ..simulation.split import split_of
+from ..vectorization.persistence_images import PersistenceImager, Scaling, fit_imager
 
-
-def _parse_dim_key(key: Any) -> int | None:
-    if isinstance(key, int):
-        return key
-
-    if isinstance(key, np.integer):
-        return int(key)
-
-    if not isinstance(key, str):
-        return None
-
-    if key.isdigit():
-        return int(key)
-
-    if key.startswith("h") and key[1:].isdigit():
-        return int(key[1:])
-
-    if key.startswith("betti_") and key[len("betti_"):].isdigit():
-        return int(key[len("betti_"):])
-
-    return None
+FAMILIES = ("poisson", "thomas", "nested", "matern2", "lgcp")
 
 
-def _lookup_dim(mapping: Mapping, dim: int) -> Any:
-    candidates = (dim, str(dim), f"h{dim}", f"betti_{dim}")
-
-    for key in candidates:
-        if key in mapping:
-            return mapping[key]
-
-    for key, value in mapping.items():
-        if _parse_dim_key(key) == dim:
-            return value
-
-    raise KeyError(f"Could not find homology dimension {dim} in keys {list(mapping.keys())}")
+def birth_axis(tag: str, dim: int) -> bool:
+    """H1 always has one; H0 only under DTM, where births are 2 f(x) rather than 0."""
+    return dim > 0 or tag.startswith("dtm")
 
 
-def _infer_dims(mapping: Mapping) -> list[int]:
-    dims = sorted(
-        dim for dim in (_parse_dim_key(key) for key in mapping.keys())
-        if dim is not None
+@dataclass
+class Dataset:
+    manifest: pd.DataFrame                  # one row per pattern, with a `split` column
+    images: dict[int, np.ndarray]           # dim -> (N, n_tags, resolution[, resolution]) float32
+    covariates: np.ndarray                  # (N, 1) float32: log n
+    imagers: dict[tuple[str, int], PersistenceImager]
+    norm: dict[int, tuple[np.ndarray, np.ndarray]]
+
+    def index(self, split: str) -> np.ndarray:
+        return np.flatnonzero((self.manifest["split"] == split).to_numpy())
+
+
+def load_manifest(families: list[str]) -> pd.DataFrame:
+    frames = []
+    for family in families:
+        m = pd.read_csv(SIMULATION / family / "manifest.csv")
+        m["split"] = split_of(m["theta"].to_numpy())
+        frames.append(m)
+    return pd.concat(frames, ignore_index=True)
+
+
+def load_pairs(family: str, tag: str, dim: int) -> list[np.ndarray]:
+    """Per-pattern (m, 2) finite pairs, in manifest order."""
+    z = np.load(FEATURIZATION / family / tag / "diagrams.npz")
+    flat, offsets = z[f"h{dim}"], z[f"h{dim}_offsets"]
+    return [flat[offsets[i]:offsets[i + 1]] for i in range(len(offsets) - 1)]
+
+
+def _channel(
+    pairs: list[np.ndarray], n: np.ndarray, train: np.ndarray, tag: str, dim: int,
+    resolution: int, sigma_pixels: float, coverage: float, scaling: Scaling,
+) -> tuple[np.ndarray, PersistenceImager]:
+    imager = fit_imager(
+        [pairs[i] for i in train], n[train], birth_axis=birth_axis(tag, dim),
+        resolution=resolution, sigma_pixels=sigma_pixels, coverage=coverage, scaling=scaling,
     )
-
-    if not dims:
-        raise ValueError(f"Could not infer homology dimensions from keys {list(mapping.keys())}")
-
-    return dims
-
-
-def _normalize_dims(homology_dims: list[int] | tuple[int, ...] | None, source: Mapping) -> list[int]:
-    if homology_dims is not None:
-        return [int(d) for d in homology_dims]
-
-    return _infer_dims(source)
+    out = np.empty((len(pairs), *imager.shape), dtype=np.float32)
+    for i, p in enumerate(pairs):
+        out[i] = imager.transform(p, int(n[i]))
+    return out, imager
 
 
-def _as_label_tensor(labels: np.ndarray, dtype: torch.dtype) -> torch.Tensor:
-    return torch.as_tensor(labels, dtype=dtype)
+def _zscore(images: np.ndarray, train: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """One (mean, std) per tag channel, over train pixels: H0 and H1 pixel scales differ by ~10x
+    and nothing in the network rescales its input."""
+    axes = (0, *range(2, images.ndim))
+    block = images[train]
+    return (block.mean(axis=axes, dtype=np.float32),
+            np.maximum(block.std(axis=axes, dtype=np.float32), 1e-12))
 
 
-def _as_image_tensor(image: Any) -> torch.Tensor:
-    arr = np.asarray(image, dtype=np.float32)
+def build(
+    families: list[str],
+    tags: list[str],
+    dims: list[int],
+    resolution: int = 64,
+    sigma_pixels: float = 1.0,
+    coverage: float = 0.99,
+    scaling: Scaling = Scaling(),
+    verbose: bool = True,
+) -> Dataset:
+    manifest = load_manifest(families)
+    n = manifest["n"].to_numpy()
+    train = manifest.index[manifest["split"] == "train"].to_numpy()
 
-    if arr.ndim == 2:
-        arr = arr[None, :, :]
-    elif arr.ndim == 3 and arr.shape[0] != 1:
-        pass
-    elif arr.ndim != 3:
-        raise ValueError(f"Expected image with shape (H, W) or (C, H, W), got {arr.shape}")
+    images, imagers, norm = {}, {}, {}
+    for dim in dims:
+        channels = []
+        for tag in tags:
+            pairs = [p for family in families for p in load_pairs(family, tag, dim)]
+            if len(pairs) != len(manifest):
+                raise ValueError(f"{tag} H{dim}: {len(pairs)} diagrams for {len(manifest)} patterns")
+            channel, imager = _channel(pairs, n, train, tag, dim, resolution, sigma_pixels,
+                                       coverage, scaling)
+            imagers[(tag, dim)] = imager
+            channels.append(channel)
+            if verbose:
+                print(f"  [image] {tag} H{dim}: {channel.shape[1:]} {imager.params}", flush=True)
+        stacked = np.stack(channels, axis=1)
+        mean, std = _zscore(stacked, train)
+        shape = (1, len(tags)) + (1,) * (stacked.ndim - 2)
+        stacked -= mean.reshape(shape)      # in place: the tensor is the bulk of a run's memory
+        stacked /= std.reshape(shape)
+        images[dim], norm[dim] = stacked, (mean, std)
 
-    return torch.from_numpy(arr)
-
-
-def _is_stacked_dim_mapping(source: Any, labels_len: int) -> bool:
-    if not isinstance(source, Mapping):
-        return False
-
-    dims = [_parse_dim_key(key) for key in source.keys()]
-    if not any(dim is not None for dim in dims):
-        return False
-
-    for key, value in source.items():
-        if _parse_dim_key(key) is None:
-            continue
-
-        arr = np.asarray(value)
-        if arr.ndim < 2 or len(arr) != labels_len:
-            return False
-
-    return True
-
-
-class PersistenceImageDataset(Dataset):
-    def __init__(
-        self,
-        images: Any,
-        labels: np.ndarray,
-        homology_dims: list[int] | tuple[int, ...] | None = None,
-        return_dict: bool | None = None,
-        dtype: torch.dtype = torch.float32,
-    ):
-        if isinstance(images, Mapping) and "image_tensors" in images:
-            images = images["image_tensors"]
-        elif isinstance(images, Mapping) and "images" in images:
-            images = images["images"]
-
-        self.images = images
-        self.labels = _as_label_tensor(labels, dtype)
-        self.stacked = _is_stacked_dim_mapping(images, len(self.labels))
-
-        if self.stacked:
-            self.dims = _normalize_dims(homology_dims, images)
-            n_images = len(np.asarray(_lookup_dim(images, self.dims[0])))
-        else:
-            if len(images) == 0:
-                raise ValueError("images cannot be empty")
-            self.dims = _normalize_dims(homology_dims, images[0])
-            n_images = len(images)
-
-        if n_images != len(self.labels):
-            raise ValueError("images and labels must have the same length")
-
-        self.return_dict = len(self.dims) > 1 if return_dict is None else bool(return_dict)
-
-    def __len__(self) -> int:
-        return len(self.labels)
-
-    def _item_mapping(self, idx: int) -> dict[int, Any]:
-        if self.stacked:
-            return {
-                dim: np.asarray(_lookup_dim(self.images, dim))[idx]
-                for dim in self.dims
-            }
-
-        item = self.images[idx]
-
-        if not isinstance(item, Mapping):
-            if len(self.dims) != 1:
-                raise ValueError("Non-mapping image items require exactly one homology dimension")
-            return {self.dims[0]: item}
-
-        return {
-            dim: _lookup_dim(item, dim)
-            for dim in self.dims
-        }
-
-    def __getitem__(self, idx: int):
-        item = self._item_mapping(idx)
-        tensors = {
-            f"h{dim}": _as_image_tensor(item[dim])
-            for dim in self.dims
-        }
-
-        if self.return_dict:
-            return tensors, self.labels[idx]
-
-        if len(self.dims) == 1:
-            return tensors[f"h{self.dims[0]}"], self.labels[idx]
-
-        x = torch.cat([tensors[f"h{dim}"] for dim in self.dims], dim=0)
-        return x, self.labels[idx]
-
-    @property
-    def input_shape(self) -> tuple[int, ...]:
-        x, _ = self[0]
-        if isinstance(x, dict):
-            first = x[f"h{self.dims[0]}"]
-            return tuple(first.shape)
-        return tuple(x.shape)
+    covariates = np.log(n.astype(np.float32)).reshape(-1, 1)
+    covariates = (covariates - covariates[train].mean()) / covariates[train].std()
+    return Dataset(manifest, images, covariates, imagers, norm)
 
 
-class PointCloudDataset(Dataset):
-    def __init__(
-        self,
-        clouds: list[PointCloud],
-        labels: np.ndarray,
-        n_points: int | None = None,
-        dtype: torch.dtype = torch.float32,
-    ):
-        self.clouds = clouds
-        self.labels = _as_label_tensor(labels, dtype)
-        self.n_points = n_points
+def targets(manifest: pd.DataFrame, columns: list[str], train: np.ndarray) -> tuple[np.ndarray, dict]:
+    """Regression targets, log-transformed where strictly positive, then z-scored on train rows.
 
-        if len(self.clouds) != len(self.labels):
-            raise ValueError("clouds and labels must have same length")
+    The transform is returned so predictions can be put back into parameter units.
+    """
+    values = manifest[columns].to_numpy(float)
+    logged = (values[train] > 0).all(axis=0)
+    values = np.where(logged, np.log(np.where(values > 0, values, np.nan)), values)
+    mean, std = values[train].mean(axis=0), np.maximum(values[train].std(axis=0), 1e-12)
+    norm = {"columns": columns, "log": logged.tolist(), "mean": mean.tolist(), "std": std.tolist()}
+    return ((values - mean) / std).astype(np.float32), norm
+
+
+def invert_targets(standardized: np.ndarray, norm: dict) -> np.ndarray:
+    values = standardized * np.asarray(norm["std"]) + np.asarray(norm["mean"])
+    return np.where(norm["log"], np.exp(values), values)
+
+
+# The family's own parameters (Family.model's keys), which is what the manifest stores. nbar stands
+# in for LGCP's mu_log (= log nbar - sigma2/2, and the only target that can be negative) and is
+# Poisson's only parameter.
+TARGETS = {
+    "poisson": ["nbar"],
+    "thomas": ["kappa", "mu", "sigma"],
+    "nested": ["kappa", "mu1", "mu2", "sigma1", "sigma2"],
+    "matern2": ["R", "lam_p"],
+    "lgcp": ["nbar", "sigma2", "s"],
+}
+
+
+class Rows(torch.utils.data.Dataset):
+    """A split's rows as (images per dim, covariates, target) tuples, indexing the full arrays
+    rather than slicing them, so a split costs no extra memory."""
+
+    def __init__(self, data: Dataset, targets: np.ndarray, index: np.ndarray):
+        self.images = [torch.from_numpy(data.images[dim]) for dim in sorted(data.images)]
+        self.covariates = torch.from_numpy(data.covariates)
+        self.targets = torch.from_numpy(np.array(targets))   # copy: torch rejects read-only arrays
+        self.index = index
 
     def __len__(self) -> int:
-        return len(self.clouds)
+        return len(self.index)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        cloud = self.clouds[idx]
-        points = cloud.points
-
-        if self.n_points is not None:
-            n = len(points)
-            if n == 0:
-                dim = points.shape[1] if points.ndim == 2 else getattr(cloud, "dimension", 2)
-                points = np.zeros((self.n_points, int(dim)), dtype=float)
-            else:
-                chosen = np.random.choice(n, self.n_points, replace=n < self.n_points)
-                points = points[chosen]
-
-        return torch.from_numpy(np.asarray(points, dtype=np.float32)), self.labels[idx]
-
-
-def pad_point_cloud_collate(batch: list[tuple]):
-    """Collate variable-length point clouds by zero-padding to the batch's
-    max cloud size and returning a validity mask alongside the points, so no
-    points are dropped to fit a fixed cardinality."""
-    has_covariates = len(batch[0]) == 3
-
-    if has_covariates:
-        points, covariates, labels = zip(*batch)
-    else:
-        points, labels = zip(*batch)
-
-    dim = points[0].shape[1]
-    max_n = max(p.shape[0] for p in points)
-
-    padded = torch.zeros(len(points), max_n, dim, dtype=points[0].dtype)
-    mask = torch.zeros(len(points), max_n, dtype=torch.bool)
-    for i, p in enumerate(points):
-        n = p.shape[0]
-        padded[i, :n] = p
-        mask[i, :n] = True
-
-    x = {"points": padded, "mask": mask}
-
-    if has_covariates:
-        return x, torch.stack(covariates), torch.stack(labels)
-    return x, torch.stack(labels)
-
-
-class CorrelationFeatureDataset(Dataset):
-    def __init__(
-        self,
-        features: Any,
-        labels: np.ndarray,
-        statistic_names: list[str] | None = None,
-        dtype: torch.dtype = torch.float32,
-    ):
-        if isinstance(features, Mapping) and "feature_matrix" in features and statistic_names is None:
-            features = features["feature_matrix"]
-        elif isinstance(features, Mapping) and "features" in features:
-            features = features["features"]
-
-        self.labels = _as_label_tensor(labels, dtype)
-        self.statistic_names = statistic_names
-        self.feature_matrix = None
-
-        if isinstance(features, np.ndarray):
-            if len(features) != len(self.labels):
-                raise ValueError("features and labels must have same length")
-            self.feature_matrix = np.asarray(features, dtype=np.float32)
-            self.features = None
-        else:
-            if len(features) != len(self.labels):
-                raise ValueError("features and labels must have same length")
-            self.features = [self._coerce(f) for f in features]
-
-    @staticmethod
-    def _coerce(feature: CorrelationFeatures | Mapping) -> CorrelationFeatures:
-        if isinstance(feature, CorrelationFeatures):
-            return feature
-
-        return CorrelationFeatures(
-            features=feature["features"],
-            generator_name=feature.get("process", ""),
-            generator_params=feature.get("params", {}),
-            seed=feature.get("seed"),
-            statistic_params=feature.get("statistic_params", {}),
-        )
-
-    def __len__(self) -> int:
-        return len(self.labels)
-
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.feature_matrix is not None:
-            x = torch.as_tensor(self.feature_matrix[idx], dtype=torch.float32)
-        else:
-            vec = self.features[idx].vector(self.statistic_names)
-            x = torch.as_tensor(vec, dtype=torch.float32)
-
-        return x, self.labels[idx]
-
-    @property
-    def input_dim(self) -> int:
-        if self.feature_matrix is not None:
-            return int(self.feature_matrix.shape[1])
-
-        return len(self.features[0].vector(self.statistic_names))
-    
-
+    def __getitem__(self, i: int):
+        j = self.index[i]
+        return [x[j] for x in self.images], self.covariates[j], self.targets[j]

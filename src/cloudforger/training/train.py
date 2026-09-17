@@ -1,3 +1,10 @@
+"""Train one model: AdamW, early stopping on validation loss, best state restored.
+
+Batches are (images, covariates, targets), where images is the per-homology-dimension list PHNet
+takes. Every metric here is the loss the task was trained on; anything per-regime is computed later
+from the saved per-pattern predictions, never here.
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -6,150 +13,77 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 
-def _to_device(inputs, device):
-    if isinstance(inputs, dict):
-        return {k: v.to(device) for k, v in inputs.items()}
-    return inputs.to(device)
-
-
-def _batch_size(labels: torch.Tensor) -> int:
-    return labels.size(0)
-
-
-def _unpack_batch(batch):
-    if len(batch) == 2:
-        inputs, labels = batch
-        covariates = None
-    elif len(batch) == 3:
-        inputs, covariates, labels = batch
-    else:
-        raise ValueError(f"Unexpected batch structure with {len(batch)} elements.")
-    return inputs, covariates, labels
-
-
-def train_one_epoch(
-        model,
-        loader: DataLoader,
-        optimizer: torch.optim.Optimizer,
-        loss_fn: nn.Module,
-        device: torch.device,
-) -> tuple[float, float]:
-    model.train()
-    total_loss, total_correct, total_seen = 0.0, 0, 0
-
-    for batch in loader:
-        inputs, covariates, labels = _unpack_batch(batch)
-
-        inputs = _to_device(inputs, device)
-        labels = labels.to(device)
-        if covariates is not None:
-            covariates = covariates.to(device)
-
-        n = _batch_size(labels)
-
-        optimizer.zero_grad()
-        logits = model(inputs, covariates)
-        loss = loss_fn(logits, labels)
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item() * n
-        if labels.dim() == 1:
-            total_correct += (logits.argmax(dim=-1) == labels).sum().item()
-        total_seen += n
-
-    acc = total_correct / total_seen if total_seen > 0 else float("nan")
-    return total_loss / total_seen, acc
+def _move(batch, device):
+    images, covariates, targets = batch
+    return [x.to(device) for x in images], covariates.to(device), targets.to(device)
 
 
 @torch.no_grad()
-def evaluate(model, loader: DataLoader, loss_fn: nn.Module, device: torch.device):
+def evaluate(model, loader: DataLoader, loss_fn: nn.Module, device) -> tuple[float, float]:
+    """(mean loss, accuracy). Accuracy is nan unless the targets are class indices."""
     model.eval()
-    total_loss, total_correct, total_seen = 0.0, 0, 0
-
+    total, correct, seen = 0.0, None, 0
     for batch in loader:
-        inputs, covariates, labels = _unpack_batch(batch)
-
-        inputs = _to_device(inputs, device)
-        labels = labels.to(device)
-        if covariates is not None:
-            covariates = covariates.to(device)
-
-        n = _batch_size(labels)
-
-        logits = model(inputs, covariates)
-        loss = loss_fn(logits, labels)
-
-        total_loss += loss.item() * n
-        if labels.dim() == 1:
-            total_correct += (logits.argmax(dim=-1) == labels).sum().item()
-        total_seen += n
-
-    acc = total_correct / total_seen if total_seen > 0 else float("nan")
-    return total_loss / total_seen, acc
+        images, covariates, targets = _move(batch, device)
+        out = model(images, covariates)
+        total += loss_fn(out, targets).item() * len(targets)
+        if targets.dim() == 1:   # class indices; regression targets are (B, n_targets)
+            correct = (correct or 0) + (out.argmax(dim=-1) == targets).sum().item()
+        seen += len(targets)
+    return total / seen, (correct / seen if correct is not None else float("nan"))
 
 
-@torch.no_grad()
-def evaluate_per_target(model, loader: DataLoader, device: torch.device) -> np.ndarray:
-    """Same aggregation as evaluate(), but keeps the per-target-column MSE
-    instead of collapsing it to one scalar -- lets callers see whether a
-    method's aggregate loss is driven by one target or spread evenly across
-    them. Mean of the returned array equals evaluate()'s scalar loss."""
-    model.eval()
-    total_sq_err, total_seen = None, 0
+def fit(
+    model,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    loss_fn: nn.Module,
+    device,
+    lr: float = 1e-3,
+    weight_decay: float = 3e-4,
+    epochs: int = 200,
+    patience: int = 30,
+    tag: str = "",
+) -> dict:
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    best_loss, best_state, best_epoch = float("inf"), None, 0
+    history = []
 
-    for batch in loader:
-        inputs, covariates, labels = _unpack_batch(batch)
+    for epoch in range(1, epochs + 1):
+        model.train()
+        total, seen = 0.0, 0
+        for batch in train_loader:
+            images, covariates, targets = _move(batch, device)
+            optimizer.zero_grad()
+            loss = loss_fn(model(images, covariates), targets)
+            loss.backward()
+            optimizer.step()
+            total += loss.item() * len(targets)
+            seen += len(targets)
+        train_loss = total / seen
+        val_loss, val_acc = evaluate(model, val_loader, loss_fn, device)
+        history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
 
-        inputs = _to_device(inputs, device)
-        labels = labels.to(device)
-        if covariates is not None:
-            covariates = covariates.to(device)
+        if val_loss < best_loss:
+            best_loss, best_epoch = val_loss, epoch
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        print(f"[{tag}] epoch {epoch:3d}  train {train_loss:.4f}  val {val_loss:.4f}"
+              f"{f'  acc {val_acc:.4f}' if val_acc == val_acc else ''}"
+              f"{'  *' if epoch == best_epoch else ''}", flush=True)
+        if epoch - best_epoch >= patience:
+            print(f"[{tag}] no improvement in {patience} epochs, stopping", flush=True)
+            break
 
-        logits = model(inputs, covariates)
-        sq_err = (logits - labels).pow(2).sum(dim=0)
-        total_sq_err = sq_err if total_sq_err is None else total_sq_err + sq_err
-        total_seen += _batch_size(labels)
-
-    return (total_sq_err / total_seen).cpu().numpy()
-
-
-def train_and_eval(model, loaders, cfg: dict, device: str, tag: str):
-    train_loader, val_loader, test_loader = loaders
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg["lr"])
-    loss_fn = nn.MSELoss()
-
-    history = {"train_loss": [], "val_loss": []}
-    best_val_loss, best_state = float("inf"), None
-
-    for epoch in range(1, cfg["n_epochs"] + 1):
-        train_loss, _ = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
-        val_loss, _ = evaluate(model, val_loader, loss_fn, device)
-        history["train_loss"].append(train_loss)
-        history["val_loss"].append(val_loss)
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-
-        print(f"[{tag}] Epoch {epoch:3d} | train loss {train_loss:.4f} | val loss {val_loss:.4f}")
-
+    if best_state is None:
+        raise RuntimeError(f"[{tag}] validation loss was never finite; nothing to restore")
     model.load_state_dict(best_state)
-    test_loss, _ = evaluate(model, test_loader, loss_fn, device)
-    print(f"\n[{tag}] Test loss: {test_loss:.4f}")
-    return history, best_state, test_loss
+    return {"best_val_loss": best_loss, "best_epoch": best_epoch, "epochs_run": len(history),
+            "history": history}
+
 
 @torch.no_grad()
-def predict_outputs(model, loader: DataLoader, device) -> np.ndarray:
-    """Raw model outputs for every row of `loader`, in loader order (no
-    shuffling assumed): standardized predictions for a regressor, logits for
-    a classifier. What the per-pattern prediction bundles are made of."""
+def predict(model, loader: DataLoader, device) -> np.ndarray:
+    """Raw outputs in loader order: standardized predictions for regression, logits for a classifier."""
     model.eval()
-    parts = []
-    for batch in loader:
-        inputs, covariates, _labels = _unpack_batch(batch)
-        inputs = _to_device(inputs, device)
-        if covariates is not None:
-            covariates = covariates.to(device)
-        parts.append(model(inputs, covariates).detach().cpu().numpy())
-    return np.concatenate(parts, axis=0) if parts else np.empty((0, 0))
+    parts = [model(*_move(batch, device)[:2]).cpu().numpy() for batch in loader]
+    return np.concatenate(parts, axis=0)

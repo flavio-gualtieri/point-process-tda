@@ -1,0 +1,179 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem,graphicx}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+
+\newcommand{\dt}{\tilde\delta}
+\newcommand{\nb}{\bar n}
+
+\title{03 --- Featurization: filtrations and persistence diagrams}
+\date{17 September 2026}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\section{Theory}
+
+\subsection*{Aim}
+\begin{itemize}
+  \item Every pattern of 02 $\to$ one persistence diagram per filtration, $H_0$ and $H_1$
+  \item Diagrams only: no vectorisation here, since every image/curve calibration is fitted per split (leakage otherwise)
+  \item Three filtration types, one sweep parameter ($k$ for DTM); each is a different clock on the same points
+\end{itemize}
+
+\subsection*{Filtrations}
+A filtration is a nested family of complexes indexed by a scale $t$; persistent homology records the $t$ at which components ($H_0$) and loops ($H_1$) are born and die.
+\begin{itemize}
+  \item \textbf{Rips}: flag complex of the edges $d(x,y)\le t$. Pure geometry; $H_0$ births all $0$, so $H_0$ is the single-linkage merge heights (the Euclidean MST). $H_1$ = gaps between clusters
+  \item \textbf{Alpha}: the Delaunay subcomplex at scale $t$, filtration value = circumradius of the smallest empty ball. Nerve of the union of balls $\Rightarrow$ homotopy equivalent to \v{C}ech, i.e.\ the exact topology of the $t$-neighbourhood, not the Rips over-approximation. $O(n)$ simplices in 2D
+  \item \textbf{DTM$_k$} (Anai et al.\ 2020): weighted Rips with vertex weight
+  \[
+    f(x) = \Big(\tfrac1k\textstyle\sum_{y\in N_k(x)} d(x,y)^q\Big)^{1/q}, \quad q = 2,
+  \]
+  $N_k(x)$ the $k$ nearest neighbours of $x$ ($x$ itself included). Vertex enters at $2f(x)$, edge $xy$ at $\max\{d(x,y)+f(x)+f(y),\,2f(x),\,2f(y)\}$
+  \begin{itemize}
+    \item Dense points enter early, sparse points late $\Rightarrow$ the diagram sees \emph{local density variation}, not just geometry
+    \item $k$ is the density-estimation scale: small $k$ resolves fine clustering but is noisy, large $k$ smooths. Swept, like the radius $r$ of an $L$ function
+    \item $k=1$ gives $f\equiv0$ and reduces to Rips (verified)
+  \end{itemize}
+\end{itemize}
+
+\subsection*{Why these three}
+\begin{itemize}
+  \item Rips: geometric baseline, the representation every published PH number in this project used
+  \item Alpha: exact union-of-balls topology and it records empty-ball radii, i.e.\ spacing. Aimed at Mat\'ern II, whose departure is a hard core (a forbidden spacing), the regime where the $L$ test lags (02)
+  \item DTM: the clustered families differ by \emph{density} contrast; $k\in\{5,10,15,20\}$ covers the density scales
+\end{itemize}
+
+\subsection*{Two implementation identities}
+\begin{itemize}
+  \item \textbf{DTM through Rips.} The DTM complex is a flag filtration, so it is determined by its vertex and edge values. Feeding ripser the matrix $M_{ij}=\max\{d_{ij}+f_i+f_j,\,2f_i,\,2f_j\}$, $M_{ii}=2f_i$, reproduces GUDHI's diagrams exactly, in $O(n^2)$ memory instead of GUDHI's $O(n^3)$ 2-skeleton, $\approx50\times$ faster. This removes the entire memory-management layer the old pipeline needed (chunk scheduling, per-worker RSS models, OOM retries)
+  \item \textbf{Alpha scale.} GUDHI returns squared circumradii $\alpha$. Stored as $2\sqrt\alpha$, so alpha and Rips share one axis (ball diameter $=$ edge length). A monotone axis map does not change the diagram's topology, only the grid a later vectorisation puts on it; \texttt{scale} in the config switches between $\alpha$, $\sqrt\alpha$, $2\sqrt\alpha$
+\end{itemize}
+
+\subsection*{Conventions}
+\begin{itemize}
+  \item $\max\dim=1$: $H_0$, $H_1$
+  \item Only finite pairs kept; the one essential $H_0$ bar (death $=\infty$) is dropped, so $|H_0| = n-1$ always
+  \item Zero-persistence pairs are not produced by either backend
+  \item No thresholding: the filtration runs to completion
+\end{itemize}
+
+%==============================================================================
+\section{Implemented pipeline}
+
+\subsection*{Code}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\texttt{src/cloudforger/featurization/filtrations.py} & \texttt{rips}, \texttt{alpha}, \texttt{dtm}; tags \\
+\texttt{src/cloudforger/featurization/sweep.py}       & config, shard, merge \\
+\texttt{scripts/featurize.py}                          & CLI: \texttt{run}, \texttt{merge} \\
+\texttt{slurm/featurize.sh}                            & one 48-CPU job: run then merge \\
+\texttt{configs/featurization/config.yaml}             & filtration list, $\max\dim$, shard size \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+Backends: ripser (Rips, DTM), GUDHI (alpha), scipy (kNN, distances). 235 lines in total.
+
+\subsection*{Configuration}
+\begin{itemize}
+  \item \texttt{rips}; \texttt{alpha} (\texttt{scale: diameter}); \texttt{dtm} $k = 5, 10, 15, 20$ ($q=2$) $\Rightarrow$ 6 diagram sets $\times$ 5 families
+  \item $\max\dim = 1$, shards of 500 patterns (40 per family)
+  \item One config entry = one output directory; adding a $k$ is one line
+\end{itemize}
+
+\subsection*{Steps}
+\begin{enumerate}
+  \item \textbf{Run} (\texttt{run --jobs 48}): one file per (family, filtration, shard), atomic, resumable; a finished shard or a merged output is skipped
+  \item \textbf{Merge}: shards $\to$ \texttt{data/featurization/<family>/<tag>/diagrams.npz}, then the shards are deleted. Refuses to write (keeping the shards) on a missing or out-of-order shard, or a diagram count $\ne$ the manifest's
+\end{enumerate}
+
+\subsection*{Output}
+\texttt{data/featurization/<family>/<tag>/diagrams.npz}, tags \texttt{rips}, \texttt{alpha\_diameter}, \texttt{dtm\_k5}, \dots
+\begin{itemize}
+  \item \texttt{case\_id} $(P,)$, row order of 02's \texttt{manifest.csv} --- the only join key back to $\theta$
+  \item \texttt{h0}, \texttt{h1}: all patterns' finite $(b,d)$ pairs concatenated; \texttt{h<d>\_offsets} $(P+1,)$ cuts pattern $p$ out of them
+  \item \texttt{spec}: the config entry that produced the file
+  \item Same flat layout as 02's \texttt{points.npz}: one array, one offset vector, no pickles
+\end{itemize}
+
+\subsection*{Cost}
+Mean seconds per pattern (40 random patterns per family, $n\le961$):
+
+\smallskip
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+ & Poisson & Thomas & Nested & Mat\'ern II & LGCP \\
+\midrule
+Rips     & 0.015 & 0.027 & 0.027 & 0.018 & 0.045 \\
+Alpha    & 0.001 & 0.002 & 0.002 & 0.002 & 0.002 \\
+DTM$_{20}$ & 0.025 & 0.043 & 0.042 & 0.031 & 0.075 \\
+\bottomrule
+\end{tabular}
+\begin{itemize}
+  \item $\approx5.6$ CPU-h for all 30 (family, filtration) pairs $\Rightarrow$ $\approx15$ min on one 48-CPU node; $\approx4.2$ GB of diagrams
+  \item Memory per worker is one distance matrix, $n^2\cdot8$\,B $\le8$\,MB: no scheduling needed, unlike the old GUDHI pipeline
+\end{itemize}
+
+\subsection*{Results}
+{\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Check & Result & Reference \\
+\midrule
+DTM vs GUDHI \texttt{DTMRipsComplex}, $k=1,5,15$ & identical ($H_0$, $H_1$) & exact \\
+DTM$_{k=1}$ vs Rips & identical & $f\equiv0$ \\
+Alpha \texttt{diameter} vs $2\sqrt{\texttt{squared\_radius}}$ & identical & monotone map \\
+Merged slice vs pattern recomputed alone & identical (all 6 tags) & --- \\
+$|H_0|$ per pattern & $n-1$ & one essential bar dropped \\
+Merge with a shard missing & refuses, shards kept & --- \\
+\bottomrule
+\end{tabular}}
+
+\medskip
+Mean pairs per point (20 patterns per family):
+
+\smallskip
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+$|H_1|/n$ & Poisson & Thomas & Nested & Mat\'ern II & LGCP \\
+\midrule
+Rips        & 0.24 & 0.20 & 0.21 & 0.24 & 0.22 \\
+Alpha       & 0.90 & 0.83 & 0.84 & 0.91 & 0.84 \\
+DTM$_{5}$   & 0.19 & 0.15 & 0.16 & 0.18 & 0.16 \\
+DTM$_{20}$  & 0.19 & 0.15 & 0.16 & 0.19 & 0.16 \\
+\bottomrule
+\end{tabular}
+
+%==============================================================================
+\section{Notes}
+
+\subsection*{Interpretation}
+\begin{itemize}
+  \item Alpha carries $\approx4\times$ the $H_1$ pairs of Rips: it keeps every Delaunay cycle, most of them short-lived. Information, but also a heavier tail for any vectorisation to absorb
+  \item $|H_1|/n$ is nearly flat across families and $k$: the families differ in \emph{where} the pairs sit, not how many there are --- a total-count feature would be uninformative
+  \item DTM's axis is in distance units but rescaled by local density, so its diagrams are not directly comparable with Rips/alpha; each filtration needs its own calibration downstream
+  \item Clustered families cost more per pattern than Poisson at equal $n$ (denser neighbourhoods $\Rightarrow$ more simplices); LGCP is the most expensive
+\end{itemize}
+
+\subsection*{Scope and limits}
+\begin{itemize}
+  \item $H_2$ and higher are empty in 2D; $\max\dim=1$ is not a restriction
+  \item The essential $H_0$ bar is constant across patterns and carries nothing; $n$ itself is in the manifest
+  \item Diagrams are the full sufficient output of this stage: vectorisation (images, landscapes, Betti curves) is fitted per training split later, never here
+  \item No edge correction: the filtration sees $W$ as it is, unlike $\hat K$ in 01--02. Boundary effects are part of the representation and identical across families
+\end{itemize}
+
+\subsection*{Open}
+\begin{itemize}
+  \item Which $k$ (or which subset) carries the signal; the sweep exists to answer it
+  \item Whether alpha beats Rips on Mat\'ern II, the reason it is here
+  \item Alpha axis choice ($\alpha$, $\sqrt\alpha$, $2\sqrt\alpha$) is irrelevant to the topology but not to a fixed vectorisation grid
+  \item Whether short bars should be pruned before vectorisation (alpha especially)
+\end{itemize}
+
+\end{document}
