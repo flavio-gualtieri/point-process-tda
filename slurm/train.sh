@@ -2,6 +2,7 @@
 
 #SBATCH -J train
 #SBATCH -p compute
+#SBATCH --gres=gpu:1
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --cpus-per-task=8
@@ -10,43 +11,48 @@
 #SBATCH --output=logs/train_%A_%a.out
 #SBATCH --error=logs/train_%A_%a.err
 
-# One array task per (filtration, dims, seed) of one task, via scripts/train.py.
+# One array task per (task, filtration, dims, seed) of the full matrix, via scripts/train.py:
+# 6 filtrations x {H0, H1, H0+H1} x 10 seeds x {5-way classification, parameters for each family}
+# = 1080 runs.
 #
-#   bash slurm/train.sh classify           # print the run list and the --array range, submit nothing
-#   sbatch --array=0-89 slurm/train.sh classify
-#   sbatch --array=0-89 slurm/train.sh params nested
+#   bash slurm/train.sh                      # print the run list and the --array range, submit nothing
+#   sbatch --array=0-1079%20 slurm/train.sh  # %20 caps how many run at once
 #
-# The matrix is the environment, so a subset is a submit-time choice, not an edit:
-#   FILTRATIONS="dtm_k10" DIMS="0,1" SEEDS="1 2 3" bash slurm/train.sh classify
+# Any axis can be narrowed at submit time instead of edited:
+#   TASKS="classify" FILTRATIONS="dtm_k10" SEEDS="1 2 3" bash slurm/train.sh
 #
-# Sizing: images are held in memory, ~1.6 GB per (filtration, homology dim) at resolution 64 over
-# 100k patterns (less where H0 is 1-D), plus ~1 min each to rasterize. The multi-k arm
-# (dtm_k5,dtm_k10,dtm_k15 with dims 0,1) is the big one at ~10 GB.
+# Resumable: a run whose run.json exists is skipped, so a re-submit only fills the gaps.
 #
-# GPU: if this cluster has a GPU partition, set PARTITION/GRES below -- scripts/train.py picks CUDA
-# up on its own (--device overrides). On CPU, keep --cpus-per-task for torch's thread pool.
+# Sizing: images are held in memory, ~1.6 GB per 2-D (filtration, homology dim) channel over the
+# 100k classification patterns and a fifth of that per family, plus ~1 min each to rasterize.
+# Rips/alpha H0 are 1-D and negligible. GPU: scripts/train.py uses CUDA when it sees it.
 
 set -euo pipefail
 
-TASK="${1:?usage: train.sh classify | params <family>}"
-FAMILY="${2:-}"
-
-FILTRATIONS="${FILTRATIONS:-rips alpha dtm_k5 dtm_k10 dtm_k15 dtm_k20 dtm_k5,dtm_k10,dtm_k15}"
+# TASKS, not GROUPS: bash keeps a special GROUPS variable (the caller's group ids) and would
+# silently ignore the assignment.
+TASKS="${TASKS:-classify params:poisson params:thomas params:nested params:matern2 params:lgcp}"
+FILTRATIONS="${FILTRATIONS:-rips alpha_diameter dtm_k5 dtm_k10 dtm_k15 dtm_k20}"
 DIMS="${DIMS:-0 1 0,1}"
-SEEDS="${SEEDS:-1 2 3 4 5}"
+SEEDS="${SEEDS:-1 2 3 4 5 6 7 8 9 10}"
 
 runs=()
-for filtration in $FILTRATIONS; do
-  for dims in $DIMS; do
-    for seed in $SEEDS; do
-      runs+=("--filtration $filtration --dims $dims --seed $seed")
+for entry in $TASKS; do
+  for filtration in $FILTRATIONS; do
+    for dims in $DIMS; do
+      for seed in $SEEDS; do
+        task="${entry%%:*}"
+        family="${entry#*:}"
+        [ "$family" = "$entry" ] && family=""      # "classify" carries no family
+        runs+=("--task $task ${family:+--family $family} --filtration $filtration --dims $dims --seed $seed")
+      done
     done
   done
 done
 
 if [ -z "${SLURM_ARRAY_TASK_ID:-}" ]; then
   printf '%s\n' "${runs[@]}"
-  echo "${#runs[@]} runs -> sbatch --array=0-$(( ${#runs[@]} - 1 )) slurm/train.sh $TASK $FAMILY"
+  echo "${#runs[@]} runs -> sbatch --array=0-$(( ${#runs[@]} - 1 ))%20 slurm/train.sh"
   exit 0
 fi
 
@@ -61,7 +67,7 @@ mamba activate /gpfs/scratch/qp252676/globus/envs/cloud-env
 set -u
 
 run="${runs[$SLURM_ARRAY_TASK_ID]}"
-echo "Host: $(hostname)  Job ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}  ${TASK} ${FAMILY} ${run}"
+echo "Host: $(hostname)  Job ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}  ${run}"
 
 # shellcheck disable=SC2086
-python -u scripts/train.py --task "$TASK" ${FAMILY:+--family "$FAMILY"} $run
+python -u scripts/train.py $run
