@@ -57,12 +57,12 @@ def test_feature_registry_betti_and_entropy():
     assert set(ent.keys()) == {0, 1}
 
 
-def test_calibrated_imager():
-    from cloudforger.vectorization.persistence_images.calibrated import build_calibrated_imager
+def test_fit_imager_on_real_diagrams():
+    from cloudforger.vectorization.persistence_images import fit_imager
 
     diagrams = [_dtm_diagram(i) for i in range(3)]
+    pairs = [d.finite_pairs(1) for d in diagrams]
+    n = np.array([len(d.finite_pairs(0)) + 1 for d in diagrams])
 
-    imager = build_calibrated_imager(diagrams, homology_dims=(0, 1), resolution=16, verbose=False)
-    images = imager.transform(diagrams[0])
-    assert images[0].shape == (16, 16)
-    assert images[1].shape == (16, 16)
+    imager = fit_imager(pairs, n, birth_axis=True, resolution=16)
+    assert imager.transform(pairs[0], n[0]).shape == (16, 16)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...core.signed_measure import SignedMeasure
-from .persistence_image import _box_mass
+from .image import _box_mass
 
 import numpy as np
 

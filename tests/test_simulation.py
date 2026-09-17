@@ -37,3 +37,11 @@ def test_stored_pattern_regenerates(name):
     rep, pts, _ = list(sample_patterns(name, theta, CFG, 123))[1]
     assert m.case_id[k] == f"{name}-00123-1"
     np.testing.assert_array_equal(pts, z["points"][z["offsets"][k]:z["offsets"][k + 1]])
+
+
+def test_split_by_theta():
+    from cloudforger.simulation.split import split_of
+
+    s = split_of(np.arange(12000))
+    assert [(s[:10000] == k).sum() for k in ("train", "val", "test")] == [7000, 1000, 2000]
+    assert (s[10000:] == "train").all()
