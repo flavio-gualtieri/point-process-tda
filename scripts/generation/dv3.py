@@ -3,7 +3,6 @@
 """Generate the DV3 data: training, test set A (prior-drawn) and test sets B, C
 (fixed theta) -- docs/generation_procedure.tex, docs/theory/generation.tex.
 
-    python scripts/generation/dv3.py nulls --jobs 8         # CSR null tables (once; commit the .npz)
     python scripts/generation/dv3.py validate --jobs 8      # V1 (K vs closed form) and V4 (edges) batches
     python scripts/generation/dv3.py cells                  # B cells + C ladders -> dv3_cells.csv (commit)
     python scripts/generation/dv3.py plan --jobs 8          # dv3.yaml + tables + cells -> data/dv3/plan.csv
@@ -31,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.generation.pipeline import (  # noqa: E402
-    PipelineError, list_shards, load_plan, make_cells, make_nulls, make_plan, merge, regen_case, run_all_shards,
+    PipelineError, list_shards, load_plan, make_cells, make_plan, merge, regen_case, run_all_shards,
     run_shard,
 )
 from cloudforger.generation.spec import load_spec  # noqa: E402
@@ -40,13 +39,6 @@ from cloudforger.generation.validate import run as run_validation, v1_cells  # n
 
 DEFAULT_SPEC = ROOT / "configs" / "generation" / "dv3.yaml"
 DEFAULT_OUT = ROOT / "data" / "dv3"
-
-
-def cmd_nulls(spec, paths, args) -> None:
-    print(f"null tables: {len(spec.null_n_grid)} sizes x {spec.null_reps} binomial replicates -> {spec.null_tables_path}")
-    report = make_nulls(spec, jobs=args.jobs, force=args.force)
-    print(f"V9 (Monte Carlo s.e. of c95 <= 0.05): {'PASS' if report['V9_pass'] else 'FAIL'}; "
-          f"max s.e. {max(report['c95_se_L']):.3f}")
 
 
 def cmd_validate(spec, paths, args) -> None:
@@ -133,11 +125,6 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC, help="generation spec (default: %(default)s)")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="output root (default: %(default)s)")
     sub = parser.add_subparsers(dest="command", required=True)
-
-    p = sub.add_parser("nulls", help="build the CSR null tables for delta-tilde")
-    p.add_argument("--jobs", type=int, default=1)
-    p.add_argument("--force", action="store_true", help="rebuild existing tables")
-    p.set_defaults(func=cmd_nulls)
 
     p = sub.add_parser("validate", help="V1/V4 validation batches against the closed forms")
     p.add_argument("--reps", type=int, default=1000)

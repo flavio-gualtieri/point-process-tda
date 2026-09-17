@@ -1,0 +1,21 @@
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}l cccc c cccc@{}}
+\toprule
+ & \multicolumn{4}{c}{Accuracy} & & \multicolumn{4}{c}{Detection power}\\
+\cmidrule(lr){2-5}\cmidrule(l){7-10}
+Model & \texttt{below} & \texttt{weak} & \texttt{mod.} & \texttt{strong} & & \texttt{below} & \texttt{weak} & \texttt{mod.} & \texttt{strong}\\
+\midrule
+$L$ & 0.474 & 0.659 & 0.766 & 0.841 & & 0.439 & 0.908 & 0.993 & 0.999\\
+$L{+}J$ & 0.471 & 0.684 & 0.815 & 0.898 & & 0.427 & 0.904 & 0.993 & 1.000\\
+$L{+}F{+}G$ & 0.473 & 0.684 & 0.819 & 0.899 & & 0.432 & 0.909 & 0.994 & 1.000\\
+$L{+}F{+}J$ & 0.471 & 0.682 & 0.820 & 0.895 & & 0.426 & 0.901 & 0.994 & 1.000\\
+\midrule
+PH $H_0$ & 0.356 & 0.639 & 0.776 & 0.872 & & 0.299 & 0.809 & 0.978 & 0.999\\
+PH $H_1$ & 0.257 & 0.332 & 0.434 & 0.634 & & 0.168 & 0.433 & 0.650 & 0.804\\
+PH $H_0{+}H_1$ & 0.358 & 0.643 & 0.784 & 0.878 & & 0.313 & 0.821 & 0.978 & 1.000\\
+\bottomrule
+\end{tabular}
+\caption{Left: accuracy by band (chance 0.20 in every band). Right: the classifiers used as tests of ``Poisson vs.\ not Poisson'' (score $1-P(\text{Poisson})$), threshold set at 5\% false alarms per $\nbar$ octave on half of the test set's Poisson patterns, power measured on the structured patterns; the false-alarm rate on the other half is 0.045--0.049 for every model.}
+\label{tab:classify-delta}
+\end{table}

@@ -1,7 +1,6 @@
 # src/cloudforger/generation/pipeline.py
 """The four DV3 jobs (generation.tex, "How the generation runs"):
 
-    make_nulls   CSR null tables (once; committed next to dv3.yaml)
     make_cells   B cells and C ladders -> dv3_cells.csv (reviewed at D1; committed)
     make_plan    dv3.yaml + null tables + cells -> plan.csv (+ plan.json with checksums)
     run_shard    one (set, family, shard) of the plan -> shard files; idempotent
@@ -30,7 +29,6 @@ from scipy.spatial import cKDTree
 
 from ..core.io import dump_pickle
 from .design import build_cells, cell_shape, cells_bytes, read_cells
-from .nulls import build_tables, load_tables, tables_bytes
 from .plan import build_plan, draw_from_row
 from .prior import build_priors, draw, fixed
 from .samplers import WINDOW, points_sha1, simulate
@@ -55,29 +53,6 @@ def git_state() -> tuple[str | None, bool | None]:
         return git("rev-parse", "HEAD").strip(), bool(git("status", "--porcelain").strip())
     except (OSError, subprocess.CalledProcessError):
         return None, None
-
-
-# --- null tables -----------------------------------------------------------------
-
-def make_nulls(spec: Spec, jobs: int = 1, force: bool = False, log=print) -> dict[str, Any]:
-    """Build the CSR null tables (WP2a) and check V9: Monte Carlo s.e. of c95(n) <= 0.05."""
-    path = spec.null_tables_path
-    if path.exists() and not force:
-        raise PipelineError(f"{path} exists; pass --force to rebuild (every plan made from it goes stale)")
-    tabs = build_tables(spec.root, list(spec.null_n_grid), spec.null_reps, jobs=jobs, log=log)
-    data = tables_bytes(tabs)
-    atomic_write_bytes(path, data)
-    report = {
-        "n_grid": [int(n) for n in tabs["n_grid"]],
-        "reps": spec.null_reps,
-        "c95_L": [round(float(c), 4) for c in tabs["L"]["c95"]],
-        "c95_se_L": [round(float(c), 4) for c in tabs["L"]["c95_se"]],
-        "median_L": [round(float(c), 4) for c in tabs["L"]["median"]],
-        "V9_pass": bool(np.all(tabs["L"]["c95_se"] <= 0.05)),
-        "sha256": sha256_bytes(data),
-    }
-    write_json(path.with_suffix(".json"), report)
-    return report
 
 
 def _null_sha(spec: Spec) -> str:

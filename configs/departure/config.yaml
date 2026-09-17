@@ -1,0 +1,11 @@
+# CSR null tables for the studentised L departure and delta-tilde (src/cloudforger/departure).
+
+root: 70519940839025816406438102027139626253   # generation master seed
+
+n: {low: 20, high: 2000, step: 0.03}   # log grid: n_k = round(low * (1 + step)^k)
+reps: {fit: 6000, calibrate: 6000}      # per grid n: moments from `fit`, c95 from `calibrate`
+validation: 50000                       # fresh patterns at log-uniform random n
+
+min_pairs: 10     # radius set R(n) = {r : expected CSR pairs within r >= min_pairs}
+alpha: 0.05
+knots: {moments: 8, c95: 4}             # interior knots of the cubic splines in log n

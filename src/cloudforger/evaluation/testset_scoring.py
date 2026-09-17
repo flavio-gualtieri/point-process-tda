@@ -169,3 +169,99 @@ def score_run(run: Path | str, ts: T.TestSet) -> tuple[dict[str, Any], list[tupl
             for name in per_seed[0]["overall"].get("loss_std", {})
         }
     return agg, tables
+
+
+# ---------------------------------------------------------------------------
+# Detection: the classifier reused as a test of "CSR vs not CSR"
+# ---------------------------------------------------------------------------
+
+def detection_on_testset(
+    bundle: dict[str, Any], ts: T.TestSet, alpha: float = 0.05,
+) -> dict[str, Any]:
+    """Power per stratum for a classification bundle used as a CSR test.
+
+    The score is 1 - P(CSR) at the argmax-free probability level. The threshold
+    is calibrated split-half on the test set's OWN CSR patterns -- one half sets
+    the (1 - alpha) quantile, the other measures the size that threshold
+    actually delivers -- because a threshold and its size check taken from the
+    same patterns would report alpha by construction. It is calibrated per nbar
+    octave, since the null distribution of any such score depends on how many
+    points the pattern has.
+
+    The split is on the CSR rows' position in the test set's own (sorted)
+    order, so it is deterministic and identical for every method compared."""
+    if bundle["task"] != "classify":
+        raise ValueError("detection needs a classification bundle")
+    names = list(bundle["class_names"])
+    if T.NULL_FAMILY not in names:
+        raise ValueError(f"no {T.NULL_FAMILY} class in this bundle")
+    csr_col = names.index(T.NULL_FAMILY)
+
+    rows, idx = _rows_for(bundle, ts)
+    score = 1.0 - bundle["proba"][idx][:, csr_col]
+    is_null = np.array([bool(r["is_null"]) for r in rows])
+    band = np.array([r["nbar_band"] for r in rows], dtype=object)
+    strata = np.array([r["stratum"] for r in rows], dtype=object)
+
+    # Calibrate per nbar octave on half the CSR rows; size on the other half.
+    thresholds: dict[str, float] = {}
+    size: dict[str, float] = {}
+    for b in np.unique(band):
+        at = np.flatnonzero(is_null & (band == b))
+        if at.size < 4:
+            continue
+        s = score[at]
+        s = s[np.isfinite(s)]
+        fit, held = s[0::2], s[1::2]
+        # "higher": the smallest observed score with at most alpha of the
+        # calibration half strictly above it -- conservative, no interpolation.
+        thr = float(np.quantile(fit, 1 - alpha, method="higher"))
+        thresholds[str(b)] = thr
+        size[str(b)] = float((held > thr).mean()) if held.size else float("nan")
+
+    thr_row = np.array([thresholds.get(str(b), np.inf) for b in band])
+    # A non-finite score is "did not reject": a test that cannot be computed on
+    # a pattern has no power on it.
+    reject = np.isfinite(score) & (score > thr_row)
+
+    held_mask = is_null.copy()
+    held_mask[np.flatnonzero(is_null)[0::2]] = False   # the calibration half
+    out: dict[str, Any] = {
+        "alpha": alpha,
+        "threshold": thresholds,
+        "size_per_band": size,
+        "size": float(reject[held_mask].mean()) if held_mask.any() else float("nan"),
+        "strata": {},
+    }
+    for s in T.STRATUM_NAMES:
+        m = (strata == s) & ~is_null
+        if m.any():
+            p = float(reject[m].mean())
+            out["strata"][s] = {
+                "n": int(m.sum()), "power": p,
+                "power_se": float(np.sqrt(p * (1 - p) / int(m.sum()))),
+            }
+    return out
+
+
+def detection_run(run: Path | str, ts: T.TestSet, alpha: float = 0.05) -> dict[str, Any]:
+    """`detection_on_testset` averaged over a run's seeds."""
+    per_seed = []
+    for sd in seed_dirs(run):
+        bundle = pool_seed(sd)
+        if bundle is not None:
+            per_seed.append(detection_on_testset(bundle, ts, alpha))
+    if not per_seed:
+        raise ValueError(f"{run}: no prediction bundles")
+    out: dict[str, Any] = {
+        "run": str(run), "n_seeds": len(per_seed), "alpha": alpha,
+        "size": float(np.nanmean([r["size"] for r in per_seed])),
+        "strata": {},
+    }
+    for s in T.STRATUM_NAMES:
+        if s in per_seed[0]["strata"]:
+            v = np.array([r["strata"][s]["power"] for r in per_seed], dtype=float)
+            out["strata"][s] = {"mean": float(np.nanmean(v)),
+                                "sd": float(np.nanstd(v, ddof=1)) if len(v) > 1 else 0.0,
+                                "n": per_seed[0]["strata"][s]["n"]}
+    return out

@@ -37,9 +37,12 @@ PH = [
     ("pi_multik_h1_nocc_norm", "PH image $H_1$"),
     ("pi_multik_h01_nocc_norm", "PH image $H_0{+}H_1$"),
 ]
-# The r_max = 0.08 variants, paired with the r_max = 0.25 run they compete with.
-GRID_PAIRS = {"vihrs": "vihrs_lfgj_r080", "vihrs_checkpointed": "vihrs_lfgj_r080",
-              "vihrs_f": "vihrs_f_r080", "vihrs_g": "vihrs_g_r080",
+# The r_max = 0.08 variants, paired with the r_max = 0.25 run of the SAME
+# feature set they compete with. The 0.08 grid is a radius grid for F, G and J
+# only, so only subsets containing one of them have a variant. L alone has
+# none: pairing it with vihrs_lfgj_r080 would substitute the full union for L
+# whenever the union scored better, which is a different model, not a grid.
+GRID_PAIRS = {"vihrs_f": "vihrs_f_r080", "vihrs_g": "vihrs_g_r080",
               "vihrs_lfgj": "vihrs_lfgj_r080"}
 
 

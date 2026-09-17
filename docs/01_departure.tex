@@ -1,0 +1,213 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+
+\newcommand{\dt}{\tilde\delta}
+\newcommand{\nb}{\bar n}
+
+\title{01 --- Departure from CSR: $\dt$ and null tables}
+\date{17 September 2026}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\section{Theory}
+
+\subsection*{Setting}
+\begin{itemize}
+  \item Window $W=[0,1]^2$, fixed
+  \item $\nb$: expected number of points --- model parameter, deterministic
+  \item $n$: realised number of points in one pattern --- random around $\nb$
+  \begin{itemize}
+    \item Poisson, Mat\'ern II: $n/\nb \in [0.90, 1.11]$ (5--95\%)
+    \item Thomas, nested, LGCP: $n/\nb \in [0.77, 1.25]$ (overdispersed, clusters arrive whole)
+  \end{itemize}
+\end{itemize}
+
+\subsection*{Estimator}
+\begin{itemize}
+  \item Ripley's $K$, isotropic edge correction, $\lambda^2$ estimated by $n(n-1)$:
+  \[
+    \hat K(r) = \frac{1}{n(n-1)} \sum_{i\neq j} w(x_i, d_{ij})\, \mathbf 1\{d_{ij}\le r\},
+    \qquad
+    w(x,d) = \frac{2\pi}{\text{length of } \partial b(x,d)\cap W}
+  \]
+  \item $\hat L(r) - r = \sqrt{\hat K(r)/\pi} - r$
+  \item Radii $r_k = 0.25\,k/512$, $k=1,\dots,512$ ($r=0$ dropped: identically zero)
+  \item Weight exact for $d \le 0.5$ (no circle meets two opposite edges); $r_{\max}=0.25$
+\end{itemize}
+
+\subsection*{Null}
+\begin{itemize}
+  \item Binomial process: $n$ i.i.d.\ uniform points in $W$ (CSR conditioned on $n$)
+  \item Correct null for a test applied at the realised $n$
+  \item Null moments $m_0(r;n) = \mathbb E_0[\hat L(r)-r]$, $\ s_0(r;n) = \mathrm{sd}_0[\hat L(r)-r]$
+\end{itemize}
+
+\subsection*{Radius set}
+\begin{itemize}
+  \item Expected CSR pairs closer than $r$: $\tfrac12 n(n-1)\pi r^2$
+  \item Few pairs $\Rightarrow$ $\hat L$ is a near-zero count, $s_0$ tiny, studentised statistic dominated by counting noise
+  \item $R(n) = \{r_k : \tfrac12 n(n-1)\pi r_k^2 \ge p\}$, $p = 10$
+  \item $r_{\min}$: 0.13 ($n=20$), 0.025 ($n=100$), 0.0034 ($n=800$), 0.0015 ($n=2000$)
+\end{itemize}
+
+\subsection*{Test (studentised global envelope; Myllym\"aki et al.\ 2017)}
+\[
+  S(x) = \frac{1}{c_{95}(n)} \max_{r\in R(n)} \frac{|\hat L_x(r) - r - m_0(r;n)|}{s_0(r;n)}
+\]
+\begin{itemize}
+  \item $c_{95}(n)$: 95\% quantile of the max under the null
+  \item Reject CSR at 5\% iff $S > 1$
+\end{itemize}
+
+\subsection*{Distance $\dt$}
+\[
+  \dt(\theta,\nb) = \frac{1}{c_{95}(\nb)} \max_{r\in R(\nb)} \frac{|L_\theta(r) - r|}{s_0(r;\nb)}
+\]
+\begin{itemize}
+  \item Same functional as $S$, applied to the closed-form $L_\theta$ at $\nb$, uncentred ($m_0 = 0$)
+  \item $\dt(\text{CSR}) = 0$ exactly
+  \item $\dt = 1$: true curve on the rejection boundary $\Rightarrow$ power $\approx 50\%$, not 5\%
+  \item Units: null s.d.s, relative to the critical value
+  \item Property of the model, known before simulation $\Rightarrow$ usable as a sweep coordinate
+  \item At fixed shape, $\dt$ grows with $\nb$ ($s_0$ shrinks)
+\end{itemize}
+
+\subsection*{Why not ERL}
+\begin{itemize}
+  \item Rank-based: exact, no $s_0$ needed
+  \item Saturates once the curve leaves all null curves at one radius ($p$ stuck at $\approx 1/N$ for all larger departures)
+  \item No continuous distance without envelope-scaling constructions $\Rightarrow$ rejected
+\end{itemize}
+
+\subsection*{Smoothing in $n$}
+\begin{itemize}
+  \item True $m_0$, $s_0$, $c_{95}$ smooth in $n$; raw per-$n$ estimates noisy
+  \item Dense grid alone does not help: leave-one-out interpolation error on the old 20-point grid $\approx$ Monte Carlo noise
+  \item Fit across $n$ $\Rightarrow$ borrow strength from neighbouring $n$; defined at every $n$, no interpolation rule
+  \item $s_0 \propto n^{-1}$ at small $r$, slower at large $r$ $\Rightarrow$ fit $n\,m_0$, $n\,s_0$ (slowly varying)
+  \item Cubic B-splines in $\log n$
+\end{itemize}
+
+%==============================================================================
+\section{Implemented pipeline}
+
+\subsection*{Code}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\texttt{src/cloudforger/classical/lfunction.py} & $\hat K$, $\hat L - r$, weights, $L-r$ from $K - \pi r^2$ \\
+\texttt{src/cloudforger/departure/config.py}   & config, $n$ grid, paths \\
+\texttt{src/cloudforger/departure/simulate.py} & null patterns $\to$ stored curves \\
+\texttt{src/cloudforger/departure/fit.py}      & curves $\to$ spline tables \\
+\texttt{src/cloudforger/departure/tables.py}   & tables $\to$ $S$, $\dt$ \\
+\texttt{src/cloudforger/departure/validate.py} & size on fresh patterns \\
+\texttt{scripts/departure.py}                  & CLI: \texttt{simulate}, \texttt{fit}, \texttt{validate} \\
+\texttt{configs/departure/}                    & \texttt{config.yaml}, \texttt{tables.npz}, \texttt{report.json} \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Configuration}
+\begin{itemize}
+  \item $n$ grid: $\mathrm{round}(20 \cdot 1.03^k)$ up to 2000 $\Rightarrow$ 153 values
+  \item Per grid $n$: 6000 fit + 6000 calibration patterns
+  \item Validation: 50\,000 patterns, $n$ log-uniform integer on $[20, 2000]$
+  \item $p = 10$ pairs; $\alpha = 0.05$; knots: 8 interior (moments), 4 interior ($c_{95}$)
+\end{itemize}
+
+\subsection*{Steps}
+\begin{enumerate}
+  \item \textbf{Simulate} (\texttt{simulate --jobs 10}; $\sim$55 min on 10 cores)
+  \begin{itemize}
+    \item Seed key: (\texttt{pilot}, \texttt{poisson}, $n\cdot 10^5 + \text{rep}$, PATTERN)
+    \item Validation key: (\texttt{pilot}, \texttt{poisson}, $i < 10^5$); $n$ from PARAMS, points from PATTERN
+    \item One \texttt{float32} file per $n$ ($12000 \times 512$), atomic, resumable; 3.6\,GB total
+  \end{itemize}
+  \item \textbf{Fit} (\texttt{fit})
+  \begin{itemize}
+    \item Per $n$, fit batch: pointwise mean, s.d., Monte Carlo s.e.s
+    \item Weighted least squares per radius: $n\,m_0$, $n\,s_0$ on spline basis in $\log n$
+    \item Per $n$, calibration batch: max statistic under \emph{fitted} moments $\to$ raw $c_{95}$, s.e.
+    \item Weighted spline fit of $c_{95}$ in $\log n$
+    \item Store knots + coefficients (100\,KB)
+  \end{itemize}
+  \item \textbf{Validate} (\texttt{validate}): rejection rate on validation patterns, overall and in 6 $\log n$ bands
+  \item \textbf{Use}: \texttt{Tables().statistic(curves, n)} (test), \texttt{Tables().delta\_tilde(L\_minus\_r, nbar)} ($\dt$)
+\end{enumerate}
+
+\subsection*{Results}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Check & Result & Reference \\
+\midrule
+Fitted $m_0$ vs raw, mean $z^2$ & 0.94 & $\approx 0.92$ ($1 - \text{params}/\text{grid}$) \\
+Fitted $s_0$ vs raw, mean $z^2$ & 0.97 & $\approx 0.92$ \\
+Max relative error of $s_0$ & 3.9\% & --- \\
+$c_{95}$ range; max s.e. & 2.75--3.21; 0.03 & --- \\
+Size, 50\,000 patterns & 0.0515 ($z = 1.5$) & 0.05 \\
+Size by $n$ band & 0.049--0.054, all $|z| \le 1.8$ & 0.05 \\
+Centring gap $\max|m_0|/s_0/c_{95}$ & 0.02--0.03 & --- \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Estimator checks}
+\begin{itemize}
+  \item \texttt{tests/test\_lfunction.py}:
+  \begin{itemize}
+    \item Weights vs brute-force circle fraction: $|\Delta| < 10^{-3}$
+    \item Two points at distance 0.1: $\hat K = 0$ below, $=1$ above
+    \item $\mathbb E\hat K = \pi r^2$ under binomial (400 patterns, within 3\%)
+  \end{itemize}
+  \item One-off: agrees with the previous implementation (\texttt{baselines/vihrs.py}) to $10^{-9}$
+\end{itemize}
+
+%==============================================================================
+\section{Statistical notes}
+
+\subsection*{Sample splitting}
+\begin{itemize}
+  \item Three disjoint sets: fit ($m_0$, $s_0$), calibration ($c_{95}$), validation (size)
+  \item $c_{95}$ from same patterns as moments $\Rightarrow$ downward-biased critical value
+  \item Size on calibration batch is 5\% by construction $\Rightarrow$ validation needs fresh patterns
+  \item $c_{95}$ computed under the \emph{fitted} moments $\Rightarrow$ calibrates the statistic actually used
+  \item Validation $n$ random integers $\Rightarrow$ mostly off-grid, tests the smoother between grid points
+\end{itemize}
+
+\subsection*{Fit diagnostics}
+\begin{itemize}
+  \item $z = (\text{raw} - \text{fit})/\text{s.e.}$; pure noise $\Rightarrow$ mean $z^2 \approx 1 - \text{params}/\text{grid points}$
+  \item s.e.\ of $s_0$ uses the fourth moment: $\sqrt{(\mu_4 - s^4)/N}/(2s)$ (small-$r$ tails non-Gaussian)
+  \item $c_{95}$ s.e.\ from order statistics: $(q_{.96}-q_{.94})/0.02 \cdot \sqrt{.95\cdot.05/N}$
+  \item Per-$n$ mean $z^2$ varies widely (0.07--4.5): residuals strongly correlated across $r$ $\Rightarrow$ few effective d.o.f.\ per $n$; band averages $\approx 1$, no trend
+\end{itemize}
+
+\subsection*{Centring}
+\begin{itemize}
+  \item $\hat K$ unbiased under binomial; $\hat L = \sqrt{\hat K/\pi}$ is not (Jensen) $\Rightarrow$ $m_0 \ne 0$
+  \item $\dt$ uncentred, test centred $\Rightarrow$ gap $\le 0.03$ in $\dt$ units on $R(n)$
+  \item Old tables ($r \ge 0.01$ for all $n$): gap 0.16 at $n=50$ --- caused by low-pair radii
+\end{itemize}
+
+\subsection*{Interpretation of $\dt$}
+\begin{itemize}
+  \item Defined through a classical L-test $\Rightarrow$ yardstick of that test, not an omnibus distance
+  \item Classical baseline partly calibrated to the axis: state explicitly
+  \item Sup over $r$: one radius decides; multi-scale models (nested Thomas) summarised by their most visible scale
+  \item L only: inhibition may be more visible in $G$ than $\dt$ suggests (Mat\'ern II)
+  \item Design $\dt$ at $\nb$, not realised $n$: per-pattern difficulty scatters around the label (most for Cox processes)
+  \item $\dt=1$ at $\nb$ does not mean $S=1$ on a pattern: $S$ is random around $\dt$
+\end{itemize}
+
+\subsection*{Scope and limits}
+\begin{itemize}
+  \item Tables valid for $n \in [20, 2000]$; outside raises (observed DV3 $n$: 17--1320)
+  \item $W$ fixed unit square; weight formula requires $r \le 0.5$
+  \item $R(n)$ depends on $n$: at small $n$ small-scale structure invisible by construction
+  \item Curves stored $\Rightarrow$ $p$, $\alpha$, knots changeable without re-simulation
+\end{itemize}
+
+\end{document}
