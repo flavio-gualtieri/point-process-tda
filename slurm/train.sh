@@ -1,7 +1,13 @@
 #!/bin/bash
 
 #SBATCH -J train
-#SBATCH -p compute
+# The "compute" partition has no GPUs (GRES=null), and the "gpu" partition only admits the
+# pilot_gpu/its-research accounts, so --gres=gpu:1 there fails at submit time with "Requested node
+# configuration is not available" / "Invalid account or account/partition combination". Our GPU
+# access is the "sae" partition via the pilot_sae_gpu account (a100-80gb/h100/h200/l40s nodes);
+# it is not the default account, so -A has to be named explicitly.
+#SBATCH -A pilot_sae_gpu
+#SBATCH -p sae
 #SBATCH --gres=gpu:1
 #SBATCH -N 1
 #SBATCH -n 1
