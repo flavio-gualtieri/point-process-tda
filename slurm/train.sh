@@ -13,18 +13,19 @@
 #SBATCH -n 1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH -t 12:00:00
+#SBATCH -t 24:00:00
 #SBATCH --output=logs/train_%A_%a.out
 #SBATCH --error=logs/train_%A_%a.err
 
-# One array task per (task, features, variant, seed) of the full matrix, via scripts/train.py, over
-# both feature arms x 10 seeds x {5-way classification, parameters for each family}:
+# One array task per (task, features, variant) of the full matrix, via scripts/train.py; each task
+# loops over all 10 seeds in-process, over both feature arms x {5-way classification, parameters
+# for each family}:
 #   PH         6 filtrations x {H0, H1, H0+H1}            = 18 per task
 #   classical  {L,F,G,J and L} x {fixed, sqrtn_u2} grids  =  4 per task
-# = 1320 runs. Seeds are the outer loop, so a truncated array still covers every feature set.
+# = 132 array tasks x 10 seeds = 1320 runs.
 #
-#   bash slurm/train.sh                      # print the run list and the --array range, submit nothing
-#   sbatch --array=0-1319%20 slurm/train.sh  # %20 caps how many run at once
+#   bash slurm/train.sh                     # print the run list and the --array range, submit nothing
+#   sbatch --array=0-131%20 slurm/train.sh  # %20 caps how many run at once
 #
 # Any axis can be narrowed at submit time instead of edited, and setting FILTRATIONS or CURVES to
 # the empty string drops that arm entirely:
@@ -53,23 +54,21 @@ for entry in $TASKS; do
   family="${entry#*:}"
   [ "$family" = "$entry" ] && family=""          # "classify" carries no family
   head="--task $task ${family:+--family $family}"
-  for seed in $SEEDS; do
-    for filtration in $FILTRATIONS; do
-      for dims in $DIMS; do
-        runs+=("$head --filtration $filtration --dims $dims --seed $seed")
-      done
+  for filtration in $FILTRATIONS; do
+    for dims in $DIMS; do
+      runs+=("$head --filtration $filtration --dims $dims")
     done
-    for curves in $CURVES; do
-      for grid in $GRIDS; do
-        runs+=("$head --curves $curves --grid $grid --seed $seed")
-      done
+  done
+  for curves in $CURVES; do
+    for grid in $GRIDS; do
+      runs+=("$head --curves $curves --grid $grid")
     done
   done
 done
 
 if [ -z "${SLURM_ARRAY_TASK_ID:-}" ]; then
   printf '%s\n' "${runs[@]}"
-  echo "${#runs[@]} runs -> sbatch --array=0-$(( ${#runs[@]} - 1 ))%20 slurm/train.sh"
+  echo "${#runs[@]} array tasks x $(echo $SEEDS | wc -w) seeds -> sbatch --array=0-$(( ${#runs[@]} - 1 ))%20 slurm/train.sh"
   exit 0
 fi
 
@@ -84,7 +83,10 @@ mamba activate /gpfs/scratch/qp252676/globus/envs/cloud-env
 set -u
 
 run="${runs[$SLURM_ARRAY_TASK_ID]}"
-echo "Host: $(hostname)  Job ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}  ${run}"
+echo "Host: $(hostname)  Job ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}  ${run}  seeds: $SEEDS"
 
-# shellcheck disable=SC2086
-python -u scripts/train.py $run
+for seed in $SEEDS; do
+  echo "-- seed $seed --"
+  # shellcheck disable=SC2086
+  python -u scripts/train.py $run --seed "$seed"
+done
