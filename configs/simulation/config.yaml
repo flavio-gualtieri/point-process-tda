@@ -1,0 +1,15 @@
+root: 70519940839025816406438102027139626253   # shared with configs/departure
+
+nbar: {low: 100, high: 800}
+
+rules:
+  eps: 0.2           # structure correlation >= eps at r_min(nbar), <= eps at r = 0.25; nested separation and balance
+  cv_max: 0.45       # sd(n) / nbar
+  matern_fill: 0.95  # pi R^2 nbar
+  mu1_min: 1.0       # nested: parents per meta-cluster
+
+delta: {low: 0.1, high: 4}    # target delta-tilde, log-uniform; poisson has delta = 0
+thetas: 10000                 # per family
+reps: 2                       # patterns per theta
+n: {low: 20, high: 2000}      # patterns conditioned on n in range (null tables' domain)
+shard_size: 250

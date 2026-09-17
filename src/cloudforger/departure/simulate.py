@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from ..classical.lfunction import l_minus_r
-from ..generation.seeding import PARAMS, PATTERN, case_rng
+from ..simulation.seeding import PARAMS, PATTERN, case_rng
 from .config import DATA, Config
 
 _REP_MAX = 100_000   # grid index = n * _REP_MAX + rep; validation uses indices below _REP_MAX

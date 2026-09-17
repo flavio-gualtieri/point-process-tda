@@ -1,6 +1,6 @@
 # src/cloudforger/config.py
 """RunConfig: the single config schema driving every pipeline stage
-(generate/featurize/train/evaluate). Loaded from a YAML file, optionally
+(train/evaluate; simulation and featurization have their own configs). Loaded from a YAML file, optionally
 overridden with repeatable --set dotted.path=value flags -- generalizes
 scripts/runners/params/run_params.py's YAML-defaults-plus-CLI-overrides
 convention rather than introducing a new dependency (Hydra/OmegaConf)."""
@@ -25,19 +25,7 @@ class ProcessConfig:
 
 @dataclass
 class FiltrationConfig:
-    name: str  # registry key: rips, dtm
-    params: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class BifiltrationConfig:
-    name: str  # registry key: dtm_bifiltration
-    params: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class FeatureConfig:
-    name: str  # registry key: persistence_image, persistence_entropy -- see scripts/featurize.py's _FEATURE_HANDLERS
+    name: str  # rips, dtm, alpha -- see configs/featurization/config.yaml
     params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -80,8 +68,6 @@ class DataConfig:
 class RunConfig:
     process: ProcessConfig
     filtration: list[FiltrationConfig] = field(default_factory=list)  # empty for raw_pc/vihrs/mincontrast/palm
-    bifiltration: list[BifiltrationConfig] = field(default_factory=list)  # empty for raw_pc/vihrs/mincontrast/palm
-    features: list[FeatureConfig] = field(default_factory=list)
     method: MethodConfig | None = None
     seeds: list[int] = field(default_factory=lambda: [0])
     target_label_names: list[str] | None = None  # None -> use every label the process/method exposes
@@ -104,34 +90,17 @@ class RunConfig:
             filtration_raw = [filtration_raw]
         filtration = [f if isinstance(f, FiltrationConfig) else FiltrationConfig(**f) for f in filtration_raw]
 
-        features_raw = d.pop("features", [])
-        features = [
-            f if isinstance(f, FeatureConfig)
-            else FeatureConfig(**f) if isinstance(f, dict)
-            else FeatureConfig(name=f)
-            for f in features_raw
-        ]
-
         method_raw = d.pop("method", None)
         method = None
         if method_raw is not None:
             method = method_raw if isinstance(method_raw, MethodConfig) else MethodConfig(**method_raw)
-
-        bifiltration_raw = d.pop("bifiltration", [])
-        if isinstance(bifiltration_raw, dict):
-            bifiltration_raw = [bifiltration_raw]
-        bifiltration = [
-            b if isinstance(b, BifiltrationConfig) else BifiltrationConfig(**b)
-            for b in bifiltration_raw
-        ]
 
         data_raw = d.pop("data", None) or {}
         data = data_raw if isinstance(data_raw, DataConfig) else DataConfig(**data_raw)
         if data.source not in ("legacy", "dv3"):
             raise ValueError(f"data.source must be 'legacy' or 'dv3', got {data.source!r}")
 
-        return cls(process=process, filtration=filtration, features=features, method=method,
-                   bifiltration=bifiltration, data=data, **d)
+        return cls(process=process, filtration=filtration, method=method, data=data, **d)
 
 
 def _set_by_dotted_path(target: dict[str, Any], dotted_key: str, value: Any) -> None:

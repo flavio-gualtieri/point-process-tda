@@ -1,0 +1,11 @@
+maxdim: 1
+shard_size: 500   # patterns per shard
+
+# One entry per diagram set -> data/featurization/<family>/<tag>/diagrams.npz
+filtrations:
+  - {name: rips}
+  - {name: alpha, scale: diameter}   # squared_radius | radius | diameter (= Rips axis)
+  - {name: dtm, k: 5, q: 2}
+  - {name: dtm, k: 10, q: 2}
+  - {name: dtm, k: 15, q: 2}
+  - {name: dtm, k: 20, q: 2}

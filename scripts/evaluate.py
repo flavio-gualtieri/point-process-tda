@@ -19,8 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.config import RunConfig, load_config
-from cloudforger.data_generation.filtration import REGISTRY as FILTRATION_REGISTRY
-from cloudforger.paths import DEFAULT_RESULTS_ROOT, ResultsPaths
+from cloudforger.paths import DEFAULT_RESULTS_ROOT, ResultsPaths, filtration_tags
 
 # Methods whose results always live under the "raw" filtration tag,
 # regardless of what's configured under `filtration:` -- mirrors
@@ -372,7 +371,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, overrides=args.overrides)
-    filtrations = [FILTRATION_REGISTRY.build(f.name, **f.params) for f in cfg.filtration]
+    filtrations = filtration_tags(cfg.filtration)
     results_paths = ResultsPaths(cfg.process.name, root=cfg.results_root or DEFAULT_RESULTS_ROOT)
     out_dir = results_paths.compare_dir(filtrations, args.name)
 

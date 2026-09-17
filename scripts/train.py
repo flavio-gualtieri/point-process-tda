@@ -64,12 +64,10 @@ from cloudforger import baselines
 from cloudforger.config import RunConfig, load_config
 from cloudforger.core.io import load_pickle
 from cloudforger.core.splits import resolve_split, train_val_test_indices
-from cloudforger.data_generation.filtration import BIFILTRATION_REGISTRY, REGISTRY as FILTRATION_REGISTRY
-from cloudforger.data_generation.filtration.base import Filtration
 from cloudforger.experiments.base import build_experiment
 from cloudforger.experiments.common import MultiSourceExperiment, save_results
 from cloudforger.evaluation import dv3
-from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, PROJECT_ROOT, DataPaths, ExplicitTag, ResultsPaths, is_done
+from cloudforger.paths import DEFAULT_DATA_ROOT, DEFAULT_RESULTS_ROOT, PROJECT_ROOT, DataPaths, ExplicitTag, ResultsPaths, filtration_tags, is_done
 
 MULTI_K_METHODS = {
     "pi_multik", "pi_multik_fusion", "pi_multik_scaleconv", "pi_multik_towers", "pi_multik_earlyfusion",
@@ -121,19 +119,6 @@ def resolve_data_paths(cfg: RunConfig) -> tuple[DataPaths, dict[str, DataPaths]]
     return train, {s: dv3.data_paths(s, group, root) for s in cfg.data.eval_sets}
 
 
-def build_filtrations(cfg: RunConfig) -> list[Filtration]:
-    return [FILTRATION_REGISTRY.build(f.name, **f.params) for f in cfg.filtration]
-
-
-def build_bifiltrations(cfg: RunConfig) -> list[Filtration]:
-    """Bifiltration counterpart of build_filtrations -- Bifiltration only
-    implements .path_tag() of the Filtration interface, but that's all
-    DataPaths/ResultsPaths (paths.py) ever call, same as ExplicitTag's
-    stand-in, so these are interchangeable wherever a list[Filtration] is
-    used purely for path resolution below."""
-    return [BIFILTRATION_REGISTRY.build(b.name, **b.params) for b in cfg.bifiltration]
-
-
 def build_method_cfg(cfg: RunConfig, seed: int) -> dict[str, Any]:
     cfg_dict: dict[str, Any] = {
         "task": "params",
@@ -154,7 +139,7 @@ def build_method_cfg(cfg: RunConfig, seed: int) -> dict[str, Any]:
     return cfg_dict
 
 
-def _experiment_dataset_path(exp, data_paths: DataPaths, filtrations: list[Filtration], adversarial: bool = False) -> Path:
+def _experiment_dataset_path(exp, data_paths: DataPaths, filtrations: list[ExplicitTag], adversarial: bool = False) -> Path:
     if exp.file_key == "raw_pc":
         return data_paths.clouds(adversarial=adversarial)
     feature_name = FILE_KEY_TO_FEATURE_NAME.get(exp.file_key, exp.file_key)
@@ -171,16 +156,11 @@ def _topo_superset_image_paths(data_paths: DataPaths, m_values: list[float], adv
 
 
 def _multi_source_dataset_paths(
-    exp, cfg: RunConfig, data_paths: DataPaths, filtrations: list[Filtration], adversarial: bool = False
+    exp, cfg: RunConfig, data_paths: DataPaths, filtrations: list[ExplicitTag], adversarial: bool = False
 ) -> dict[str, Any]:
     multi_k = cfg.method.name in MULTI_K_METHODS
     m_values = cfg.method.params.get("m_values")
-    # bifiltration-based multi-source methods (mph_fusion) read mph_image.pkl,
-    # not persistence_image.pkl -- same cfg.bifiltration branch build_bifiltrations
-    # uses for path tagging above, kept as a presence check (not a method-name
-    # allowlist) so any future bifiltration-based multi-source method picks
-    # this up automatically.
-    image_feature_name = "mph_image" if cfg.bifiltration else "persistence_image"
+    image_feature_name = "persistence_image"
     paths: dict[str, Any] = {}
     if "clouds" in exp.file_keys:
         paths["clouds"] = data_paths.clouds(adversarial=adversarial)
@@ -217,7 +197,7 @@ def run_experiment_method(
     seed: int,
     data_paths: DataPaths,
     results_paths: ResultsPaths,
-    filtrations: list[Filtration],
+    filtrations: list[ExplicitTag],
     force: bool,
     run_tag: str | None = None,
     eval_data_paths: dict[str, DataPaths] | None = None,
@@ -284,7 +264,7 @@ def run_vihrs_classify_method(
     seed: int,
     data_paths: DataPaths,
     results_paths: ResultsPaths,
-    filtrations: list[Filtration],
+    filtrations: list[ExplicitTag],
     force: bool,
     run_tag: str | None = None,
     eval_data_paths: dict[str, DataPaths] | None = None,
@@ -394,7 +374,7 @@ def run_vihrs_method(
     seed: int,
     data_paths: DataPaths,
     results_paths: ResultsPaths,
-    filtrations: list[Filtration],
+    filtrations: list[ExplicitTag],
     force: bool,
     run_tag: str | None = None,
     eval_data_paths: dict[str, DataPaths] | None = None,
@@ -718,16 +698,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"DV3: training pool {data_paths.process_dir}; evaluation sets "
               + ", ".join(f"{s} -> {dp.process_dir}" for s, dp in eval_data_paths.items()))
     results_paths = ResultsPaths(cfg.process.name, root=cfg.results_root or DEFAULT_RESULTS_ROOT)
-    filtrations = build_filtrations(cfg)
-    bifiltrations = build_bifiltrations(cfg)
-    # A config sets `filtration:` (single-parameter) or `bifiltration:`
-    # (mph_*), never both -- whichever is non-empty is what dataset/results
-    # paths get tagged with below. Every existing config only ever sets
-    # `filtration:`, so this is a no-op (path_filtrations == filtrations)
-    # for all of them; bifiltrations only becomes non-empty for configs
-    # like nested_thomas_mph.yaml that couldn't reach run_experiment_method
-    # at all before (no `method:` block).
-    path_filtrations = bifiltrations or filtrations
+    filtrations = filtration_tags(cfg.filtration)
 
     seeds = [args.seed] if args.seed is not None else cfg.seeds
 
@@ -743,7 +714,7 @@ def main(argv: list[str] | None = None) -> None:
             elif cfg.method.name in CLASSICAL_BASELINE_NAMES:
                 run_classical_baseline(cfg.method.name, cfg, seed, data_paths, results_paths, args.force, run_tag=args.run_tag)
             else:
-                run_experiment_method(cfg, seed, data_paths, results_paths, path_filtrations, args.force,
+                run_experiment_method(cfg, seed, data_paths, results_paths, filtrations, args.force,
                                       run_tag=args.run_tag, eval_data_paths=eval_data_paths)
         except Exception:
             print(f"[{cfg.method.name} seed={seed}] FAILED:")

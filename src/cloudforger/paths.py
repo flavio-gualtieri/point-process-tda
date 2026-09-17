@@ -14,7 +14,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .data_generation.filtration import Filtration
+from typing import Any
+
+from .featurization.filtrations import tag
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_ROOT = PROJECT_ROOT / "data"
@@ -37,18 +39,19 @@ RUN_ARCHIVE_DIR_NAME = "_runs"
 
 
 class ExplicitTag:
-    """Minimal Filtration stand-in (only .path_tag() is required by
-    combined_filtration_tag()/ResultsPaths) for methods whose diagrams
-    weren't computed via the Filtration registry -- e.g. topo_superset's
-    mass-fraction DTM sweep (scripts/featurize_topo_superset.py), which
-    needs a per-cloud k = round(m*N) the registry's fixed-k contract has no
-    hook for, so it bypasses DataPaths/the registry entirely."""
+    """A filtration as DataPaths/ResultsPaths see it: a path tag (e.g. dtm_k5) plus its params."""
 
-    def __init__(self, tag: str):
+    def __init__(self, tag: str, params: dict[str, Any] | None = None):
         self._tag = tag
+        self.params = dict(params or {})
 
     def path_tag(self) -> str:
         return self._tag
+
+
+def filtration_tags(filtration_configs) -> list[ExplicitTag]:
+    """RunConfig.filtration entries -> tags, named as in configs/featurization (featurization.filtrations.tag)."""
+    return [ExplicitTag(tag({"name": f.name, **f.params}), f.params) for f in filtration_configs]
 
 
 # Splits a path_tag() into (family_prefix, trailing_numeric_value), e.g.
@@ -57,8 +60,8 @@ class ExplicitTag:
 _TAG_FAMILY_RE = re.compile(r"^(.*?)(\d[\d.]*)$")
 
 
-def combined_filtration_tag(filtrations: list[Filtration] | None) -> str:
-    """Path segment for zero, one, or several Filtration instances (more
+def combined_filtration_tag(filtrations: list[ExplicitTag] | None) -> str:
+    """Path segment for zero, one, or several filtration tags (more
     than one for multi-channel sweeps like pi_multik/pi_multik_scaleconv).
     Each filtration contributes its own path_tag() (e.g. DTM's "dtm_k5" or
     a mass-fraction sweep's "dtm_m0.01"). Consecutive tags sharing the same
@@ -102,18 +105,14 @@ class DataPaths:
     def manifest(self) -> Path:
         return self.process_dir / "cloud_generation_manifest.yaml"
 
-    def filtration_dir(self, filtrations: list[Filtration] | None) -> Path:
+    def filtration_dir(self, filtrations: list[ExplicitTag] | None) -> Path:
         return self.process_dir / combined_filtration_tag(filtrations)
 
-    def diagrams(self, filtrations: list[Filtration] | None, adversarial: bool = False) -> Path:
+    def diagrams(self, filtrations: list[ExplicitTag] | None, adversarial: bool = False) -> Path:
         prefix = "adversarial_" if adversarial else ""
         return self.filtration_dir(filtrations) / f"{prefix}diagrams.pkl"
 
-    def signed_measures(self, bifiltrations, adversarial: bool = False) -> Path:
-        prefix = "adversarial_" if adversarial else ""
-        return self.filtration_dir(bifiltrations) / f"{prefix}signed_measures.pkl"
-
-    def feature(self, filtrations: list[Filtration] | None, feature_name: str, adversarial: bool = False) -> Path:
+    def feature(self, filtrations: list[ExplicitTag] | None, feature_name: str, adversarial: bool = False) -> Path:
         prefix = "adversarial_" if adversarial else ""
         return self.filtration_dir(filtrations) / f"{prefix}{feature_name}.pkl"
 
@@ -131,16 +130,16 @@ class ResultsPaths:
         self.process = process
         self.root = Path(root)
 
-    def method_dir(self, filtrations: list[Filtration] | None, method: str, run_tag: str | None = None) -> Path:
+    def method_dir(self, filtrations: list[ExplicitTag] | None, method: str, run_tag: str | None = None) -> Path:
         base = self.root / self.process / combined_filtration_tag(filtrations) / method
         return base / RUN_ARCHIVE_DIR_NAME / run_tag if run_tag else base
 
     def seed_dir(
-        self, filtrations: list[Filtration] | None, method: str, seed: int, run_tag: str | None = None
+        self, filtrations: list[ExplicitTag] | None, method: str, seed: int, run_tag: str | None = None
     ) -> Path:
         return self.method_dir(filtrations, method, run_tag) / f"seed_{seed}"
 
-    def compare_dir(self, filtrations: list[Filtration] | None, name: str) -> Path:
+    def compare_dir(self, filtrations: list[ExplicitTag] | None, name: str) -> Path:
         return self.root / self.process / combined_filtration_tag(filtrations) / COMPARE_DIR_NAME / name
 
 
