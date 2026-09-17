@@ -165,31 +165,47 @@ def test_sqrt_transform_tames_the_dynamic_range(fake_data):
     assert skew(root.images[1]) < skew(linear.images[1])
 
 
-def _write_curves(tmp_path, rng):
+def _write_curves(tmp_path, rng, grids=("sqrtn_u2", "fixed")):
     """Minimal data/classical/<family>/<grid>/curves.npz for the classical arm."""
     root = tmp_path / "classical"
     for family in FAMILIES:
         manifest = pd.read_csv(D.SIMULATION / family / "manifest.csv")
-        out = {"case_id": manifest.case_id.to_numpy(str), "axis": np.linspace(0, 2, 64)}
-        for name in ("L", "F", "G", "J"):
-            out[name] = rng.random((len(manifest), 64)).astype(np.float32)
-        (root / family / "sqrtn_u2").mkdir(parents=True, exist_ok=True)
-        np.savez(root / family / "sqrtn_u2" / "curves.npz", **out)
+        for grid in grids:
+            out = {"case_id": manifest.case_id.to_numpy(str), "axis": np.linspace(0, 2, 64)}
+            for name in ("L", "F", "G", "J"):
+                out[name] = rng.random((len(manifest), 64)).astype(np.float32)
+            (root / family / grid).mkdir(parents=True, exist_ok=True)
+            np.savez(root / family / grid / "curves.npz", **out)
     return root
 
 
-def test_curves_stack_into_one_encoder_by_default(fake_data, tmp_path, monkeypatch):
-    """L/F/G/J share one r axis, so they are channels of a single encoder; --curves-separate is the
-    ablation that gives each its own, the way H0 and H1 are forced to be."""
+def test_curves_on_one_grid_share_an_encoder(fake_data, tmp_path, monkeypatch):
+    """Sharing a grid means index i is the same radius in every channel, so one encoder can compare
+    them there; --curves-separate is the ablation that gives each its own."""
     monkeypatch.setattr(D, "CLASSICAL", _write_curves(tmp_path, np.random.default_rng(1)))
+    curves = D.parse_curves("L,F,G,J", "sqrtn_u2")
 
-    stacked = D.build_curves(FAMILIES, "sqrtn_u2", ["L", "F", "G", "J"], verbose=False)
-    assert list(stacked.images) == ["L+F+G+J"]
-    assert stacked.images["L+F+G+J"].shape[1] == 4        # one key, four channels
+    stacked = D.build_curves(FAMILIES, curves, verbose=False)
+    assert len(stacked.images) == 1
+    assert next(iter(stacked.images.values())).shape[1] == 4      # one key, four channels
 
-    separate = D.build_curves(FAMILIES, "sqrtn_u2", ["L", "F", "G", "J"], stack=False, verbose=False)
-    assert sorted(separate.images) == ["F", "G", "J", "L"]
+    separate = D.build_curves(FAMILIES, curves, stack=False, verbose=False)
+    assert sorted(separate.images) == ["F@sqrtn_u2", "G@sqrtn_u2", "J@sqrtn_u2", "L@sqrtn_u2"]
     assert all(v.shape[1] == 1 for v in separate.images.values())
+
+
+def test_curves_on_different_grids_get_their_own_encoders(fake_data, tmp_path, monkeypatch):
+    """F and G saturate long before r_max on the fixed axis, so they earn their own grid -- and then
+    there is no shared index to convolve across, so stacking is refused rather than silently wrong."""
+    monkeypatch.setattr(D, "CLASSICAL", _write_curves(tmp_path, np.random.default_rng(1)))
+    curves = D.parse_curves("L@fixed,F,G,J", "sqrtn_u2")
+    assert curves == [("L", "fixed"), ("F", "sqrtn_u2"), ("G", "sqrtn_u2"), ("J", "sqrtn_u2")]
+
+    mixed = D.build_curves(FAMILIES, curves, verbose=False)      # separate, without being asked
+    assert sorted(mixed.images) == ["F@sqrtn_u2", "G@sqrtn_u2", "J@sqrtn_u2", "L@fixed"]
+
+    with pytest.raises(ValueError, match="different grids"):
+        D.build_curves(FAMILIES, curves, stack=True, verbose=False)
 
 
 def test_train_script_runs_the_classical_arm(fake_data, tmp_path, monkeypatch):
@@ -201,10 +217,53 @@ def test_train_script_runs_the_classical_arm(fake_data, tmp_path, monkeypatch):
         monkeypatch.setattr(module, "CLASSICAL", _write_curves(tmp_path, np.random.default_rng(2)))
     out = tmp_path / "curves_run"
 
-    train.main(["--task", "classify", "--curves", "L,F,G,J", "--grid", "sqrtn_u2", "--seed", "1",
+    train.main(["--task", "classify", "--curves", "L@fixed,F,G,J", "--grid", "sqrtn_u2", "--seed", "1",
                 "--epochs", "2", "--batch-size", "8", "--out", str(out)])
 
     z = np.load(out / "predictions.npz")
     assert len(z["case_id"]) == 8                        # the same test patterns as the PH arm
     run = __import__("json").loads((out / "run.json").read_text())
-    assert run["curves"] == ["L", "F", "G", "J"] and run["curves_stacked"] is True
+    assert run["curves"] == [["L", "fixed"], ["F", "sqrtn_u2"], ["G", "sqrtn_u2"], ["J", "sqrtn_u2"]]
+    assert run["curves_stacked"] is False                # mixed grids -> one encoder each
+    assert train.run_id(train.parse_args(
+        ["--task", "classify", "--curves", "L@fixed,F,G,J", "--grid", "sqrtn_u2"])) == (
+        "all", "L+F+G+J", "fixed+sqrtn_u2+sqrtn_u2+sqrtn_u2")
+
+
+def test_several_seeds_share_one_feature_build(fake_data, tmp_path, monkeypatch, capsys):
+    """--seed 1,2 builds the images once and trains both, which is what lets a SLURM array task
+    cover every seed of a feature set without re-rasterizing per seed."""
+    train = _train_module()
+    for module in (D, train.D):
+        monkeypatch.setattr(module, "SIMULATION", D.SIMULATION)
+        monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
+        monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
+    monkeypatch.setattr(train, "RESULTS", tmp_path / "results")
+
+    train.main(["--task", "classify", "--filtration", "rips", "--dims", "0", "--seed", "1,2",
+                "--resolution", "8", "--epochs", "1", "--batch-size", "8"])
+
+    assert capsys.readouterr().out.count("[image] rips H0") == 1        # rasterized once
+    runs = sorted((tmp_path / "results").glob("classify/all/rips/h0/seed_*/run.json"))
+    assert [p.parent.name for p in runs] == ["seed_1", "seed_2"]
+    seeds = [__import__("json").loads(p.read_text())["args"]["seed"] for p in runs]
+    assert seeds == [1, 2]                                             # each records its own seed
+
+
+def test_finished_seeds_are_skipped(fake_data, tmp_path, monkeypatch, capsys):
+    train = _train_module()
+    for module in (D, train.D):
+        monkeypatch.setattr(module, "SIMULATION", D.SIMULATION)
+        monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
+        monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
+    monkeypatch.setattr(train, "RESULTS", tmp_path / "results")
+    argv = ["--task", "classify", "--filtration", "rips", "--dims", "0", "--seed", "1,2",
+            "--resolution", "8", "--epochs", "1", "--batch-size", "8"]
+
+    train.main(argv)
+    capsys.readouterr()
+    train.main(argv[:-8] + ["--seed", "1,2,3"] + argv[-6:])            # seeds 1 and 2 already done
+
+    out = capsys.readouterr().out
+    assert out.count("--force to retrain") == 2
+    assert "seed(s) 3" in out                                          # only the new seed is trained

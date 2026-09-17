@@ -145,38 +145,62 @@ def load_curves(family: str, grid: str, name: str) -> np.ndarray:
     return np.load(CLASSICAL / family / grid / "curves.npz")[name]
 
 
-def build_curves(families: list[str], grid: str, names: list[str], stack: bool = True,
-                 verbose: bool = True) -> Dataset:
-    """The classical arm: L/F/G/J as 1-D channels.
+def parse_curves(spec: str, default_grid: str) -> list[tuple[str, str]]:
+    """'L@fixed,F,G,J' -> [(L, fixed), (F, default), (G, default), (J, default)].
 
-    stack=True (default) puts the curves in as channels of ONE encoder, because they share the same
-    r axis: at index i every curve refers to the same radius, so a convolution can compare them
-    there. stack=False gives each its own encoder, which can only compare them after pooling -- the
-    ablation, and the arrangement the PH arm is forced into by H0 and H1 having separate boxes.
+    A curve names its own grid because the functions saturate at different places: F and G are
+    distance CDFs that reach 1 near the mean nearest-neighbour distance, so on the fixed r axis
+    (r_max = 0.25) most of their 512 samples sit on a flat tail, while L is only comparable to the
+    literature on that axis. Per-function grids spend each curve's resolution where it varies.
+    """
+    out = []
+    for item in spec.split(","):
+        name, _, grid = item.partition("@")
+        out.append((name, grid or default_grid))
+    return out
+
+
+def build_curves(families: list[str], curves: list[tuple[str, str]], stack: bool | None = None,
+                 verbose: bool = True) -> Dataset:
+    """The classical arm: (curve, grid) pairs as 1-D channels.
+
+    stack puts the curves in as channels of ONE encoder, which is only meaningful when they share a
+    grid: then index i means the same radius in every channel and a convolution can compare them
+    there. Curves on different grids have nothing to compare at a given index, so they get one
+    encoder each and meet only as concatenated embeddings -- the same arrangement H0 and H1 are in
+    for the same reason. Default: stack when the grid is shared, separate when it is not.
 
     Same contract as build() otherwise -- manifest order, statistics fitted on train rows only,
     log n as the covariate -- so everything downstream is shared and the arms stay comparable. No
     sqrt here: these are bounded functions (F, G in [0, 1]), not a sparse measure with a heavy tail.
     """
+    grids = {grid for _, grid in curves}
+    if stack is None:
+        stack = len(grids) == 1
+    elif stack and len(grids) > 1:
+        raise ValueError(f"curves on different grids ({sorted(grids)}) cannot share an encoder")
+
     manifest = load_manifest(families)
     train = manifest.index[manifest["split"] == "train"].to_numpy()
 
-    curves = {}
-    for name in names:
+    blocks = {}
+    for name, grid in curves:
         block = np.concatenate([load_curves(f, grid, name) for f in families])[:, None, :]
         if len(block) != len(manifest):
             raise ValueError(f"{name} on {grid}: {len(block)} curves for {len(manifest)} patterns")
-        curves[name] = block
+        blocks[f"{name}@{grid}"] = block
+
+    if stack:
+        blocks = {"+".join(blocks): np.concatenate(list(blocks.values()), axis=1)}
 
     images, norm = {}, {}
-    for key, block in ({"+".join(names): np.concatenate(list(curves.values()), axis=1)} if stack
-                       else curves).items():
+    for key, block in blocks.items():
         mean, std = _zscore(block, train)          # one (mean, std) per curve, whichever layout
         shape = (1, block.shape[1], 1)
         images[key] = (block - mean.reshape(shape)) / std.reshape(shape)
         norm[key] = (mean, std)
         if verbose:
-            print(f"  [curve] {key} on {grid}: {images[key].shape[1:]}", flush=True)
+            print(f"  [curve] {key}: {images[key].shape[1:]}", flush=True)
 
     return Dataset(manifest, images, _covariates(manifest["n"].to_numpy(), train), {}, norm)
 

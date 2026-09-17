@@ -21,7 +21,7 @@
 # loops over all 10 seeds in-process, over both feature arms x {5-way classification, parameters
 # for each family}:
 #   PH         6 filtrations x {H0, H1, H0+H1}            = 18 per task
-#   classical  {L,F,G,J and L} x {fixed, sqrtn_u2} grids  =  4 per task
+#   classical  4 curve specs (see CURVES below)          =  4 per task
 # = 132 array tasks x 10 seeds = 1320 runs.
 #
 #   bash slurm/train.sh                     # print the run list and the --array range, submit nothing
@@ -31,7 +31,8 @@
 # the empty string drops that arm entirely:
 #   TASKS="classify" FILTRATIONS="dtm_k10" CURVES="" SEEDS="1 2 3" bash slurm/train.sh
 #
-# Resumable: a run whose run.json exists is skipped, so a re-submit only fills the gaps.
+# Resumable: a seed whose run.json exists is skipped, so a re-submit only fills the gaps (the
+# features are still built once for whatever seeds remain).
 #
 # Sizing: images are held in memory, ~1.6 GB per 2-D (filtration, homology dim) channel over the
 # 100k classification patterns and a fifth of that per family, plus ~1 min each to rasterize.
@@ -44,8 +45,12 @@ set -euo pipefail
 TASKS="${TASKS:-classify params:poisson params:thomas params:nested params:matern2 params:lgcp}"
 FILTRATIONS="${FILTRATIONS-rips alpha_diameter dtm_k5 dtm_k10 dtm_k15 dtm_k20}"   # PH arm
 DIMS="${DIMS:-0 1 0,1}"
-CURVES="${CURVES-L,F,G,J L}"                     # classical arm; L alone is the VIHRS feature set
-GRIDS="${GRIDS:-fixed sqrtn_u2}"
+# Classical arm: one self-contained spec per entry, NAME@grid per function (unqualified names take
+# scripts/train.py's --grid default, sqrtn_u2). Per-function grids exist because F and G are distance
+# CDFs: on the fixed r axis they sit saturated at 1.0 over 62%/66% of their 512 samples, against
+# 24%/30% on the sqrt(n) axis, while L is only comparable to the literature on the fixed one.
+# L alone is the VIHRS feature set.
+CURVES="${CURVES-L@fixed,F,G,J L,F,G,J L@fixed,F@fixed,G@fixed,J@fixed L@fixed}"
 SEEDS="${SEEDS:-1 2 3 4 5 6 7 8 9 10}"
 
 runs=()
@@ -60,9 +65,7 @@ for entry in $TASKS; do
     done
   done
   for curves in $CURVES; do
-    for grid in $GRIDS; do
-      runs+=("$head --curves $curves --grid $grid")
-    done
+    runs+=("$head --curves $curves")
   done
 done
 
@@ -85,8 +88,7 @@ set -u
 run="${runs[$SLURM_ARRAY_TASK_ID]}"
 echo "Host: $(hostname)  Job ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}  ${run}  seeds: $SEEDS"
 
-for seed in $SEEDS; do
-  echo "-- seed $seed --"
-  # shellcheck disable=SC2086
-  python -u scripts/train.py $run --seed "$seed"
-done
+# One process for all the seeds, not one per seed: scripts/train.py --seed accepts a list and builds
+# the features once, so an array task rasterizes its images once instead of ten times.
+# shellcheck disable=SC2086
+python -u scripts/train.py $run --seed "$(echo $SEEDS | tr ' ' ',')"

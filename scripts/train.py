@@ -7,6 +7,9 @@
     # the classical arm: summary-function curves instead of diagrams, same everything else
     python scripts/train.py --task classify --curves L,F,G,J --grid sqrtn_u2 --seed 1
 
+    # per-function grids: L on the literature's r axis, F/G/J on the sqrt(n) axis they vary over
+    python scripts/train.py --task classify --curves L@fixed,F,G,J --grid sqrtn_u2 --seed 1
+
     # parameter estimation for nested Thomas, rips H0 (a 1-D image: rips births are all 0)
     python scripts/train.py --task params --family nested --filtration rips --dims 0 --seed 1
 
@@ -54,11 +57,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--filtration",
                    help="PH arm: comma-separated tags as under data/featurization/<family>/ (rips, dtm_k5...)")
     p.add_argument("--dims", default="0,1", help="PH arm: homology dimensions, comma-separated")
-    p.add_argument("--curves", help="classical arm: comma-separated summary functions (L,F,G,J)")
-    p.add_argument("--grid", default="sqrtn_u2", help="classical arm: grid tag (fixed, sqrtn_u2)")
+    p.add_argument("--curves", help="classical arm: comma-separated functions, each optionally with "
+                                    "its own grid (L@fixed,F,G,J)")
+    p.add_argument("--grid", default="sqrtn_u2", help="classical arm: grid for curves that name none")
     p.add_argument("--curves-separate", action="store_true",
-                   help="classical arm: one encoder per curve instead of one over all of them")
-    p.add_argument("--seed", type=int, default=1)
+                   help="classical arm: one encoder per curve even when they share a grid "
+                        "(curves on different grids always get one each)")
+    p.add_argument("--seed", default="1", help="one seed, or several ('1,2,3'): the features are "
+                                                "built once and every seed trained from them")
     p.add_argument("--targets", help="params: comma-separated manifest columns (default: the family's own)")
     p.add_argument("--resolution", type=int, default=64)
     p.add_argument("--sigma-pixels", type=float, default=1.0)
@@ -93,35 +99,41 @@ def run_id(args) -> tuple[str, str, str]:
     produced it -- dtm_k10/h01 for the PH arm, L+F+G+J/sqrtn_u2 for the classical one."""
     group = args.family if args.task == "params" else "all"
     if args.curves:
-        return group, args.curves.replace(",", "+"), args.grid
+        curves = D.parse_curves(args.curves, args.grid)
+        grids = [grid for _, grid in curves]
+        # variant carries the grids in curve order, so features + variant reconstruct the spec
+        return (group, "+".join(name for name, _ in curves),
+                grids[0] if len(set(grids)) == 1 else "+".join(grids))
     return group, args.filtration.replace(",", "+"), "h" + "".join(args.dims.split(","))
 
 
-def output_dir(args) -> Path:
+def output_dir(args, seed: int) -> Path:
     """results/<task>/<group>/<features>/<variant>/seed_<n>."""
     if args.out:
         return args.out
-    return RESULTS.joinpath(args.task, *run_id(args), f"seed_{args.seed}")
+    return RESULTS.joinpath(args.task, *run_id(args), f"seed_{seed}")
 
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    out = output_dir(args)
-    if (out / "run.json").exists() and not args.force:
-        print(f"{out}/run.json exists; --force to retrain")
+    seeds = [int(s) for s in str(args.seed).split(",")]
+    todo = [s for s in seeds if args.force or not (output_dir(args, s) / "run.json").exists()]
+    for seed in seeds:
+        if seed not in todo:
+            print(f"{output_dir(args, seed)}/run.json exists; --force to retrain")
+    if not todo:
         return
-    torch.manual_seed(args.seed)
 
     families = list(D.FAMILIES) if args.task == "classify" else [args.family]
     tags = args.filtration.split(",") if args.filtration else []
     dims = [int(d) for d in args.dims.split(",")]
     scaling = Scaling(coords="none" if args.raw_coords else "sqrt_n", density=not args.raw_mass)
-    tag = f"{args.task}/{'/'.join(run_id(args))}/s{args.seed}"
+    run = f"{args.task}/{'/'.join(run_id(args))}"
 
-    print(f"[{tag}] building features", flush=True)
+    print(f"[{run}] building features once for seed(s) {','.join(map(str, todo))}", flush=True)
     if args.curves:
-        dataset = D.build_curves(families, args.grid, args.curves.split(","),
-                                 stack=not args.curves_separate)
+        curves = D.parse_curves(args.curves, args.grid)
+        dataset = D.build_curves(families, curves, stack=False if args.curves_separate else None)
     else:
         dataset = D.build(families, tags, dims, resolution=args.resolution, sigma_pixels=args.sigma_pixels,
                           coverage=args.coverage, scaling=scaling, transform=args.image_transform)
@@ -138,7 +150,7 @@ def main(argv=None) -> None:
         columns = args.targets.split(",") if args.targets else D.TARGETS[args.family]
         y, target_norm = D.targets(manifest, columns, train_idx)
         loss_fn, n_outputs = nn.MSELoss(), len(columns)
-    print(f"[{tag}] {len(manifest)} patterns: {len(train_idx)} train, {len(val_idx)} val, "
+    print(f"[{run}] {len(manifest)} patterns: {len(train_idx)} train, {len(val_idx)} val, "
           f"{len(test_idx)} test; {n_outputs} outputs", flush=True)
 
     def loader(index, shuffle):
@@ -146,53 +158,62 @@ def main(argv=None) -> None:
 
     keys = sorted(dataset.images)
     n_tags = len(tags) if args.filtration else 1   # PH: one pass per filtration; curves: one pass
-    model = PHNet(
-        ranks=[dataset.images[k].ndim - 2 for k in keys],
-        n_tags=n_tags,
-        channels=[dataset.images[k].shape[1] // n_tags for k in keys],
-        n_covariates=dataset.covariates.shape[1], n_outputs=n_outputs,
-        embedding_dim=args.embedding_dim,
-        conv_channels=tuple(int(c) for c in args.conv_channels.split(",")),
-        dropout=args.dropout,
-    ).to(args.device)
 
-    fit = T.fit(model, loader(train_idx, True), loader(val_idx, False), loss_fn, args.device,
-                lr=args.lr, weight_decay=args.weight_decay, epochs=args.epochs,
-                patience=args.patience, tag=tag)
+    # Features are seed-independent (the split is fixed by theta, and every fit -- imager box, pixel
+    # z-score, target transform -- uses train rows only), so they are built once above and each seed
+    # only re-initializes and retrains the network.
+    for seed in todo:
+        tag = f"{run}/s{seed}"
+        out = output_dir(args, seed)
+        torch.manual_seed(seed)
+        model = PHNet(
+            ranks=[dataset.images[k].ndim - 2 for k in keys],
+            n_tags=n_tags,
+            channels=[dataset.images[k].shape[1] // n_tags for k in keys],
+            n_covariates=dataset.covariates.shape[1], n_outputs=n_outputs,
+            embedding_dim=args.embedding_dim,
+            conv_channels=tuple(int(c) for c in args.conv_channels.split(",")),
+            dropout=args.dropout,
+        ).to(args.device)
 
-    test_loader = loader(test_idx, False)
-    test_loss, test_acc = T.evaluate(model, test_loader, loss_fn, args.device)
-    outputs = T.predict(model, test_loader, args.device)
+        fit = T.fit(model, loader(train_idx, True), loader(val_idx, False), loss_fn, args.device,
+                    lr=args.lr, weight_decay=args.weight_decay, epochs=args.epochs,
+                    patience=args.patience, tag=tag)
 
-    saved = {"case_id": manifest["case_id"].to_numpy(str)[test_idx]}
-    if args.task == "classify":
-        posterior = torch.softmax(torch.from_numpy(outputs), dim=1).numpy()
-        saved |= {"y_true": y[test_idx], "y_pred": outputs.argmax(axis=1), "posterior": posterior}
-        print(f"[{tag}] test loss {test_loss:.4f}  accuracy {test_acc:.4f}", flush=True)
-    else:
-        saved |= {"y_true": D.invert_targets(y[test_idx], target_norm),
-                  "y_pred": D.invert_targets(outputs, target_norm),
-                  "y_true_std": y[test_idx], "y_pred_std": outputs}
-        print(f"[{tag}] test loss {test_loss:.4f} (standardized MSE)", flush=True)
+        test_loader = loader(test_idx, False)
+        test_loss, test_acc = T.evaluate(model, test_loader, loss_fn, args.device)
+        outputs = T.predict(model, test_loader, args.device)
 
-    out.mkdir(parents=True, exist_ok=True)
-    np.savez(out / "predictions.npz", **saved)
-    torch.save(model.state_dict(), out / "model.pt")
-    (out / "run.json").write_text(json.dumps({
-        "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
-        "families": families, "tags": tags, "dims": dims if not args.curves else [],
-        "curves": args.curves.split(",") if args.curves else [],
-        "curves_stacked": bool(args.curves) and not args.curves_separate,
-        "n_train": len(train_idx), "n_val": len(val_idx), "n_test": len(test_idx),
-        "imagers": {f"{t}_h{d}": im.params for (t, d), im in dataset.imagers.items()},
-        "image_transform": args.image_transform,
-        "targets": target_norm, "labels": labels,
-        "best_val_loss": fit["best_val_loss"], "best_epoch": fit["best_epoch"],
-        "epochs_run": fit["epochs_run"], "test_loss": test_loss,
-        "test_accuracy": test_acc if args.task == "classify" else None,
-        "history": fit["history"], "provenance": provenance_stamp(),
-    }, indent=2, default=float))
-    print(f"[{tag}] wrote {out}", flush=True)
+        saved = {"case_id": manifest["case_id"].to_numpy(str)[test_idx]}
+        if args.task == "classify":
+            posterior = torch.softmax(torch.from_numpy(outputs), dim=1).numpy()
+            saved |= {"y_true": y[test_idx], "y_pred": outputs.argmax(axis=1), "posterior": posterior}
+            print(f"[{tag}] test loss {test_loss:.4f}  accuracy {test_acc:.4f}", flush=True)
+        else:
+            saved |= {"y_true": D.invert_targets(y[test_idx], target_norm),
+                      "y_pred": D.invert_targets(outputs, target_norm),
+                      "y_true_std": y[test_idx], "y_pred_std": outputs}
+            print(f"[{tag}] test loss {test_loss:.4f} (standardized MSE)", flush=True)
+
+        out.mkdir(parents=True, exist_ok=True)
+        np.savez(out / "predictions.npz", **saved)
+        torch.save(model.state_dict(), out / "model.pt")
+        (out / "run.json").write_text(json.dumps({
+                "args": {**{k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
+                     "seed": seed},
+            "families": families, "tags": tags, "dims": dims if not args.curves else [],
+            "curves": D.parse_curves(args.curves, args.grid) if args.curves else [],
+            "curves_stacked": bool(args.curves) and len(dataset.images) == 1 and len(args.curves.split(",")) > 1,
+            "n_train": len(train_idx), "n_val": len(val_idx), "n_test": len(test_idx),
+            "imagers": {f"{t}_h{d}": im.params for (t, d), im in dataset.imagers.items()},
+            "image_transform": args.image_transform,
+            "targets": target_norm, "labels": labels,
+            "best_val_loss": fit["best_val_loss"], "best_epoch": fit["best_epoch"],
+            "epochs_run": fit["epochs_run"], "test_loss": test_loss,
+            "test_accuracy": test_acc if args.task == "classify" else None,
+            "history": fit["history"], "provenance": provenance_stamp(),
+        }, indent=2, default=float))
+        print(f"[{tag}] wrote {out}", flush=True)
 
 
 if __name__ == "__main__":
