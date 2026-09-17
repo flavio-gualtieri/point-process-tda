@@ -1,0 +1,9 @@
+f_grid_size: 64    # F's test locations: 64x64 = 4096 interior points on the unit square
+
+# One entry per curve set -> data/classical/<family>/<tag>/curves.npz, all four of L, F, G, J.
+# `fixed` is spatstat's Kest axis and the only grid L is comparable to the VIHRS paper on; `sqrtn`
+# rescales r by sqrt(n) so F and G stop wasting ~70% of the grid on a saturated tail. Which is
+# better is an ablation -- see cloudforger/classical/functions.py.
+grids:
+  - {name: fixed}
+  - {name: sqrtn, u_max: 2.0}

@@ -1,13 +1,24 @@
 """Diagrams on disk -> persistence images, targets and splits, in memory.
 
-    data/simulation/<family>/manifest.csv          one row per pattern (case_id, theta, nbar, n, ...)
+    data/simulation/<family>/manifest.csv           one row per pattern (case_id, theta, nbar, n, ...)
     data/featurization/<family>/<tag>/diagrams.npz  its diagrams, h<d> + h<d>_offsets in manifest order
+    data/classical/<family>/<grid>/curves.npz       its L/F/G/J curves (the classical arm)
+
+Two feature sources, one contract: build() rasterizes diagrams, build_curves() reads summary
+functions, and both return a Dataset whose `images` maps a channel key to a (N, ...) array with one
+encoder per key. Everything after this module is shared, so the arms are comparable by construction.
 
 Rows are ordered by (family, manifest order), and every array here keeps that order, so `case_id`
 identifies a row all the way to predictions.npz.
 
 Imagers are fitted on TRAIN rows only, once per (tag, dim), and applied frozen to every row; the
-per-channel z-score likewise. The birth axis exists only where the filtration gives H0 a non-trivial
+per-channel z-score likewise -- one (mean, std) per filtration channel, pooled over train patterns
+and pixels, so the picture is only shifted and rescaled, never reshaped per pattern or per pixel.
+
+Images pass through sqrt before that z-score: a linearly weighted persistence image of H1 is ~93%
+empty with a handful of very bright pixels (standardized range [-0.2, +50] on real Thomas dtm_k10
+diagrams), which no single affine map can tame. sqrt is variance-stabilizing for that kind of
+mass-like quantity, keeps zero at zero, and leaves the imager itself exactly Adams et al. The birth axis exists only where the filtration gives H0 a non-trivial
 birth (DTM), so rips/alpha H0 images are 1-D -- see birth_axis.
 """
 
@@ -19,6 +30,7 @@ import numpy as np
 import pandas as pd
 import torch.utils.data
 
+from ..classical.curves import DATA as CLASSICAL
 from ..featurization.sweep import DATA as FEATURIZATION, SIMULATION
 from ..simulation.split import split_of
 from ..vectorization.persistence_images import PersistenceImager, Scaling, fit_imager
@@ -34,7 +46,7 @@ def birth_axis(tag: str, dim: int) -> bool:
 @dataclass
 class Dataset:
     manifest: pd.DataFrame                  # one row per pattern, with a `split` column
-    images: dict[int, np.ndarray]           # dim -> (N, n_tags, resolution[, resolution]) float32
+    images: dict                            # channel key -> (N, n_tags, ...) float32; one encoder each
     covariates: np.ndarray                  # (N, 1) float32: log n
     imagers: dict[tuple[str, int], PersistenceImager]
     norm: dict[int, tuple[np.ndarray, np.ndarray]]
@@ -82,6 +94,9 @@ def _zscore(images: np.ndarray, train: np.ndarray) -> tuple[np.ndarray, np.ndarr
             np.maximum(block.std(axis=axes, dtype=np.float32), 1e-12))
 
 
+TRANSFORMS = {"sqrt": np.sqrt, "none": lambda x: x}
+
+
 def build(
     families: list[str],
     tags: list[str],
@@ -90,6 +105,7 @@ def build(
     sigma_pixels: float = 1.0,
     coverage: float = 0.99,
     scaling: Scaling = Scaling(),
+    transform: str = "sqrt",
     verbose: bool = True,
 ) -> Dataset:
     manifest = load_manifest(families)
@@ -109,16 +125,60 @@ def build(
             channels.append(channel)
             if verbose:
                 print(f"  [image] {tag} H{dim}: {channel.shape[1:]} {imager.params}", flush=True)
-        stacked = np.stack(channels, axis=1)
+        stacked = TRANSFORMS[transform](np.stack(channels, axis=1))
         mean, std = _zscore(stacked, train)
         shape = (1, len(tags)) + (1,) * (stacked.ndim - 2)
         stacked -= mean.reshape(shape)      # in place: the tensor is the bulk of a run's memory
         stacked /= std.reshape(shape)
         images[dim], norm[dim] = stacked, (mean, std)
 
+    return Dataset(manifest, images, _covariates(n, train), imagers, norm)
+
+
+def _covariates(n: np.ndarray, train: np.ndarray) -> np.ndarray:
     covariates = np.log(n.astype(np.float32)).reshape(-1, 1)
-    covariates = (covariates - covariates[train].mean()) / covariates[train].std()
-    return Dataset(manifest, images, covariates, imagers, norm)
+    return (covariates - covariates[train].mean()) / covariates[train].std()
+
+
+def load_curves(family: str, grid: str, name: str) -> np.ndarray:
+    """One family's L/F/G/J curves on one grid, (P, 512) float32 in manifest order."""
+    return np.load(CLASSICAL / family / grid / "curves.npz")[name]
+
+
+def build_curves(families: list[str], grid: str, names: list[str], stack: bool = True,
+                 verbose: bool = True) -> Dataset:
+    """The classical arm: L/F/G/J as 1-D channels.
+
+    stack=True (default) puts the curves in as channels of ONE encoder, because they share the same
+    r axis: at index i every curve refers to the same radius, so a convolution can compare them
+    there. stack=False gives each its own encoder, which can only compare them after pooling -- the
+    ablation, and the arrangement the PH arm is forced into by H0 and H1 having separate boxes.
+
+    Same contract as build() otherwise -- manifest order, statistics fitted on train rows only,
+    log n as the covariate -- so everything downstream is shared and the arms stay comparable. No
+    sqrt here: these are bounded functions (F, G in [0, 1]), not a sparse measure with a heavy tail.
+    """
+    manifest = load_manifest(families)
+    train = manifest.index[manifest["split"] == "train"].to_numpy()
+
+    curves = {}
+    for name in names:
+        block = np.concatenate([load_curves(f, grid, name) for f in families])[:, None, :]
+        if len(block) != len(manifest):
+            raise ValueError(f"{name} on {grid}: {len(block)} curves for {len(manifest)} patterns")
+        curves[name] = block
+
+    images, norm = {}, {}
+    for key, block in ({"+".join(names): np.concatenate(list(curves.values()), axis=1)} if stack
+                       else curves).items():
+        mean, std = _zscore(block, train)          # one (mean, std) per curve, whichever layout
+        shape = (1, block.shape[1], 1)
+        images[key] = (block - mean.reshape(shape)) / std.reshape(shape)
+        norm[key] = (mean, std)
+        if verbose:
+            print(f"  [curve] {key} on {grid}: {images[key].shape[1:]}", flush=True)
+
+    return Dataset(manifest, images, _covariates(manifest["n"].to_numpy(), train), {}, norm)
 
 
 def targets(manifest: pd.DataFrame, columns: list[str], train: np.ndarray) -> tuple[np.ndarray, dict]:

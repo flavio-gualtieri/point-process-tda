@@ -124,3 +124,87 @@ def test_params_task_predicts_in_parameter_units(fake_data, tmp_path, monkeypatc
     truth = manifest.loc[list(z["case_id"]), D.TARGETS["thomas"]].to_numpy()
     assert np.allclose(z["y_true"], truth, rtol=1e-5)   # y_true is in parameter units, not standardized
     assert (z["y_pred"] > 0).all()                      # log targets come back positive
+
+
+def _blob(cx, cy, r=64, s=4.0):
+    y, x = np.mgrid[0:r, 0:r]
+    return np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * s * s)).astype(np.float32)
+
+
+def test_encoder_distinguishes_where_mass_sits():
+    """The same feature at two positions must not give the same embedding.
+
+    A conv stack under a GLOBAL average pool is translation-invariant for every set of weights, so
+    this would fail by construction if the final pool went back to 1 -- and in a persistence image
+    the position is the measurement. Untrained weights are the point: the property is structural.
+    """
+    from cloudforger.training.model import ImageEncoder
+
+    a = torch.from_numpy(_blob(20, 20))[None, None]
+    b = torch.from_numpy(_blob(44, 44))[None, None]
+    distances = []
+    for seed in range(5):
+        torch.manual_seed(seed)
+        encoder = ImageEncoder(rank=2).eval()
+        with torch.no_grad():
+            ea, eb = encoder(a), encoder(b)
+        distances.append((torch.norm(ea - eb) / torch.norm(ea)).item())
+    assert np.mean(distances) > 0.02      # ~0.14 at pool_out=4; ~0.0002 under a global pool
+
+
+def test_sqrt_transform_tames_the_dynamic_range(fake_data):
+    """H1 images are mostly empty with a few very bright pixels; sqrt is what keeps the standardized
+    input from being a floor plus a long tail."""
+    linear = D.build(FAMILIES, ["dtm_k10"], [1], resolution=16, transform="none", verbose=False)
+    root = D.build(FAMILIES, ["dtm_k10"], [1], resolution=16, transform="sqrt", verbose=False)
+    # After standardizing, what matters is the skew: how far the bright tail reaches compared with
+    # the empty floor. sqrt pulls the tail in and lets the floor use more of the range.
+    def skew(images):
+        return images.max() / abs(images.min())
+
+    assert skew(root.images[1]) < skew(linear.images[1])
+
+
+def _write_curves(tmp_path, rng):
+    """Minimal data/classical/<family>/<grid>/curves.npz for the classical arm."""
+    root = tmp_path / "classical"
+    for family in FAMILIES:
+        manifest = pd.read_csv(D.SIMULATION / family / "manifest.csv")
+        out = {"case_id": manifest.case_id.to_numpy(str), "axis": np.linspace(0, 2, 64)}
+        for name in ("L", "F", "G", "J"):
+            out[name] = rng.random((len(manifest), 64)).astype(np.float32)
+        (root / family / "sqrtn_u2").mkdir(parents=True, exist_ok=True)
+        np.savez(root / family / "sqrtn_u2" / "curves.npz", **out)
+    return root
+
+
+def test_curves_stack_into_one_encoder_by_default(fake_data, tmp_path, monkeypatch):
+    """L/F/G/J share one r axis, so they are channels of a single encoder; --curves-separate is the
+    ablation that gives each its own, the way H0 and H1 are forced to be."""
+    monkeypatch.setattr(D, "CLASSICAL", _write_curves(tmp_path, np.random.default_rng(1)))
+
+    stacked = D.build_curves(FAMILIES, "sqrtn_u2", ["L", "F", "G", "J"], verbose=False)
+    assert list(stacked.images) == ["L+F+G+J"]
+    assert stacked.images["L+F+G+J"].shape[1] == 4        # one key, four channels
+
+    separate = D.build_curves(FAMILIES, "sqrtn_u2", ["L", "F", "G", "J"], stack=False, verbose=False)
+    assert sorted(separate.images) == ["F", "G", "J", "L"]
+    assert all(v.shape[1] == 1 for v in separate.images.values())
+
+
+def test_train_script_runs_the_classical_arm(fake_data, tmp_path, monkeypatch):
+    train = _train_module()
+    for module in (D, train.D):
+        monkeypatch.setattr(module, "SIMULATION", D.SIMULATION)
+        monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
+        monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
+        monkeypatch.setattr(module, "CLASSICAL", _write_curves(tmp_path, np.random.default_rng(2)))
+    out = tmp_path / "curves_run"
+
+    train.main(["--task", "classify", "--curves", "L,F,G,J", "--grid", "sqrtn_u2", "--seed", "1",
+                "--epochs", "2", "--batch-size", "8", "--out", str(out)])
+
+    z = np.load(out / "predictions.npz")
+    assert len(z["case_id"]) == 8                        # the same test patterns as the PH arm
+    run = __import__("json").loads((out / "run.json").read_text())
+    assert run["curves"] == ["L", "F", "G", "J"] and run["curves_stacked"] is True

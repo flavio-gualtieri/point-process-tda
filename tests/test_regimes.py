@@ -80,7 +80,7 @@ def test_table_shape_and_marginals(fake_results):
     regimes.main(["--results", str(results), "--n-boot", "200"])
     table = pd.read_csv(results / "regimes.csv")
 
-    assert set(table.columns) == {"task", "group", "filtration", "dims", "target", "metric", "family",
+    assert set(table.columns) == {"task", "group", "features", "variant", "target", "metric", "family",
                                   "nbar_bin", "delta_bin", "n_thetas", "estimate", "lo", "hi",
                                   "seed_sd", "reference", "n_seeds"}
     assert set(table.metric) == {"accuracy", "nll"}
@@ -88,7 +88,7 @@ def test_table_shape_and_marginals(fake_results):
     assert (table.n_seeds == len(SEEDS)).all()
 
     # The fully marginal row is the overall estimate, and its interval brackets it.
-    overall = table[(table.filtration == "dtm_k10") & (table.family == "all")
+    overall = table[(table.features == "dtm_k10") & (table.family == "all")
                     & table.nbar_bin.isna() & table.delta_bin.isna() & (table.metric == "accuracy")]
     assert len(overall) == 1
     assert overall.lo.iloc[0] <= overall.estimate.iloc[0] <= overall.hi.iloc[0]
@@ -111,7 +111,7 @@ def test_accuracy_rises_with_delta(fake_results):
     regimes.main(["--results", str(results), "--n-boot", "200"])
     table = pd.read_csv(results / "regimes.csv")
 
-    curve = table[(table.filtration == "dtm_k10") & (table.family == "thomas")
+    curve = table[(table.features == "dtm_k10") & (table.family == "thomas")
                   & (table.metric == "accuracy") & table.delta_bin.notna()
                   & table.nbar_bin.isna()].sort_values("delta_bin")
     assert len(curve) >= 5
@@ -123,11 +123,11 @@ def test_paired_reference_rows(fake_results):
     regimes.main(["--results", str(results), "--n-boot", "200", "--reference", "rips/h01"])
     table = pd.read_csv(results / "regimes.csv")
 
-    paired = table[(table.reference == "rips/h01") & (table.filtration == "dtm_k10")
+    paired = table[(table.reference == "rips/h01") & (table.features == "dtm_k10")
                    & (table.metric == "accuracy") & (table.family == "all")
                    & table.delta_bin.isna() & table.nbar_bin.isna()]
     assert len(paired) == 1
     assert paired.estimate.iloc[0] > 0              # the stronger run beats the reference
     assert paired.lo.iloc[0] < paired.estimate.iloc[0] < paired.hi.iloc[0]
     # A run is never paired against itself.
-    assert table[(table.reference == "rips/h01") & (table.filtration == "rips")].empty
+    assert table[(table.reference == "rips/h01") & (table.features == "rips")].empty

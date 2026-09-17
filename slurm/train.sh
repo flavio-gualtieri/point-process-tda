@@ -17,15 +17,18 @@
 #SBATCH --output=logs/train_%A_%a.out
 #SBATCH --error=logs/train_%A_%a.err
 
-# One array task per (task, filtration, dims, seed) of the full matrix, via scripts/train.py:
-# 6 filtrations x {H0, H1, H0+H1} x 10 seeds x {5-way classification, parameters for each family}
-# = 1080 runs.
+# One array task per (task, features, variant, seed) of the full matrix, via scripts/train.py, over
+# both feature arms x 10 seeds x {5-way classification, parameters for each family}:
+#   PH         6 filtrations x {H0, H1, H0+H1}            = 18 per task
+#   classical  {L,F,G,J and L} x {fixed, sqrtn_u2} grids  =  4 per task
+# = 1320 runs. Seeds are the outer loop, so a truncated array still covers every feature set.
 #
 #   bash slurm/train.sh                      # print the run list and the --array range, submit nothing
-#   sbatch --array=0-1079%20 slurm/train.sh  # %20 caps how many run at once
+#   sbatch --array=0-1319%20 slurm/train.sh  # %20 caps how many run at once
 #
-# Any axis can be narrowed at submit time instead of edited:
-#   TASKS="classify" FILTRATIONS="dtm_k10" SEEDS="1 2 3" bash slurm/train.sh
+# Any axis can be narrowed at submit time instead of edited, and setting FILTRATIONS or CURVES to
+# the empty string drops that arm entirely:
+#   TASKS="classify" FILTRATIONS="dtm_k10" CURVES="" SEEDS="1 2 3" bash slurm/train.sh
 #
 # Resumable: a run whose run.json exists is skipped, so a re-submit only fills the gaps.
 #
@@ -38,19 +41,27 @@ set -euo pipefail
 # TASKS, not GROUPS: bash keeps a special GROUPS variable (the caller's group ids) and would
 # silently ignore the assignment.
 TASKS="${TASKS:-classify params:poisson params:thomas params:nested params:matern2 params:lgcp}"
-FILTRATIONS="${FILTRATIONS:-rips alpha_diameter dtm_k5 dtm_k10 dtm_k15 dtm_k20}"
+FILTRATIONS="${FILTRATIONS-rips alpha_diameter dtm_k5 dtm_k10 dtm_k15 dtm_k20}"   # PH arm
 DIMS="${DIMS:-0 1 0,1}"
+CURVES="${CURVES-L,F,G,J L}"                     # classical arm; L alone is the VIHRS feature set
+GRIDS="${GRIDS:-fixed sqrtn_u2}"
 SEEDS="${SEEDS:-1 2 3 4 5 6 7 8 9 10}"
 
 runs=()
 for entry in $TASKS; do
-  for filtration in $FILTRATIONS; do
-    for dims in $DIMS; do
-      for seed in $SEEDS; do
-        task="${entry%%:*}"
-        family="${entry#*:}"
-        [ "$family" = "$entry" ] && family=""      # "classify" carries no family
-        runs+=("--task $task ${family:+--family $family} --filtration $filtration --dims $dims --seed $seed")
+  task="${entry%%:*}"
+  family="${entry#*:}"
+  [ "$family" = "$entry" ] && family=""          # "classify" carries no family
+  head="--task $task ${family:+--family $family}"
+  for seed in $SEEDS; do
+    for filtration in $FILTRATIONS; do
+      for dims in $DIMS; do
+        runs+=("$head --filtration $filtration --dims $dims --seed $seed")
+      done
+    done
+    for curves in $CURVES; do
+      for grid in $GRIDS; do
+        runs+=("$head --curves $curves --grid $grid --seed $seed")
       done
     done
   done

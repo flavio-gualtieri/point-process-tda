@@ -4,6 +4,9 @@
     # 5-way family classification, DTM k=10, H0 + H1
     python scripts/train.py --task classify --filtration dtm_k10 --dims 0,1 --seed 1
 
+    # the classical arm: summary-function curves instead of diagrams, same everything else
+    python scripts/train.py --task classify --curves L,F,G,J --grid sqrtn_u2 --seed 1
+
     # parameter estimation for nested Thomas, rips H0 (a 1-D image: rips births are all 0)
     python scripts/train.py --task params --family nested --filtration rips --dims 0 --seed 1
 
@@ -48,9 +51,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", choices=["classify", "params"], required=True)
     p.add_argument("--family", help="params: which family to estimate for (classify uses all five)")
-    p.add_argument("--filtration", required=True,
-                   help="comma-separated tags as under data/featurization/<family>/ (rips, alpha, dtm_k5...)")
-    p.add_argument("--dims", default="0,1", help="homology dimensions, comma-separated")
+    p.add_argument("--filtration",
+                   help="PH arm: comma-separated tags as under data/featurization/<family>/ (rips, dtm_k5...)")
+    p.add_argument("--dims", default="0,1", help="PH arm: homology dimensions, comma-separated")
+    p.add_argument("--curves", help="classical arm: comma-separated summary functions (L,F,G,J)")
+    p.add_argument("--grid", default="sqrtn_u2", help="classical arm: grid tag (fixed, sqrtn_u2)")
+    p.add_argument("--curves-separate", action="store_true",
+                   help="classical arm: one encoder per curve instead of one over all of them")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--targets", help="params: comma-separated manifest columns (default: the family's own)")
     p.add_argument("--resolution", type=int, default=64)
@@ -58,6 +65,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--coverage", type=float, default=0.99)
     p.add_argument("--raw-coords", action="store_true", help="do not rescale diagrams by sqrt(n)")
     p.add_argument("--raw-mass", action="store_true", help="do not divide images by n")
+    p.add_argument("--image-transform", choices=["sqrt", "none"], default="sqrt",
+                   help="variance-stabilizing transform applied before the per-channel z-score")
     p.add_argument("--embedding-dim", type=int, default=64)
     p.add_argument("--conv-channels", default="32,64,128")
     p.add_argument("--dropout", type=float, default=0.2)
@@ -74,15 +83,25 @@ def parse_args(argv=None) -> argparse.Namespace:
         p.error("--task params needs --family")
     if args.task == "classify" and args.family:
         p.error("--task classify uses every family; drop --family")
+    if bool(args.filtration) == bool(args.curves):
+        p.error("pass exactly one of --filtration (PH arm) or --curves (classical arm)")
     return args
 
 
+def run_id(args) -> tuple[str, str, str]:
+    """(group, features, variant): `features` is what was fed in and `variant` how, whichever arm
+    produced it -- dtm_k10/h01 for the PH arm, L+F+G+J/sqrtn_u2 for the classical one."""
+    group = args.family if args.task == "params" else "all"
+    if args.curves:
+        return group, args.curves.replace(",", "+"), args.grid
+    return group, args.filtration.replace(",", "+"), "h" + "".join(args.dims.split(","))
+
+
 def output_dir(args) -> Path:
+    """results/<task>/<group>/<features>/<variant>/seed_<n>."""
     if args.out:
         return args.out
-    group = args.family if args.task == "params" else "all"
-    dims = "".join(args.dims.split(","))
-    return RESULTS / args.task / group / args.filtration.replace(",", "+") / f"h{dims}" / f"seed_{args.seed}"
+    return RESULTS.joinpath(args.task, *run_id(args), f"seed_{args.seed}")
 
 
 def main(argv=None) -> None:
@@ -94,14 +113,18 @@ def main(argv=None) -> None:
     torch.manual_seed(args.seed)
 
     families = list(D.FAMILIES) if args.task == "classify" else [args.family]
-    tags = args.filtration.split(",")
+    tags = args.filtration.split(",") if args.filtration else []
     dims = [int(d) for d in args.dims.split(",")]
     scaling = Scaling(coords="none" if args.raw_coords else "sqrt_n", density=not args.raw_mass)
-    tag = f"{args.task}/{'+'.join(families) if len(families) == 1 else 'all'}/{args.filtration}/h{args.dims}/s{args.seed}"
+    tag = f"{args.task}/{'/'.join(run_id(args))}/s{args.seed}"
 
-    print(f"[{tag}] building images", flush=True)
-    dataset = D.build(families, tags, dims, resolution=args.resolution, sigma_pixels=args.sigma_pixels,
-                      coverage=args.coverage, scaling=scaling)
+    print(f"[{tag}] building features", flush=True)
+    if args.curves:
+        dataset = D.build_curves(families, args.grid, args.curves.split(","),
+                                 stack=not args.curves_separate)
+    else:
+        dataset = D.build(families, tags, dims, resolution=args.resolution, sigma_pixels=args.sigma_pixels,
+                          coverage=args.coverage, scaling=scaling, transform=args.image_transform)
     train_idx, val_idx, test_idx = (dataset.index(s) for s in ("train", "val", "test"))
 
     manifest = dataset.manifest
@@ -121,9 +144,13 @@ def main(argv=None) -> None:
     def loader(index, shuffle):
         return DataLoader(D.Rows(dataset, y, index), batch_size=args.batch_size, shuffle=shuffle)
 
+    keys = sorted(dataset.images)
+    n_tags = len(tags) if args.filtration else 1   # PH: one pass per filtration; curves: one pass
     model = PHNet(
-        ranks=[dataset.images[dim].ndim - 2 for dim in sorted(dataset.images)],
-        n_tags=len(tags), n_covariates=dataset.covariates.shape[1], n_outputs=n_outputs,
+        ranks=[dataset.images[k].ndim - 2 for k in keys],
+        n_tags=n_tags,
+        channels=[dataset.images[k].shape[1] // n_tags for k in keys],
+        n_covariates=dataset.covariates.shape[1], n_outputs=n_outputs,
         embedding_dim=args.embedding_dim,
         conv_channels=tuple(int(c) for c in args.conv_channels.split(",")),
         dropout=args.dropout,
@@ -153,9 +180,12 @@ def main(argv=None) -> None:
     torch.save(model.state_dict(), out / "model.pt")
     (out / "run.json").write_text(json.dumps({
         "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
-        "families": families, "tags": tags, "dims": dims,
+        "families": families, "tags": tags, "dims": dims if not args.curves else [],
+        "curves": args.curves.split(",") if args.curves else [],
+        "curves_stacked": bool(args.curves) and not args.curves_separate,
         "n_train": len(train_idx), "n_val": len(val_idx), "n_test": len(test_idx),
         "imagers": {f"{t}_h{d}": im.params for (t, d), im in dataset.imagers.items()},
+        "image_transform": args.image_transform,
         "targets": target_norm, "labels": labels,
         "best_val_loss": fit["best_val_loss"], "best_epoch": fit["best_epoch"],
         "epochs_run": fit["epochs_run"], "test_loss": test_loss,

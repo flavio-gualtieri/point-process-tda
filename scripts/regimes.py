@@ -8,9 +8,20 @@ Nothing about regimes exists during training. A run's predictions carry `case_id
 data/simulation/<family>/manifest.csv for the regime coordinates (nbar, delta), so the binning here
 can change without retraining anything.
 
+A run is discovered by its directory, results/<task>/<group>/<features>/<variant>/seed_<n>/, and
+nothing here knows which arm produced it -- `features` and `variant` are whatever that arm names
+them:
+
+    PH         results/classify/all/dtm_k10/h01/seed_1        features dtm_k10   variant h01
+    classical  results/classify/all/L+F+G+J/cnn_sqrtn/seed_1  features L+F+G+J   variant cnn_sqrtn
+    vihrs      results/classify/all/L/vihrs/seed_1            features L         variant vihrs
+
+so a PH run, a summary-function run and the paper-faithful VIHRS baseline land in one table and are
+compared by --reference like any two runs.
+
 One long row per (run, cell, metric), so a figure or a table is one filter:
 
-    task group filtration dims target metric family nbar_bin delta_bin
+    task group features variant target metric family nbar_bin delta_bin
     n_thetas estimate lo hi seed_sd reference n_seeds
 
 `nbar_bin`/`delta_bin` hold the bin's left edge and are empty on a marginal row; the marginals are
@@ -67,11 +78,11 @@ def bin_left(values: np.ndarray, edge: np.ndarray) -> np.ndarray:
 
 
 def find_runs(root: Path, task: str | None) -> dict[tuple, list[Path]]:
-    """seed directories grouped by (task, group, filtration, dims)."""
+    """seed directories grouped by (task, group, features, variant)."""
     runs: dict[tuple, list[Path]] = {}
     for predictions in sorted(root.glob("*/*/*/*/seed_*/predictions.npz")):
         seed_dir = predictions.parent
-        key = tuple(seed_dir.parts[-5:-1])          # task, group, filtration, dims
+        key = tuple(seed_dir.parts[-5:-1])          # task, group, features, variant
         if task and key[0] != task:
             continue
         runs.setdefault(key, []).append(seed_dir)
@@ -160,7 +171,7 @@ def select(table: pd.DataFrame, family, delta_bin, nbar_bin) -> np.ndarray:
 
 
 def rows_for_run(key, table, metrics, n_seeds, reference, reference_id, rng, n_boot, min_thetas) -> list[dict]:
-    task, group, filtration, dims = key
+    task, group, features, variant = key
     families = sorted(table.family.unique())
     out = []
     for family, delta_bin, nbar_bin in cells(table, families):
@@ -178,7 +189,7 @@ def rows_for_run(key, table, metrics, n_seeds, reference, reference_id, rng, n_b
             point, lo, hi = bootstrap(values, metric, rng, n_boot)
             seeds = [estimate(metric, subset[f"{metric}__seed{i}"].to_numpy().mean()) for i in range(n_seeds)]
             out.append({
-                "task": task, "group": group, "filtration": filtration, "dims": dims,
+                "task": task, "group": group, "features": features, "variant": variant,
                 "target": metric.split(":")[1] if ":" in metric else ("all" if task == "params" else ""),
                 "metric": metric.split(":")[0], "family": family,
                 "nbar_bin": nbar_bin, "delta_bin": delta_bin, "n_thetas": len(subset),
@@ -192,7 +203,8 @@ def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--results", type=Path, default=RESULTS)
     p.add_argument("--task", choices=["classify", "params"])
-    p.add_argument("--reference", help="'<filtration>/h<dims>' to compare every other run against")
+    p.add_argument("--reference", help="'<features>/<variant>' to compare every other run "
+                   "against, e.g. dtm_k10/h01 or L/vihrs")
     p.add_argument("--out", type=Path, help="default: <results>/regimes.csv")
     p.add_argument("--n-boot", type=int, default=N_BOOT)
     p.add_argument("--min-thetas", type=int, default=10, help="skip cells with fewer test thetas")

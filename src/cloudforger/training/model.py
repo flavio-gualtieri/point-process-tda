@@ -4,9 +4,14 @@ Dimensions are never stacked as channels of one convolution: H0 and H1 images ar
 their own boxes, so the same pixel means different things in each, and under rips/alpha they do not
 even have the same rank. Each dimension gets its own encoder, and their embeddings are concatenated.
 
-Several filtrations (the multi-k arm) are the encoder's channel axis instead: one shared-weight
-encoder is applied to each, and the embeddings are concatenated, so an extra filtration adds an
-embedding rather than a copy of the network.
+Two ways an input can carry several signals, and which applies is a property of the axis:
+
+  separately (n_tags): several filtrations of the multi-k arm, each its own calibrated box, so one
+  shared-weight encoder is applied to each in turn and the embeddings are concatenated.
+
+  stacked (channels): the classical arm's L, F, G, J, which live on ONE shared r axis, so they go in
+  as channels of the first convolution and the encoder can compare them at the same r -- something
+  separate encoders can never do, since they only ever meet after pooling.
 """
 
 from __future__ import annotations
@@ -15,8 +20,22 @@ import torch
 import torch.nn as nn
 
 
+POOL_OUT = 4
+
+
 class ImageEncoder(nn.Module):
-    """Conv stack -> global average pool -> embedding. 1-D or 2-D, following the image rank."""
+    """Conv stack -> coarse spatial pool -> embedding. 1-D or 2-D, following the image rank.
+
+    The final pool keeps a POOL_OUT-wide map rather than collapsing to one number per channel.
+    Convolution is translation-equivariant and a global average is translation-INVARIANT, for every
+    possible set of weights, so a global pool would make the encoder unable to tell a feature at
+    persistence 0.5 from the same feature at persistence 2.0 -- in a persistence image the position
+    is the measurement, not a nuisance. Measured on two identical blobs at different positions, the
+    relative distance between their embeddings is 0.0002 under a global pool and 0.14 at POOL_OUT=4.
+
+    Dropout is channel-wise (Dropout1d/2d), not element-wise: neighbouring pixels of a feature map
+    are strongly correlated, so dropping single activations regularizes little.
+    """
 
     def __init__(
         self,
@@ -24,23 +43,27 @@ class ImageEncoder(nn.Module):
         embedding_dim: int = 64,
         conv_channels: tuple[int, ...] = (32, 64, 128),
         dropout: float = 0.2,
+        pool_out: int = POOL_OUT,
+        in_channels: int = 1,
     ):
         super().__init__()
-        conv, pool, gap = ((nn.Conv1d, nn.AvgPool1d, nn.AdaptiveAvgPool1d) if rank == 1
-                           else (nn.Conv2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d))
+        conv, pool, adaptive, drop = ((nn.Conv1d, nn.AvgPool1d, nn.AdaptiveAvgPool1d, nn.Dropout1d) if rank == 1
+                                      else (nn.Conv2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d, nn.Dropout2d))
         layers: list[nn.Module] = []
-        prev = 1
+        prev = in_channels
         for i, ch in enumerate(conv_channels):
             layers += [conv(prev, ch, kernel_size=3, padding=1), nn.ReLU()]
             if i < len(conv_channels) - 1:
-                layers += [pool(2), nn.Dropout(dropout)]
+                layers += [pool(2), drop(dropout)]
             prev = ch
-        layers.append(gap(1))
+        layers.append(adaptive(pool_out))
         self.conv = nn.Sequential(*layers)
-        self.fc = nn.Linear(prev, embedding_dim)
+        # ReLU after fc: without it this linear map would compose with the head's first Linear into
+        # a single linear map, making the embedding a rank bottleneck and nothing more.
+        self.fc = nn.Sequential(nn.Linear(prev * pool_out ** rank, embedding_dim), nn.ReLU())
         self.embedding_dim = embedding_dim
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # (B, 1, ...) -> (B, embedding_dim)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # (B, in_channels, ...) -> (B, embedding_dim)
         return self.fc(self.conv(x).flatten(1))
 
 
@@ -57,29 +80,33 @@ def mlp(in_dim: int, out_dim: int, hidden_dims: tuple[int, ...] = (64, 32), drop
 class PHNet(nn.Module):
     def __init__(
         self,
-        ranks: list[int],          # image rank per homology dimension, in the dataset's dim order
-        n_tags: int,               # filtrations sharing one encoder (the multi-k arm)
+        ranks: list[int],          # rank of each input, in the dataset's key order
+        n_tags: int,               # inputs of one key passed SEPARATELY through its encoder (multi-k)
         n_covariates: int,
         n_outputs: int,
+        channels: list[int] | None = None,   # input channels per key, stacked INTO its first conv
         embedding_dim: int = 64,
         conv_channels: tuple[int, ...] = (32, 64, 128),
         dropout: float = 0.2,
         head_hidden_dims: tuple[int, ...] = (64, 32),
         head_dropout: float = 0.1,
+        pool_out: int = POOL_OUT,
     ):
         super().__init__()
         self.n_tags = n_tags
+        channels = channels or [1] * len(ranks)
         self.encoders = nn.ModuleList(
-            [ImageEncoder(rank, embedding_dim, conv_channels, dropout) for rank in ranks]
+            [ImageEncoder(rank, embedding_dim, conv_channels, dropout, pool_out, c)
+             for rank, c in zip(ranks, channels)]
         )
         head_in = len(ranks) * n_tags * embedding_dim + n_covariates
         self.head = mlp(head_in, n_outputs, head_hidden_dims, head_dropout)
 
     def forward(self, images: list[torch.Tensor], covariates: torch.Tensor) -> torch.Tensor:
         parts = []
-        for encoder, x in zip(self.encoders, images):   # x: (B, n_tags, ...)
+        for encoder, x in zip(self.encoders, images):   # x: (B, n_tags * in_channels, ...)
             b = x.shape[0]
-            flat = x.reshape(b * self.n_tags, 1, *x.shape[2:])   # tags share the encoder
+            flat = x.reshape(b * self.n_tags, x.shape[1] // self.n_tags, *x.shape[2:])
             parts.append(encoder(flat).reshape(b, -1))
         parts.append(covariates)
         return self.head(torch.cat(parts, dim=1))
