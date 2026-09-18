@@ -7,6 +7,7 @@
 
 \newcommand{\dt}{\tilde\delta}
 \newcommand{\nb}{\bar n}
+\newcommand{\R}{\mathbb R}
 
 \title{01 --- Departure from CSR: $\dt$ and null tables}
 \date{17 September 2026}
@@ -20,8 +21,8 @@
 \subsection*{Setting}
 \begin{itemize}
   \item Window $W=[0,1]^2$, fixed
-  \item $\nb$: expected number of points --- model parameter, deterministic
-  \item $n$: realised number of points in one pattern --- random around $\nb$
+  \item $\nb$: expected number of points (deterministic model parameter)
+  \item Pattern $x = \{x_1,\dots,x_n\} \subset W$; $n = |x|$ realised number of points (random around $\nb$)
   \begin{itemize}
     \item Poisson, Mat\'ern II: $n/\nb \in [0.90, 1.11]$ (5--95\%)
     \item Thomas, nested, LGCP: $n/\nb \in [0.77, 1.25]$ (overdispersed, clusters arrive whole)
@@ -32,36 +33,69 @@
 \begin{itemize}
   \item Ripley's $K$, isotropic edge correction, $\lambda^2$ estimated by $n(n-1)$:
   \[
-    \hat K(r) = \frac{1}{n(n-1)} \sum_{i\neq j} w(x_i, d_{ij})\, \mathbf 1\{d_{ij}\le r\},
+    \hat K_x(r) = \frac{1}{n(n-1)} \sum_{i\neq j} w(x_i, d_{ij})\, \mathbf 1\{d_{ij}\le r\},
     \qquad
     w(x,d) = \frac{2\pi}{\text{length of } \partial b(x,d)\cap W}
   \]
-  \item $\hat L(r) - r = \sqrt{\hat K(r)/\pi} - r$
+  \item Centred $L$-function of a pattern $x$, and its model counterpart:
+  \[
+    \hat\phi_x(r) = \hat L_x(r) - r = \sqrt{\hat K_x(r)/\pi} - r,
+    \qquad
+    \phi(r) = L(r) - r \quad (= 0 \text{ under CSR})
+  \]
+  \item Evaluated on the radius grid: $\hat\phi_x = \big(\hat\phi_x(r_1),\dots,\hat\phi_x(r_{512})\big) \in \R^{512}$
   \item Radii $r_k = 0.25\,k/512$, $k=1,\dots,512$ ($r=0$ dropped: identically zero)
-  \item Weight exact for $d \le 0.5$ (no circle meets two opposite edges); $r_{\max}=0.25$
-\end{itemize}
-
-\subsection*{Null}
-\begin{itemize}
-  \item Binomial process: $n$ i.i.d.\ uniform points in $W$ (CSR conditioned on $n$)
-  \item Correct null for a test applied at the realised $n$
-  \item Null moments $m_0(r;n) = \mathbb E_0[\hat L(r)-r]$, $\ s_0(r;n) = \mathrm{sd}_0[\hat L(r)-r]$
 \end{itemize}
 
 \subsection*{Radius set}
+Everything in this subsection is defined for fixed $n$. The test and $\dt$ only use radii in $R(n)$.
 \begin{itemize}
-  \item Expected CSR pairs closer than $r$: $\tfrac12 n(n-1)\pi r^2$
-  \item Few pairs $\Rightarrow$ $\hat L$ is a near-zero count, $s_0$ tiny, studentised statistic dominated by counting noise
-  \item $R(n) = \{r_k : \tfrac12 n(n-1)\pi r_k^2 \ge p\}$, $p = 10$
-  \item $r_{\min}$: 0.13 ($n=20$), 0.025 ($n=100$), 0.0034 ($n=800$), 0.0015 ($n=2000$)
+  \item At small $r$, $\hat\phi_x(r)$ is a function of a small count: the pairs of $x$ closer than $r$. Under $\mathbb P_{0,n}$ we expect
+  \[
+    \mu(r;n) = \tfrac12 n(n-1)\pi r^2
+  \]
+  such pairs (edge-corrected)
+  \item The maximum in $M_n$ (next subsection) treats all radii alike only if each standardised deviation $(\hat\phi_X(r) - m_0)/s_0$ has roughly the same null distribution, i.e.\ $\approx N(0,1)$
+  \item Few expected pairs $\Rightarrow$ $\hat\phi$ takes a handful of values; standardised deviation discrete and skewed, not $N(0,1)$. Checked on the null curves at $n=99$:
+  \begin{itemize}
+    \item $\mu < 0.3$: heavy right tail, $\mathbb P(|z|>3)$ 10$\times$ Gaussian
+    \item $\mu \in [3, 10)$: still 3$\times$ Gaussian
+    \item $\mu \ge 10$: Gaussian tail rate, skewness and kurtosis
+  \end{itemize}
+  \item Heavy-tailed radii win the null maximum too often $\Rightarrow$ $c_{95}$ inflated by counting noise $\Rightarrow$ power lost at every other radius ($c_{95}$ at $n=99$: 3.07 with $p=10$, 3.43 with $p=0.1$)
+  \item Keep radii with at least $p$ expected pairs, $p = 10$ (usual threshold for the normal approximation to a Poisson count):
+  \[
+    R(n) = \{r_k : \mu(r_k;n) \ge p\} = [r_{\min}(n), 0.25],
+    \qquad
+    r_{\min}(n) = \sqrt{\frac{2p}{\pi n(n-1)}} \approx \frac{2.52}{n}
+  \]
+  \item $r_{\min}$: 0.13 ($n=20$), 0.025 ($n=100$), 0.0034 ($n=800$), 0.0015 ($n=2000$). More points $\Rightarrow$ $R(n)$ reaches down to finer scales
+\end{itemize}
+
+\subsection*{Null distribution}
+Everything in this subsection is defined for fixed $n$. In practice, we compute the null distribution at every $n$ on a grid.
+\begin{itemize}
+  \item Null $\mathbb P_{0,n}$: $n$ i.i.d.\ uniform points on $W$ (CSR conditioned on $n$); $\mathbb E_{0,n}$, $\mathrm{sd}_{0,n}$ under it
+  \item Generate $12\,000$ CSR clouds from $\mathbb P_{0,n}$
+  \item Estimate null moments for $r \in R(n)$ using half of the CSR clouds:
+  \[
+    m_0(r;n) = \mathbb E_{0,n}\big[\hat\phi_X(r)\big],
+    \qquad
+    s_0(r;n) = \mathrm{sd}_{0,n}\big[\hat\phi_X(r)\big]
+  \]
+  \item Using remaining half of CSR clouds, compute maximum deviation of each cloud $x$:
+  \[
+    M_n(x) = \max_{r\in R(n)} \frac{|\hat\phi_x(r) - m_0(r;n)|}{s_0(r;n)}
+  \]
+  \item Determine critical value: $c_{95}(n)$ = 95\% quantile of $M_n$ over these clouds (estimates the 95\% quantile of $M_n(X)$, $X\sim\mathbb P_{0,n}$)
 \end{itemize}
 
 \subsection*{Test (studentised global envelope; Myllym\"aki et al.\ 2017)}
 \[
-  S(x) = \frac{1}{c_{95}(n)} \max_{r\in R(n)} \frac{|\hat L_x(r) - r - m_0(r;n)|}{s_0(r;n)}
+  S(x) = \frac{M_n(x)}{c_{95}(n)}, \qquad n = |x|
 \]
 \begin{itemize}
-  \item $c_{95}(n)$: 95\% quantile of the max under the null
+  \item Under the null, $\mathbb P_{0,n}(S > 1) = 0.05$ by definition of $c_{95}$ (up to Monte Carlo error)
   \item Reject CSR at 5\% iff $S > 1$
 \end{itemize}
 
@@ -72,17 +106,39 @@
 \begin{itemize}
   \item Same functional as $S$, applied to the closed-form $L_\theta$ at $\nb$, uncentred ($m_0 = 0$)
   \item $\dt(\text{CSR}) = 0$ exactly
-  \item $\dt = 1$: true curve on the rejection boundary $\Rightarrow$ power $\approx 50\%$, not 5\%
+  \item $\dt = 1$: true curve on the rejection boundary $\Rightarrow$ power well above 5\%; measured 0.64--0.78 (02), not 50\%, because pattern noise adds to the maximum
   \item Units: null s.d.s, relative to the critical value
   \item Property of the model, known before simulation $\Rightarrow$ usable as a sweep coordinate
   \item At fixed shape, $\dt$ grows with $\nb$ ($s_0$ shrinks)
 \end{itemize}
 
-\subsection*{Why not ERL}
+\subsection*{$\dt$ does not transfer well for Mat\'ern II}
 \begin{itemize}
-  \item Rank-based: exact, no $s_0$ needed
-  \item Saturates once the curve leaves all null curves at one radius ($p$ stuck at $\approx 1/N$ for all larger departures)
-  \item No continuous distance without envelope-scaling constructions $\Rightarrow$ rejected
+  \item Hard core $R$: no two points closer than $R$ $\Rightarrow$ $L(r) - r = -r$ for $r < R$
+  \item Size of the hard core in pairs: the CSR pairs it forbids,
+  \[
+    \mu_R = \mu(R;\nb) = \tfrac12 \nb(\nb-1)\pi R^2 = p\,\big(R/r_{\min}(\nb)\big)^2
+  \]
+  \item For $\dt \lesssim 1$ the hard core lies below $r_{\min}$ ($\mu_R < p$), where $\dt$ does not look. $\dt$ sees only the deficit it leaves above $r_{\min}$, which decays like $1/r$ $\Rightarrow$ maximum at $r_{\min}$ for 82\% of Mat\'ern $\theta$ $\Rightarrow$ Mat\'ern $\dt$ is set by the cutoff $p$, not by the model
+  \item A nearest-neighbour test sees the hard core directly: reject CSR if no pair is closer than $d$, with $\mu(d) \approx 3$ ($\mathbb P_0(\text{no pair within } d) \approx e^{-\mu(d)} = 0.05$; 2.97 measured)
+  \item Same $\dt$, very different difficulty (all 20\,000 simulated Mat\'ern patterns; nearest-neighbour test calibrated to 5\% on the Poisson pool):
+
+  \smallskip
+  \begin{tabular}{@{}lrrrrrr@{}}
+  \toprule
+  $\dt$ bin & (0.1, 0.2] & (0.2, 0.3] & (0.3, 0.5] & (0.5, 1] & (1, 2] & (2, 4] \\
+  \midrule
+  $L$ test power & 0.06 & 0.07 & 0.12 & 0.34 & 0.86 & 1.00 \\
+  Nearest-neighbour test power & 0.23 & 0.63 & 0.97 & 1.00 & 1.00 & 1.00 \\
+  \bottomrule
+  \end{tabular}
+  \item So $\dt$ is a fair difficulty axis only for departures visible inside $R(\nb)$ (the cluster families). For Mat\'ern we use $\mu_R$ as the regime coordinate:
+  \begin{itemize}
+    \item Unit: pairs removed; detectable by the nearest-neighbour test from $\mu_R \approx 3$ on
+    \item Same ordering as $\dt$ (Spearman 0.999) and free of $\nb$: at fixed $\mu_R$, $L$-test power flat across $\nb$ terciles while $R$ varies $4\times$
+    \item Sweep unchanged: Mat\'ern still drawn on $\dt \in [0.1, 4]$, which induces $\mu_R \in [1, 46]$
+    \item Mat\'ern not pooled with the cluster families in $\dt$-binned results
+  \end{itemize}
 \end{itemize}
 
 \subsection*{Smoothing in $n$}
@@ -197,14 +253,14 @@ Centring gap $\max|m_0|/s_0/c_{95}$ & 0.02--0.03 & --- \\
   \item Defined through a classical L-test $\Rightarrow$ yardstick of that test, not an omnibus distance
   \item Classical baseline partly calibrated to the axis: state explicitly
   \item Sup over $r$: one radius decides; multi-scale models (nested Thomas) summarised by their most visible scale
-  \item L only: inhibition may be more visible in $G$ than $\dt$ suggests (Mat\'ern II)
+  \item $L$ only: hard cores below $r_{\min}$ are invisible to $\dt$ (Mat\'ern II, above)
   \item Design $\dt$ at $\nb$, not realised $n$: per-pattern difficulty scatters around the label (most for Cox processes)
   \item $\dt=1$ at $\nb$ does not mean $S=1$ on a pattern: $S$ is random around $\dt$
 \end{itemize}
 
 \subsection*{Scope and limits}
 \begin{itemize}
-  \item Tables valid for $n \in [20, 2000]$; outside raises (observed DV3 $n$: 17--1320)
+  \item Tables valid for $n \in [20, 2000]$; outside raises (simulated pool: $n$ = 44--961)
   \item $W$ fixed unit square; weight formula requires $r \le 0.5$
   \item $R(n)$ depends on $n$: at small $n$ small-scale structure invisible by construction
   \item Curves stored $\Rightarrow$ $p$, $\alpha$, knots changeable without re-simulation

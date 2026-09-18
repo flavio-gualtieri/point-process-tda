@@ -1,0 +1,295 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+
+\newcommand{\dt}{\tilde\delta}
+\newcommand{\nb}{\bar n}
+
+\title{04 --- Models: architectures, normalisation, evaluation}
+\date{18 September 2026}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\section{Theory}
+
+\subsection*{Aim}
+\begin{itemize}
+  \item One network, two feature arms, two tasks
+  \begin{itemize}
+    \item \textbf{PH arm}: diagrams of 03 $\to$ persistence images
+    \item \textbf{Classical arm}: summary functions $L, F, G, J$ on a radius grid
+    \item \textbf{Classify}: 5-way family (Poisson, Thomas, nested, Mat\'ern II, LGCP)
+    \item \textbf{Params}: the family's own parameters, one model per family
+  \end{itemize}
+  \item Everything after the feature step is shared $\Rightarrow$ arms comparable by construction
+  \item No regime information enters training; regimes are applied afterwards to the saved test predictions
+\end{itemize}
+
+\subsection*{Inputs}
+\begin{itemize}
+  \item \textbf{Persistence image} (Adams et al.\ 2017), one per (filtration, homology dim)
+  \begin{itemize}
+    \item Each pair $\to$ Gaussian in (birth, persistence), weight $=$ persistence (linear)
+    \item Pixel $=$ exact Gaussian mass over its box (erf), not a point sample; mass outside the box dropped
+    \item $64\times64$; $\sigma = 1$ pixel on both axes (one absolute $\sigma$ would distort with the axis ratio)
+    \item 1-D (persistence axis only, 64 bins) where births are all 0: Rips and alpha $H_0$. DTM $H_0$ (births $2f(x)$) and every $H_1$ are 2-D
+  \end{itemize}
+  \item \textbf{Summary functions}, 512 samples each
+  \begin{itemize}
+    \item $L(r)-r$ (01), $F$, $G$, $J=(1-G)/(1-F)$
+    \item Grid \texttt{fixed}: $r\in(0,0.25]$, spatstat's axis, the only one comparable to VIHRS
+    \item Grid \texttt{sqrtn\_u2}: $r=u/\sqrt n$, $u\in(0,2]$. $F$, $G$ saturate near the mean NN distance; on \texttt{fixed} they sit at 1.0 over 62\%/66\% of samples, on \texttt{sqrtn} 24\%/30\%
+  \end{itemize}
+  \item \textbf{Covariate}: $\log n$ (realised, observable), one scalar
+\end{itemize}
+
+\subsection*{Architecture (\texttt{PHNet})}
+\begin{itemize}
+  \item \textbf{Encoder} per input key (1-D or 2-D, following the input's rank):
+  \begin{align*}
+    &[\text{conv}_3\,32 \to \text{ReLU} \to \text{avgpool}_2 \to \text{drop}]
+    \to [\text{conv}_3\,64 \to \text{ReLU} \to \text{avgpool}_2 \to \text{drop}] \\
+    &\to [\text{conv}_3\,128 \to \text{ReLU}] \to \text{adaptive avgpool}(4)
+  \end{align*}
+  then flatten $\to$ Linear $\to$ ReLU, embedding dim 64
+  \begin{itemize}
+    \item 2-D: $64^2 \to 32^2 \to 16^2 \to 4^2$; 1-D: $64\to32\to16\to4$ (curves: $512\to\dots\to4$)
+    \item Padding 1, stride 1: convs keep resolution; only the pools shrink it
+  \end{itemize}
+  \item \textbf{Head}: concat(embeddings, $\log n$) $\to$ MLP $[64, 32]$, ReLU, dropout 0.1 $\to$ 5 logits or $p$ targets
+  \item \textbf{How inputs combine}
+  \begin{itemize}
+    \item $H_0$, $H_1$: separate encoders, concatenated. Never stacked as channels: each is calibrated on its own box, so one pixel means different things in each (and under Rips/alpha their ranks differ)
+    \item Multi-$k$ (several DTM $k$): one \emph{shared-weight} encoder applied to each $k$ in turn, embeddings concatenated
+    \item Curves on one grid: stacked as channels of the first conv (index $i$ is the same $r$ in every channel, so the conv can compare them at that $r$)
+    \item Curves on different grids: one encoder each, meet only after pooling
+  \end{itemize}
+\end{itemize}
+
+\subsection*{Design choices}
+\begin{itemize}
+  \item \textbf{Pool to $4$, not global}: a conv stack under a global average is translation-invariant for every weight setting. In a persistence image position \emph{is} the measurement (persistence 0.5 vs 2.0). Same blob at two positions: relative embedding distance 0.0002 (global) vs 0.14 (pool 4)
+  \item \textbf{Channel-wise dropout} (Dropout1d/2d, $p=0.2$): neighbouring pixels are correlated, element-wise dropout regularises little
+  \item \textbf{ReLU after the embedding}: otherwise it composes with the head's first Linear into one linear map (a rank bottleneck, nothing more)
+\end{itemize}
+
+\smallskip
+Parameter counts (classification head):
+
+\smallskip
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Input & encoder(s) & head & total \\
+\midrule
+DTM $H_0{+}H_1$ (2-D + 2-D) & $2\times223{,}808$ & 10{,}565 & 458{,}181 \\
+Rips/alpha $H_0{+}H_1$ (1-D + 2-D) & $63{,}872 + 223{,}808$ & 10{,}565 & 298{,}245 \\
+Rips/alpha $H_0$ (1-D) & 63{,}872 & 6{,}469 & 70{,}341 \\
+$L,F,G,J$ stacked (1-D, 4 ch) & 64{,}160 & 6{,}469 & 70{,}629 \\
+$L,F,G,J$ separate & $4\times63{,}872$ & 18{,}757 & 274{,}245 \\
+\bottomrule
+\end{tabular}
+
+%==============================================================================
+\section{Normalisation}
+
+No normalisation layers in the network (no BatchNorm/LayerNorm). All normalisation is on the input and target side, and every statistic is fitted on \textbf{train rows only}, then applied frozen to val and test.
+
+\subsection*{PH arm, in order}
+\begin{enumerate}
+  \item \textbf{Coordinates $\times\sqrt n$}: pairs in units of mean point spacing ($1/\sqrt n$ on $W$). Without it a pattern at $\nb=800$ fills a third of the axis of one at $\nb=100$ $\Rightarrow$ effective resolution would track the $\nb$ regime axis
+  \item \textbf{Box} (\texttt{fit\_imager}): persistence $[0,\ 1.05\cdot q_{99}]$, birth $[q_{1},\ 1.05\cdot q_{99}]$, quantiles of \emph{per-diagram} extrema over train diagrams $\Rightarrow$ $\approx$99\% of train diagrams lie wholly inside; clipping is a property of a pattern, not of the busiest corner. One box per (filtration, dim), shared by every pattern
+  \item \textbf{Mass $/\,n$}: image per point ($H_0$ has $n-1$ pairs). Without it: $\approx7\times$ mass range across $\nb$
+  \item \textbf{$\sqrt{\cdot}$ per pixel}: linear $H_1$ images are $\approx$93\% empty with a few bright pixels (standardised range $[-0.2, +50]$, Thomas DTM$_{10}$). No affine map fixes that; $\sqrt{}$ is variance-stabilising for mass-like quantities and keeps $0$ at $0$
+  \item \textbf{z-score per channel}: one (mean, s.d.) per filtration channel, pooled over train patterns \emph{and} pixels. Picture only shifted and rescaled, never reshaped per pixel or per pattern. Needed: $H_0$ and $H_1$ pixel scales differ by $\approx10\times$
+\end{enumerate}
+Example boxes (classify, train, $\sqrt n$ units): DTM$_{10}$ $H_0$ pers $[0, 3.85]$, birth $[0.60, 7.36]$; $H_1$ pers $[0, 2.94]$, birth $[1.24, 7.71]$; Rips $H_0$ pers $[0, 2.81]$.
+
+\subsection*{Classical arm}
+\begin{itemize}
+  \item z-score per curve (one mean, s.d.\ over train patterns and radii), stacked or not
+  \item No $\sqrt{}$: bounded functions ($F, G\in[0,1]$), not a sparse heavy-tailed measure
+  \item $n$-scaling via the \emph{grid} only (\texttt{sqrtn}): $r$ axis rescaled, values not
+\end{itemize}
+
+\subsection*{Covariate and targets}
+\begin{itemize}
+  \item $\log n$, z-scored on train
+  \item Params targets: $\log$ where strictly positive on train (all current targets), then z-score per target. Loss: MSE on the standardised log targets $\Rightarrow$ each target weighted equally regardless of units
+  \item Predictions inverted ($\cdot\,$s.d.\ $+$ mean, $\exp$) and saved in parameter units
+  \item Targets: Poisson $\nb$; Thomas $\kappa,\mu,\sigma$; nested $\kappa,\mu_1,\mu_2,\sigma_1,\sigma_2$; Mat\'ern $R,\lambda_p$; LGCP $\nb,\sigma^2,s$ ($\nb$ in place of $\mu_{\log}$, the only target that can be negative)
+\end{itemize}
+
+\subsection*{Scope of each fit}
+\begin{itemize}
+  \item Classify: box, z-score, $\log n$ fitted on train rows of all five families pooled
+  \item Params: fitted on that family's train rows only $\Rightarrow$ different boxes per task
+  \item Split fixed by $\theta$ $\Rightarrow$ every statistic seed-independent; features built once, reused by all 10 seeds
+\end{itemize}
+
+%==============================================================================
+\section{Evaluation}
+
+\subsection*{Split (\texttt{simulation/split.py})}
+\begin{itemize}
+  \item By $\theta$ index, not pattern: train $\theta<7000$, val $7000\le\theta<8000$, test $8000\le\theta<10\,000$
+  \item Both replicates of a $\theta$ in the same split $\Rightarrow$ no parameter vector seen in train and test
+  \item $\theta_i$ drawn from its own stream (02) $\Rightarrow$ indices are i.i.d.\ prior draws, contiguous blocks are a random split
+  \item Same split for every family, task, arm and seed $\Rightarrow$ all runs paired pattern by pattern
+  \item $\theta\ge10\,000$ (a larger sweep later) $\to$ train; the test set never changes
+\end{itemize}
+
+\smallskip
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+ & train & val & test \\
+\midrule
+$\theta$ per family & 7000 & 1000 & 2000 \\
+Patterns, classify (5 families) & 70\,000 & 10\,000 & 20\,000 \\
+Patterns, params (1 family) & 14\,000 & 2\,000 & 4\,000 \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Training}
+\begin{itemize}
+  \item AdamW, lr $10^{-3}$, weight decay $3\cdot10^{-4}$, batch 128
+  \item Loss: cross-entropy (classify), MSE on standardised log targets (params)
+  \item Up to 200 epochs; early stopping on val loss, patience 30; best-val weights restored
+  \item Val is used \emph{only} for early stopping; no hyperparameter search so far (all defaults above)
+  \item Seed: network init, minibatch order, dropout. Features and split identical across seeds
+\end{itemize}
+
+\subsection*{Test metrics (\texttt{scripts/regimes.py})}
+\begin{itemize}
+  \item Every test pattern's prediction saved with its \texttt{case\_id}; joined to the manifest for $(\nb,\dt)$ afterwards $\Rightarrow$ bins changeable without retraining
+  \item Classify: accuracy; NLL of the true family. Per family, accuracy $=$ that family's recall
+  \item Params: RMSE in log units, per target and pooled over targets (parameters span orders of magnitude, trained in log)
+  \item Cells: 8 log-$\dt$ bins on $[0.1, 4]$ $\times$ 3 log-$\nb$ bins on $[100, 800]$, plus all marginals. Edges from the prior, shared by every family and method
+  \item Poisson ($\dt=0$): in no $\dt$ bin; appears in marginal and $\nb$ rows only
+  \item $\approx 2000/24 \approx 83$ test $\theta$ per family per cell; cells with $<10$ $\theta$ skipped
+\end{itemize}
+
+\subsection*{Uncertainty}
+\begin{itemize}
+  \item Seeds averaged per pattern first, then replicates averaged per $\theta$
+  \item 95\% interval: bootstrap over \textbf{test $\theta$} (1000 resamples), replicates resampled together
+  \item \texttt{seed\_sd}: s.d.\ of the per-seed cell estimate, reported alongside (optimisation variance only)
+  \item Comparisons (\texttt{--reference}): \emph{paired} difference on the same $\theta$ resamples. Much tighter than two independent intervals; the comparison the paper makes
+\end{itemize}
+
+%==============================================================================
+\section{Implemented pipeline}
+
+\subsection*{Code}
+{\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\texttt{src/cloudforger/training/data.py}   & diagrams/curves $\to$ inputs, normalisation, targets \\
+\texttt{src/cloudforger/training/model.py}  & \texttt{ImageEncoder}, \texttt{PHNet} \\
+\texttt{src/cloudforger/training/train.py}  & AdamW loop, early stopping, predict \\
+\texttt{.../vectorization/persistence\_images/image.py} & imager, box fit, scaling \\
+\texttt{src/cloudforger/classical/functions.py}, \texttt{curves.py} & $L,F,G,J$ on \texttt{fixed} / \texttt{sqrtn} \\
+\texttt{src/cloudforger/simulation/split.py} & split by $\theta$ \\
+\texttt{scripts/train.py}                   & CLI: one (task, features, variant), list of seeds \\
+\texttt{scripts/regimes.py}                 & predictions $\to$ \texttt{results/regimes.csv} \\
+\texttt{slurm/train.sh}                     & array job over the run matrix \\
+\bottomrule
+\end{tabular}}
+
+\subsection*{Run matrix}
+\begin{itemize}
+  \item Tasks: classify $+$ params for each of 5 families $=$ 6
+  \item PH: 6 filtrations (Rips, alpha, DTM$_{5,10,15,20}$) $\times$ $\{H_0, H_1, H_0{+}H_1\}$ $=$ 18
+  \item Classical: 4 specs
+  \begin{itemize}
+    \item \texttt{L@fixed,F,G,J} (per-function grids, separate encoders)
+    \item \texttt{L,F,G,J} (all \texttt{sqrtn}, stacked)
+    \item all \texttt{fixed} (stacked)
+    \item \texttt{L@fixed} alone (the VIHRS feature set, through this network)
+  \end{itemize}
+  \item $6\times(18+4) = 132$ array tasks $\times$ 10 seeds $=$ 1320 runs; one GPU each, features built once per task
+\end{itemize}
+
+\subsection*{Output}
+\texttt{results/<task>/<group>/<features>/<variant>/seed\_<s>/}
+
+e.g.\ \texttt{classify/all/dtm\_k10/h01/seed\_1}
+\begin{itemize}
+  \item \texttt{predictions.npz}: \texttt{case\_id}, \texttt{y\_true}, \texttt{y\_pred} (+ \texttt{posterior}; params also standardised values), test patterns only
+  \item \texttt{run.json}: arguments, imager boxes, target transform, loss history, git stamp
+  \item \texttt{model.pt}: best-val weights
+  \item Resumable: a seed with \texttt{run.json} is skipped
+\end{itemize}
+
+\subsection*{Checks (\texttt{tests/test\_training.py})}
+{\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+Check & Result \\
+\midrule
+Image rank follows filtration (Rips/alpha $H_0$ 1-D, else 2-D) & pass \\
+Encoder separates one blob at two positions (untrained, 5 inits) & rel.\ distance $\approx0.14$ ($>0.02$) \\
+$\sqrt{}$ reduces standardised skew (max/$|$min$|$) of $H_1$ & pass \\
+Curves on one grid share an encoder; on different grids do not & pass \\
+Params predictions returned in parameter units & pass \\
+Several seeds share one feature build; finished seeds skipped & pass \\
+\bottomrule
+\end{tabular}}
+
+\subsection*{Status (first wave, 17--18 Sep)}
+\begin{itemize}
+  \item Classify, PH arm: complete (18 configs $\times$ 10 seeds). Params: Poisson, Thomas, nested, Mat\'ern PH complete; LGCP partial; classical arm only nested/Mat\'ern params so far
+  \item 5-way test accuracy, mean over 10 seeds (seed s.d.\ 0.001--0.004; chance 0.2):
+\end{itemize}
+
+\smallskip
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+ & Rips & alpha & DTM$_5$ & DTM$_{10}$ & DTM$_{15}$ & DTM$_{20}$ \\
+\midrule
+$H_0$        & 0.494 & 0.493 & 0.470 & 0.477 & 0.476 & 0.473 \\
+$H_1$        & 0.338 & 0.362 & 0.318 & 0.319 & 0.320 & 0.319 \\
+$H_0{+}H_1$  & 0.489 & 0.495 & 0.471 & 0.472 & 0.472 & 0.468 \\
+\bottomrule
+\end{tabular}
+\begin{itemize}
+  \item Pooled over the whole $\dt\in[0.1,4]$ prior, much of which is below the classical detection floor (02: L-test rejects $\le15\%$ at $\dt\le0.25$); per-regime tables pending
+  \item Best epoch 7--196; 1-D $H_0$ runs converge slowest: 5 Mat\'ern params runs (Rips/alpha $H_0$) hit the 200-epoch cap
+\end{itemize}
+
+%==============================================================================
+\section{Notes}
+
+\subsection*{Interpretation}
+\begin{itemize}
+  \item All scale handling is explicit and fitted on train: $\sqrt n$ coordinates, $/n$ mass, $\sqrt{}$, z-score. The network has no internal normalisation to absorb a mis-scaled input
+  \item $\sqrt n$ scaling makes the image $\nb$-invariant in geometry, not in information: $\log n$ is still given, so the head can condition on it
+  \item Box fitted on pooled families for classify: a family whose diagrams reach further than the others' is clipped more often (up to the 1\% coverage)
+  \item Seeds only measure optimisation variance; data variance comes from the $\theta$ bootstrap. Seed s.d.\ ($\le 0.004$) is small next to it
+  \item $H_1$ adds nothing to $H_0$ for classification in the first wave ($-0.005$ to $+0.002$)
+\end{itemize}
+
+\subsection*{Scope and limits}
+\begin{itemize}
+  \item One architecture, one hyperparameter setting, no search; comparisons are between features at fixed capacity (capacity differs across input layouts, see parameter counts)
+  \item Val selects the stopping epoch only; test untouched until evaluation
+  \item Classical \texttt{sqrtn} curves: $r$ rescaled, values not; $L(r)-r$ still in absolute units, shrinking $\propto 1/\sqrt n$ at fixed $u$ ($\log n$ available to compensate)
+  \item \texttt{L@fixed} here is the VIHRS \emph{feature set} through \texttt{PHNet}, not the paper-faithful VIHRS network
+  \item Multi-$k$ (shared encoder) implemented, not in the current run matrix
+\end{itemize}
+
+\subsection*{Open}
+\begin{itemize}
+  \item Per-regime tables (\texttt{regimes.py}) for the first wave; reference run to compare against
+  \item Whether the 1\% pooled-box clipping affects one family disproportionately
+  \item Whether any learned arm beats the classical floor at $\dt\lesssim0.25$ (cluster families; Mat\'ern on $\mu_R$)
+  \item \texttt{regimes.py}: bin Mat\'ern on $\mu_R$ instead of $\dt$ (01); computed from the manifest's $R$, $\nb$, so no retraining
+  \item Capacity-matched comparison (1-D $H_0$ encoders are $3.5\times$ smaller than 2-D)
+  \item Remaining params runs (LGCP, classical arm)
+\end{itemize}
+
+\end{document}

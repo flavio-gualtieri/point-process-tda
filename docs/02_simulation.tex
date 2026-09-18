@@ -20,10 +20,10 @@
 
 \subsection*{Aim}
 \begin{itemize}
-  \item One pool of patterns, swept over the regime coordinates $(\nb, \dt)$; train and test are carved from it later
-  \item Same $(\nb,\dt)$ distribution in every structured family $\Rightarrow$ the regime carries no information about the family
-  \item Two patterns per $\theta$ $\Rightarrow$ bias/variance at fixed $\theta$
-  \item $\dt$ as defined in 01 (studentised sup of $L-r$, uncentred, at $\nb$)
+  \item Generate pool of patterns swept over the regime coordinates $(\nb, \dt)$; train and test are partitioned from it later
+  \item Same $(\nb,\dt)$ distribution in every structured family, so regimes carry no info about the family
+  \item Mat\'ern II: swept on $\dt$ like the rest, but its regimes are reported in $\mu_R$ (hard core in pairs, 01), since $\dt$ misses hard cores below $\rmin$
+  \item Two patterns per $\theta$ so we can compute bias/variance at fixed $\theta$
 \end{itemize}
 
 \subsection*{Families}
@@ -45,43 +45,50 @@ Mat\'ern II & primaries $\lambda_p$, hard core $R$ (type II); & --- & $R$ \\
 \bottomrule
 \end{tabular}}
 
-\subsection*{Closed-form $K(r) - \pi r^2$}
+\subsection*{Shape and amplitude}
 \begin{itemize}
-  \item Thomas: $\ (1-e^{-r^2/4\sigma^2})/\kappa$
-  \item Nested: $\ (1-e^{-r^2/4\sigma_2^2})/(\kappa\mu_1) + (1-e^{-r^2/4(\sigma_1^2+\sigma_2^2)})/\kappa$
-  \item LGCP: $\ 2\pi \sum_{k\ge1} \frac{\sigma^{2k}}{k!}\,\frac{s^2}{k^2}\,\big[1-e^{-kr/s}(1+kr/s)\big]$ (80 terms), from $g=\exp(\sigma^2e^{-r/s})$
-  \item Mat\'ern II: $g=0$ below $R$, $1$ beyond $2R$, Stoyan's closed form between; $K$ by trapezoid on $[R,2R]$
-  \item Monotone in the amplitude at fixed $(\nb,\text{shape})$ (checked on grids) $\Rightarrow$ amplitude for a target $\dt$ unique
+  \item Shape = where the structure lives (its length scale); amplitude = how strong it is at that scale
+  \item At fixed $(\nb,\text{shape})$, amplitude $\to 0$ gives CSR; raising it strengthens the structure without moving it:
+  \begin{itemize}
+    \item Thomas $\mu$: same $\nb$ in fewer, bigger clusters ($\kappa=\nb/\mu$); nested $\mu_2$: same at the inner level
+    \item LGCP $\sigma^2$: more variable intensity; Mat\'ern $R$: bigger hard core
+  \end{itemize}
+  \item $\dt$ increases monotonically with the amplitude (checked on grids), so each target $\dt$ has exactly one amplitude; solved by root-finding on the closed-form $K$ (\texttt{families.py})
 \end{itemize}
 
 \subsection*{Validity rules}
-Two numbers: $\varepsilon = 0.2$, $c = 0.45$. Radius set $R(\nb)=[\rmin, 0.25]$ as in 01.
+Each rule removes $\theta$ for which $\dt$ would be misleading. Rules 1--2 restrict the shape (a box of allowed shapes at each $\nb$); rules 3--4 cap the amplitude. Two tolerances: $\varepsilon = 0.2$, $c = 0.45$. Radius set $R(\nb)=[\rmin, 0.25]$ as in 01.
 \begin{enumerate}
-  \item \textbf{Scale inside $R(\nb)$} (shape only). Structure correlation $\gamma(r)\in[0,1]$ must satisfy $\gamma(\rmin)\ge\varepsilon$ and $\gamma(0.25)\le\varepsilon$
+  \item \textbf{Scale inside $R(\nb)$} (shape)
   \begin{itemize}
-    \item Gaussian ($\gamma=e^{-r^2/4\sigma^2}$): $\ \sigma\in\big[\rmin,\,0.25\big]\big/\,2\sqrt{\ln(1/\varepsilon)}$ $\ \Rightarrow\ \sigma\le 0.098$
-    \item Exponential ($\gamma = e^{-r/s}$): $\ s\in\big[\rmin,\,0.25\big]\big/\ln(1/\varepsilon)$ $\ \Rightarrow\ s \le 0.155$
-    \item Nested: inner $\sigma_2$ for the lower bound, outer $\sqrt{\sigma_1^2+\sigma_2^2}$ for the upper bound
-    \item Why: $\dt$ only sees $R(\nb)$; scale is averaged over within regimes, fair only if it is visible everywhere
+    \item Why: $\dt$ only looks at $R(\nb)$. Structure mostly below $\rmin$ or beyond $0.25$ is missed, so patterns with the same $\dt$ would not be equally hard
+    \item Rule: $\gamma(r)\in[0,1]$ = how much of the structure is still to come at $r$ (Thomas: $e^{-r^2/4\sigma^2}$, fraction of cluster pairs farther apart than $r$; LGCP: $e^{-r/s}$). Need $\gamma(\rmin)\ge\varepsilon$ and $\gamma(0.25)\le\varepsilon$
+    \item Gives: $\sigma\in[\rmin,\,0.25]\,/\,2\sqrt{\ln(1/\varepsilon)}$ ($\sigma\le 0.098$); $s\in[\rmin,\,0.25]\,/\ln(1/\varepsilon)$ ($s \le 0.155$); nested: inner $\sigma_2$ for the lower bound, outer $\sqrt{\sigma_1^2+\sigma_2^2}$ for the upper
   \end{itemize}
-  \item \textbf{Nested levels distinguishable} (shape only)
+  \item \textbf{Nested levels distinguishable} (shape)
   \begin{itemize}
-    \item Separation: inner $\gamma$ at $\varepsilon$ before outer $\gamma$ at $1-\varepsilon$ $\Rightarrow$ $\sqrt{1+\rho^2}\ge\sqrt{\ln(1/\varepsilon)/(-\ln(1-\varepsilon))}$, $\rho\ge 2.49$
-    \item Balance: inner share of the $K$ plateau $1/(1+\mu_1)\ge\varepsilon$ $\Rightarrow$ $\mu_1\le 4$; $\mu_1\ge1$ (interpretability)
+    \item Why: otherwise nested is just a Thomas process
+    \item Separated: inner level done ($\gamma_{\text{in}}\le\varepsilon$) before the outer one starts ($\gamma_{\text{out}}\ge1-\varepsilon$) $\Rightarrow$ $1+\rho^2\ge\ln(1/\varepsilon)/(-\ln(1-\varepsilon))$, i.e.\ $\rho\ge 2.49$
+    \item Balanced: inner level carries at least $\varepsilon$ of the $K$ excess, $1/(1+\mu_1)\ge\varepsilon$ $\Rightarrow$ $\mu_1\le 4$; also $\mu_1\ge1$ (interpretability)
   \end{itemize}
-  \item \textbf{Enough independent units} (involves the amplitude): $\mathrm{CV}(n)=\mathrm{sd}(n)/\nb \le c$
-  \[
-    \mathrm{CV}^2 = \frac1{\nb} + \int_0^1 \bar\gamma_W(r)\, \mathrm d\big(K(r)-\pi r^2\big),
-    \qquad \bar\gamma_W(r) = 1-\tfrac{4r}{\pi}+\tfrac{r^2}{\pi}
-  \]
+  \item \textbf{Enough independent units} (amplitude)
   \begin{itemize}
-    \item $\bar\gamma_W$: isotropised set covariogram of $W$; formula vs simulated Thomas CV: 0.409/0.413, 0.310/0.306, 0.444/0.445
-    \item Why: $\dt$ is evaluated at $\nb$, meaningful only if $n\approx\nb$
-    \item Old DV3 constraints in these terms: Thomas 0.41--0.44, nested 0.26--0.31, LGCP up to 0.72 (inconsistent)
+    \item Why: $\dt$ is computed at $\nb$, so it only means something if $n\approx\nb$. Few big clusters make $n$ swing
+    \item Rule: $\mathrm{CV}(n)=\mathrm{sd}(n)/\nb \le c$, with
+    \[
+      \mathrm{CV}^2 = \frac1{\nb} + \int_0^1 \bar\gamma_W(r)\, \mathrm d\big(K(r)-\pi r^2\big),
+      \qquad \bar\gamma_W(r) = 1-\tfrac{4r}{\pi}+\tfrac{r^2}{\pi} \ \text{(isotropised set covariogram of $W$)}
+    \]
+    \item Formula vs simulated Thomas CV: 0.409/0.413, 0.310/0.306, 0.444/0.445
+    \item Old DV3 in these terms: Thomas 0.41--0.44, nested 0.26--0.31, LGCP up to 0.72 (inconsistent)
   \end{itemize}
-  \item \textbf{Mat\'ern II packing}: $\pi R^2\nb \le 0.95$ ($\lambda_p \le 3.15\,\nb$); hard limit is 1
+  \item \textbf{Mat\'ern II packing} (amplitude)
+  \begin{itemize}
+    \item Why: type II thinning cannot pass fill $\pi R^2\nb = 1$; near it the process degenerates
+    \item Rule: $\pi R^2\nb \le 0.95$ ($\lambda_p \le 3.15\,\nb$)
+  \end{itemize}
 \end{enumerate}
-With $\varepsilon=0.2$ the old DV3 bounds are recovered: $\sigma\le0.1$, $s\le0.15$, $\rho\ge3$. The LGCP lower bound widens (0.5 spacings $\to$ 0.16--0.055).
+With $\varepsilon=0.2$ we recover the old DV3 bounds ($\sigma\le0.1$, $s\le0.15$, $\rho\ge3$); only the LGCP lower bound on $s$ is wider (0.5 $\to$ 0.16--0.055 spacings).
 
 \subsection*{Feasibility and the $\dt$ range}
 Largest $\dt$ reachable under the rules (\texttt{scripts/feasibility.py}):
@@ -109,10 +116,10 @@ Mat\'ern II & 4.3 & 5.3 & 6.5 & 8.0 & 9.9 & 11.9 \\
   \item $\nb \sim$ log-uniform$[100, 800]$
   \item $\dt \sim$ log-uniform$[0.1, 4]$ (Poisson: $\dt = 0$, skip 2--4)
   \item Shape: each coordinate log-uniform on its rule-1/2 box at $\nb$; redraw until valid, $\dt$ reachable, and (LGCP) a grid exists
-  \item Amplitude: root of $\dt(\nb,\text{shape},a) = $ target, in $\log a$, below the rule-3/4 maximum
+  \item Amplitude: the unique $a$ with $\dt(\nb,\text{shape},a) = $ target (root in $\log a$), must be below the rule-3/4 cap
 \end{enumerate}
 \begin{itemize}
-  \item Induced amplitude distribution not log-uniform: whatever the $\dt$ prior pushes forward (Fig.~\ref{fig:prior})
+  \item Amplitude is not drawn, so its distribution is whatever the $\dt$ prior induces (Fig.~\ref{fig:prior})
 \end{itemize}
 
 \subsection*{Samplers}
@@ -225,7 +232,7 @@ LGCP grid $M$ (128/256/512/1k/2k/4k) & 8064/1013/566/268/76/13 $\theta$ & --- \\
 \begin{itemize}
   \item \textbf{Convergence to Poisson} (Figs.~\ref{fig:patterns}, \ref{fig:curves}): along each row only the amplitude moves; curves shrink uniformly into the null band; at $\dt\le0.25$ patterns are visually CSR
   \item \textbf{Scale structure survives the amplitude}: nested keeps its two-step shoulder at every $\dt$; Mat\'ern's deficit sits just above $\rmin$
-  \item \textbf{Same regime, same difficulty across families} (Fig.~\ref{fig:power}, left):
+  \item \textbf{Same regime, same difficulty across families, for the $L$ test} (Fig.~\ref{fig:power}, left; Mat\'ern is much easier for a nearest-neighbour test, 01):
   \smallskip
 
   \begin{tabular}{@{}lrrrrrr@{}}
@@ -267,7 +274,7 @@ Mat\'ern II & 0.1001--3.9939 & 0.60 & 0.43 & 514--601 \\
   \item \textbf{Range}: normalised position $u=\log(x/x_{lo})/\log(x_{hi}/x_{lo})$ in the box at $\nb$ spans 0.000--1.000 in every $\dt$ bin (Thomas $\sigma$, LGCP $s$, nested $\mu_1$); nested $\sigma_2$, $\rho$ reach 0.97--0.99 (top corner of the $(\sigma_2,\rho)$ region excluded by the outer-scale rule)
   \item \textbf{Uniformity}: Thomas, LGCP uniform in $u$ within each $\dt$ bin (KS $p$ 0.08--0.94); $u$-quintile $\perp$ $\dt$ bin ($\chi^2$ $p$ 0.10--0.81, all shape coordinates)
   \item \textbf{Nested}: vs a direct rejection sample of the allowed region at the same $\nb$: pooled KS $p$ 0.53--0.93; 3 of 18 per-bin tests $<0.05$ (multiple testing; excluded as bias by the replay)
-  \item \textbf{Amplitude range at fixed $\dt$} (realised within $\pm10\%$ vs grid over $\nb$ and allowed shape):
+  \item \textbf{Amplitude range at fixed $\dt$}: wide, because the amplitude compensates for $\nb$ and shape (e.g.\ larger $\nb$ needs a weaker structure for the same $\dt$). Realised ($\dt$ within $\pm10\%$) vs theory (grid over $\nb$ and allowed shapes):
 
   \smallskip
   {\footnotesize
@@ -297,7 +304,7 @@ Mat\'ern II & 0.1001--3.9939 & 0.60 & 0.43 & 514--601 \\
     \item $\nb=400$, $\dt=4$: $R=0.0127$ (0.25 spacings), $\pi R^2\nb=0.20$; 25 fresh patterns all visually near-CSR, all with $S\in[3.76, 4.48]$; minimum pair distance $\ge R$ (sampler correct)
     \item Removes only pairs closer than a quarter spacing; visibly regular patterns need fill $\approx0.95$, i.e.\ $\dt\approx8.6$ at $\nb=400$ (outside the common range)
   \end{itemize}
-  \item Mat\'ern lags in $(0.2, 1.25]$: its departure is concentrated at small $r$, where $\hat L$ is biased and pairs are few; the centred test loses part of it (likely; not verified)
+  \item Mat\'ern lags in $(0.2, 1.25]$: for $\dt\lesssim1$ its hard core lies below $\rmin$, outside $R(\nb)$, so $\dt$ and the test see only the deficit's tail (01). A nearest-neighbour test detects the same patterns with power 0.63--1.00 $\Rightarrow$ equal $\dt$ means equal difficulty for the $L$ test only
   \item Shape distribution at every $\dt$ is the full rule-1/2 prior (Coverage): no shape rejected by the amplitude solve; nested redraws are geometric (the $\rho$--$\sigma_2$ coupling)
   \item Allowed shape box depends on $\nb$ (lower bound $\propto\rmin$): in absolute units the smallest scales occur only at large $\nb$; in normalised $u$, shape $\perp\nb$
   \item Mat\'ern II has no shape: $(\nb,\dt)$ determines $R$ $\Rightarrow$ regime-conditional inference error for Mat\'ern conditions on almost the whole parameter (within a $\dt$ bin $R$ still varies $\approx8\times$ via $\nb$ and bin width); not comparable one-to-one with families that keep shape variation
@@ -317,6 +324,7 @@ Mat\'ern II & 0.1001--3.9939 & 0.60 & 0.43 & 514--601 \\
 \begin{itemize}
   \item $\delta_{lo}$: the classical test is at its floor below $\approx 0.25$; decide with learned methods' curves
   \item Carving train/validation/test from the pool (by $\theta$, both replicates together)
+  \item Mat\'ern below $\mu_R\approx1$ (hard for every test) is not sampled: the $\dt$ floor 0.1 corresponds to $\mu_R\approx1$
   \item Nested joint shape coverage thin ($\approx$13 $\theta$ per $\dt$ bin $\times$ $5^3$ cell): enough for averaging over shape, not for joint shape analysis; more $\theta$ can be appended
   \item Shard files (\texttt{data/simulation/shards/}, 626\,MB) redundant after merge
 \end{itemize}
