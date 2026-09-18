@@ -1,0 +1,116 @@
+{
+  "task": "params",
+  "method": "vihrs",
+  "paper": "Vihrs (2022)",
+  "test_loss": 0.22498109693224416,
+  "test_loss_per_target": null,
+  "seed": 9373,
+  "git_commit": "c4bc3fba6d891fe2ca41be5619b547a67a774230",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T15:02:01.268987+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "vihrs",
+    "paper": "Vihrs (2022)",
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "embedding_dim": 833,
+    "seed": 9373,
+    "checkpoint_best": true,
+    "best_epoch": 25,
+    "r_max": 0.25,
+    "n_r": 513,
+    "output_dir": "/gpfs/scratch/qp252676/globus/point-process-tda/results/dv3_nested/raw/vihrs_lf/seed_9373",
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "run_tag": null
+  },
+  "best_epoch": 25,
+  "best_val_loss": 0.3795807783603668,
+  "eval_sets": {
+    "A": {
+      "n": 5000,
+      "n_ok": 5000,
+      "loss": 0.3627618796588662,
+      "loss_per_target": {
+        "kappa": 0.10556748908318966,
+        "mu1": 0.8262447983676282,
+        "mu2": 0.08648362517814012,
+        "sigma1": 0.4667937320234952,
+        "sigma": 0.32871975364187767
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 7600,
+      "n_ok": 7600,
+      "loss": 0.1873195350245155,
+      "loss_per_target": {
+        "kappa": 0.08612526356592849,
+        "mu1": 0.15088278634206392,
+        "mu2": 0.09588678561062357,
+        "sigma1": 0.3584733818946843,
+        "sigma": 0.24522945770927723
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 9600,
+      "n_ok": 9600,
+      "loss": 0.14546186074321737,
+      "loss_per_target": {
+        "kappa": 0.07694454592166354,
+        "mu1": 0.12507107425615474,
+        "mu2": 0.08510331430435868,
+        "sigma1": 0.2611036498761845,
+        "sigma": 0.1790867193577254
+      },
+      "predictions": "predictions_C.npz"
+    }
+  },
+  "superseded_prior_set": {
+    "test_loss": 0.3627618796588662,
+    "test_loss_per_target": {
+      "kappa": 0.10556748908318966,
+      "mu1": 0.8262447983676282,
+      "mu2": 0.08648362517814012,
+      "sigma1": 0.4667937320234952,
+      "sigma": 0.32871975364187767
+    },
+    "basis": "prior-draw set A only (superseded by the stratified test set)"
+  },
+  "evaluation_basis": "stratified test set (configs/testset.csv)",
+  "test_set": {
+    "n_covered": 10000,
+    "n_testset": 50000,
+    "families": [
+      "nested"
+    ],
+    "metric": "loss",
+    "overall": 0.22498109693224416,
+    "clustered_se": 0.0061662003400198215,
+    "strata": {
+      "below": {
+        "n": 2500,
+        "loss": 0.31294643388493887,
+        "clustered_se": 0.011530006436000008
+      },
+      "weak": {
+        "n": 2500,
+        "loss": 0.26925395404309815,
+        "clustered_se": 0.017774972252069567
+      },
+      "moderate": {
+        "n": 2500,
+        "loss": 0.1840646954295309,
+        "clustered_se": 0.01071728813455428
+      },
+      "strong": {
+        "n": 2500,
+        "loss": 0.13365930437140208,
+        "clustered_se": 0.007607591699881632
+      }
+    }
+  }
+}

@@ -1,0 +1,179 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.30648285559713,
+  "test_loss_per_target": null,
+  "seed": 9374,
+  "git_commit": "55ac5c5e497829f8eca3d616da09c2b9fafdb2c7",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T16:29:18.089095+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9374,
+    "homology_dims": [
+      0
+    ],
+    "results_subdir": "pi_multik_h0_nocc",
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "coordconv": false,
+    "pi_normalize": "none",
+    "target_label_names": [
+      "kappa",
+      "mu1",
+      "mu2",
+      "sigma1",
+      "sigma"
+    ],
+    "log_label_names": [
+      "kappa",
+      "mu1",
+      "mu2",
+      "sigma1",
+      "sigma"
+    ],
+    "split": "dv3",
+    "data_group": "nested",
+    "eval_sets": [
+      "A",
+      "B",
+      "C"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.0034230668983410285,
+            0.43492428601268246
+          ],
+          "pers_range": [
+            0.0,
+            0.354947063430222
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.0033711032743307923,
+          "sigma_pers": 0.002773023933048609,
+          "weight_fn": "linear_weight"
+        }
+      }
+    },
+    "pi_norm": null
+  },
+  "best_val_loss": 0.43990441592534385,
+  "n_epochs_run": 263,
+  "eval_sets": {
+    "A": {
+      "n": 5000,
+      "n_ok": 5000,
+      "loss": 0.42917788466555995,
+      "loss_per_target": {
+        "kappa": 0.12285793743270561,
+        "mu1": 0.8621281235676037,
+        "mu2": 0.0971501004594134,
+        "sigma1": 0.6149969217389492,
+        "sigma": 0.44875634012912813
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 7600,
+      "n_ok": 7600,
+      "loss": 0.2571299849694976,
+      "loss_per_target": {
+        "kappa": 0.11583499898683906,
+        "mu1": 0.10417308086702505,
+        "mu2": 0.10626996880449048,
+        "sigma1": 0.5579623568339209,
+        "sigma": 0.40140951935521263
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 9600,
+      "n_ok": 9600,
+      "loss": 0.24334593757124923,
+      "loss_per_target": {
+        "kappa": 0.10358720246656362,
+        "mu1": 0.08772983111946014,
+        "mu2": 0.09606022974646292,
+        "sigma1": 0.5397907005966768,
+        "sigma": 0.38956172392708266
+      },
+      "predictions": "predictions_C.npz"
+    }
+  },
+  "superseded_prior_set": {
+    "test_loss": 0.42917788466555995,
+    "test_loss_per_target": {
+      "kappa": 0.12285793743270561,
+      "mu1": 0.8621281235676037,
+      "mu2": 0.0971501004594134,
+      "sigma1": 0.6149969217389492,
+      "sigma": 0.44875634012912813
+    },
+    "basis": "prior-draw set A only (superseded by the stratified test set)"
+  },
+  "evaluation_basis": "stratified test set (configs/testset.csv)",
+  "test_set": {
+    "n_covered": 10000,
+    "n_testset": 50000,
+    "families": [
+      "nested"
+    ],
+    "metric": "loss",
+    "overall": 0.30648285559713,
+    "clustered_se": 0.0067518139079852995,
+    "strata": {
+      "below": {
+        "n": 2500,
+        "loss": 0.39614718544097804,
+        "clustered_se": 0.011850105519169157
+      },
+      "weak": {
+        "n": 2500,
+        "loss": 0.3900800127360028,
+        "clustered_se": 0.020013262228524
+      },
+      "moderate": {
+        "n": 2500,
+        "loss": 0.24918745651429158,
+        "clustered_se": 0.012574543188039283
+      },
+      "strong": {
+        "n": 2500,
+        "loss": 0.1905167676972408,
+        "clustered_se": 0.009664724478080948
+      }
+    }
+  }
+}

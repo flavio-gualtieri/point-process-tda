@@ -1,0 +1,149 @@
+{
+  "task": "classify",
+  "method": "vihrs",
+  "test_loss": 0.8499644535790561,
+  "test_loss_per_target": null,
+  "seed": 9377,
+  "git_commit": "c4bc3fba6d891fe2ca41be5619b547a67a774230",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T15:48:03.055115+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "classify",
+    "method": "vihrs",
+    "paper": "Vihrs (2022), feature set + CNN adapted to classification",
+    "batch_size": 128,
+    "n_epochs": 600,
+    "lr": 0.001,
+    "weight_decay": 0.0,
+    "early_stopping_patience": 60,
+    "checkpoint_best": true,
+    "best_epoch": 39,
+    "embedding_dim": 833,
+    "seed": 9377,
+    "r_max": 0.25,
+    "n_r": 513,
+    "class_names": [
+      "poisson",
+      "thomas",
+      "nested",
+      "matern2",
+      "lgcp"
+    ],
+    "n_train": 42500,
+    "n_val": 7500,
+    "n_test": 0,
+    "output_dir": "/gpfs/scratch/qp252676/globus/point-process-tda/results/dv3_classify/raw/vihrs_gj/seed_9377",
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "run_tag": null
+  },
+  "class_names": [
+    "poisson",
+    "thomas",
+    "nested",
+    "matern2",
+    "lgcp"
+  ],
+  "test_accuracy": 0.62344,
+  "test_accuracy_per_class": {
+    "poisson": 0.7566,
+    "thomas": 0.4616,
+    "nested": 0.4764,
+    "matern2": 0.889,
+    "lgcp": 0.5962
+  },
+  "best_epoch": 39,
+  "best_val_loss": 0.8662302114168803,
+  "best_val_accuracy": 0.6366666666666667,
+  "eval_sets": {
+    "A": {
+      "n": 25000,
+      "loss": 0.8626905407582004,
+      "accuracy": 0.63596,
+      "accuracy_per_class": {
+        "poisson": 0.7566,
+        "thomas": 0.4616,
+        "nested": 0.4764,
+        "matern2": 0.889,
+        "lgcp": 0.5962
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 46400,
+      "loss": 0.903971793787111,
+      "accuracy": 0.5685775862068966,
+      "accuracy_per_class": {
+        "thomas": 0.472797619047619,
+        "nested": 0.3567105263157895,
+        "matern2": 0.905,
+        "lgcp": 0.643625
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 44400,
+      "loss": 1.024722307813957,
+      "accuracy": 0.5237612612612612,
+      "accuracy_per_class": {
+        "poisson": 0.7571666666666667,
+        "thomas": 0.25625,
+        "nested": 0.20416666666666666,
+        "matern2": 0.905,
+        "lgcp": 0.58375
+      },
+      "predictions": "predictions_C.npz"
+    }
+  },
+  "superseded_prior_set": {
+    "test_loss": 0.8626905407582004,
+    "test_loss_per_target": null,
+    "test_accuracy": 0.63596,
+    "best_val_accuracy": 0.6366666666666667,
+    "basis": "prior-draw set A only (superseded by the stratified test set)"
+  },
+  "test_recall": {
+    "poisson": 0.7559,
+    "thomas": 0.4327,
+    "nested": 0.3347,
+    "matern2": 0.9377,
+    "lgcp": 0.6562
+  },
+  "evaluation_basis": "stratified test set (configs/testset.csv)",
+  "test_set": {
+    "n_covered": 50000,
+    "n_testset": 50000,
+    "families": [
+      "lgcp",
+      "matern2",
+      "nested",
+      "poisson",
+      "thomas"
+    ],
+    "metric": "accuracy",
+    "overall": 0.62344,
+    "clustered_se": 0.003941625571350776,
+    "strata": {
+      "below": {
+        "n": 12500,
+        "accuracy": 0.41544,
+        "clustered_se": 0.007889443150493286
+      },
+      "weak": {
+        "n": 12500,
+        "accuracy": 0.58344,
+        "clustered_se": 0.00864239155442639
+      },
+      "moderate": {
+        "n": 12500,
+        "accuracy": 0.70192,
+        "clustered_se": 0.0077857340547722404
+      },
+      "strong": {
+        "n": 12500,
+        "accuracy": 0.79296,
+        "clustered_se": 0.006019489534831141
+      }
+    }
+  }
+}

@@ -1,0 +1,167 @@
+{
+  "task": "params",
+  "method": "pi_multik",
+  "test_loss": 0.18700886120855956,
+  "test_loss_per_target": null,
+  "seed": 9375,
+  "git_commit": "cf0b736ecbd5b59fa8692c67175fed163b8fb377",
+  "git_dirty": true,
+  "timestamp": "2026-09-15T16:22:12.129101+00:00",
+  "run_tag": null,
+  "config": {
+    "task": "params",
+    "method": "pi_multik",
+    "seed": 9375,
+    "homology_dims": [
+      0
+    ],
+    "results_subdir": "pi_multik_h0_nocc",
+    "include_entropy": false,
+    "resolution": 64,
+    "sigma_pixels": 0.5,
+    "pd_calibration_coverage": 0.95,
+    "embedding_dim": 64,
+    "conv_channels": [
+      32,
+      64,
+      128
+    ],
+    "dropout": 0.2,
+    "pool_type": "avg",
+    "head_hidden_dims": [
+      64,
+      32
+    ],
+    "head_dropout": 0.1,
+    "batch_size": 32,
+    "n_epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.0003,
+    "early_stopping_patience": 50,
+    "coordconv": false,
+    "pi_normalize": "none",
+    "target_label_names": [
+      "nbar",
+      "sigma2",
+      "s_abs"
+    ],
+    "log_label_names": [
+      "nbar",
+      "sigma2",
+      "s_abs"
+    ],
+    "split": "dv3",
+    "data_group": "lgcp",
+    "eval_sets": [
+      "A",
+      "B",
+      "C"
+    ],
+    "results_root": "/gpfs/scratch/qp252676/globus/point-process-tda/results",
+    "k_values": [
+      5
+    ],
+    "channels": [
+      "k5_h0"
+    ],
+    "imager_params": {
+      "5": {
+        "0": {
+          "birth_range": [
+            0.007243457666789441,
+            0.4278916601072339
+          ],
+          "pers_range": [
+            0.0,
+            0.29227509880979763
+          ],
+          "resolution": 64,
+          "sigma_pixels": 0.5,
+          "sigma_birth": 0.003286314081565972,
+          "sigma_pers": 0.002283399209451544,
+          "weight_fn": "linear_weight"
+        }
+      }
+    },
+    "pi_norm": null
+  },
+  "best_val_loss": 0.24111316196123758,
+  "n_epochs_run": 177,
+  "eval_sets": {
+    "A": {
+      "n": 5000,
+      "n_ok": 5000,
+      "loss": 0.24558032860962556,
+      "loss_per_target": {
+        "nbar": 0.05462921573918584,
+        "sigma2": 0.1741514894470152,
+        "s_abs": 0.5079602806426756
+      },
+      "predictions": "predictions_A.npz"
+    },
+    "B": {
+      "n": 16000,
+      "n_ok": 16000,
+      "loss": 0.21094129240813472,
+      "loss_per_target": {
+        "nbar": 0.0441110616955369,
+        "sigma2": 0.16977885143159643,
+        "s_abs": 0.41893396409727085
+      },
+      "predictions": "predictions_B.npz"
+    },
+    "C": {
+      "n": 9600,
+      "n_ok": 9600,
+      "loss": 0.10295333593910588,
+      "loss_per_target": {
+        "nbar": 0.03565189204781276,
+        "sigma2": 0.15799601939595526,
+        "s_abs": 0.11521209637354964
+      },
+      "predictions": "predictions_C.npz"
+    }
+  },
+  "superseded_prior_set": {
+    "test_loss": 0.24558032860962556,
+    "test_loss_per_target": {
+      "nbar": 0.05462921573918584,
+      "sigma2": 0.1741514894470152,
+      "s_abs": 0.5079602806426756
+    },
+    "basis": "prior-draw set A only (superseded by the stratified test set)"
+  },
+  "evaluation_basis": "stratified test set (configs/testset.csv)",
+  "test_set": {
+    "n_covered": 10000,
+    "n_testset": 50000,
+    "families": [
+      "lgcp"
+    ],
+    "metric": "loss",
+    "overall": 0.18700886120855956,
+    "clustered_se": 0.005322382412474652,
+    "strata": {
+      "below": {
+        "n": 2500,
+        "loss": 0.22149046141069006,
+        "clustered_se": 0.009921685143346216
+      },
+      "weak": {
+        "n": 2500,
+        "loss": 0.1990719184692573,
+        "clustered_se": 0.013531771713804236
+      },
+      "moderate": {
+        "n": 2500,
+        "loss": 0.17607010827600553,
+        "clustered_se": 0.011620403706574044
+      },
+      "strong": {
+        "n": 2500,
+        "loss": 0.15140295667828071,
+        "clustered_se": 0.008284694870652302
+      }
+    }
+  }
+}
