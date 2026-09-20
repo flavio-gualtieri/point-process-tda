@@ -7,6 +7,8 @@ rules:
   cv_max: 0.45       # sd(n) / nbar
   matern_fill: 0.95  # pi R^2 nbar
   mu1_min: 1.0       # nested: parents per meta-cluster
+  min_pairs: 10      # shape-rule radius floor r_lo = r_min(nbar, min_pairs); a design choice about
+                     # which scales are worth sweeping, deliberately NOT the test's cutoff
 
 delta: {low: 0.1, high: 4}    # target delta-tilde, log-uniform; poisson has delta = 0
 thetas: 10000                 # per family

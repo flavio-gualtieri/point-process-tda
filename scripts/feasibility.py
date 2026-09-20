@@ -42,7 +42,7 @@ def main():
     args = p.parse_args()
 
     tables = Tables()
-    rules = Rules.load(tables)
+    rules = Rules.load()
     cfg = yaml.safe_load(CONFIG.read_text())["nbar"]
     print(f"rules: {rules}\n")
     print(f"{'family':8s} {'nbar':>5s} {'shapes':>6s} {'max delta':>9s}  " + "  ".join(f"P(reach {t:>2d})" for t in TARGETS) + "  monotone")

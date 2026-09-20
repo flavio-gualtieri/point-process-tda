@@ -62,14 +62,35 @@ Everything in this subsection is defined for fixed $n$. The test and $\dt$ only 
     \item $\mu \in [3, 10)$: still 3$\times$ Gaussian
     \item $\mu \ge 10$: Gaussian tail rate, skewness and kurtosis
   \end{itemize}
-  \item Heavy-tailed radii win the null maximum too often $\Rightarrow$ $c_{95}$ inflated by counting noise $\Rightarrow$ power lost at every other radius ($c_{95}$ at $n=99$: 3.07 with $p=10$, 3.43 with $p=0.1$)
-  \item Keep radii with at least $p$ expected pairs, $p = 10$ (usual threshold for the normal approximation to a Poisson count):
+  \item Size does not need them to be Gaussian ($c_{95}$ is simulated). Two things do bind:
+  \begin{itemize}
+    \item Heavy-tailed radii win the null maximum too often $\Rightarrow$ $c_{95}$ up (2.75--3.21 at $p=10$, 2.87--3.28 at $p=5$) $\Rightarrow$ 1--3 points of power lost at every other radius
+    \item $c_{95}(n)$ must stay smooth in $n$, or the spline across $n$ (Smoothing) cannot be fitted honestly
+  \end{itemize}
+  \item The smoother is what fails first. Below $p\approx5$ the raw $c_{95}$ develops structure at large $n$ that no spline follows (residual s.d.\ vs Monte Carlo noise; $z$ against the fit):
+
+  \smallskip
+  \begin{tabular}{@{}lrrr@{}}
+  \toprule
+  $p$ & $c_{95}$ mean $z^2$ (expect $\approx1$) & residual s.d. & Monte Carlo noise \\
+  \midrule
+  10 & 0.77 & 0.019 & 0.022 \\
+  \textbf{5} & \textbf{0.97} & \textbf{0.023} & \textbf{0.022} \\
+  4 & 1.62 & 0.036 & 0.029 \\
+  3 & 5.22 & 0.040 & 0.026 \\
+  \bottomrule
+  \end{tabular}
+
+  \smallskip
+  At $p=3$ the excess is concentrated at large $n$ (residual s.d.\ 0.056 for $n\ge1000$) and locally correlated (acf 0.30): the max statistic's null distribution is lumpy there, so its 95\% quantile moves in jumps. Covariates for the grid geometry do not absorb it (mean $z^2$ 5.22 $\to$ 4.67 at best)
+  \item Keep radii with at least $p$ expected pairs, $p = 5$:
   \[
     R(n) = \{r_k : \mu(r_k;n) \ge p\} = [r_{\min}(n), 0.25],
     \qquad
-    r_{\min}(n) = \sqrt{\frac{2p}{\pi n(n-1)}} \approx \frac{2.52}{n}
+    r_{\min}(n) = \sqrt{\frac{2p}{\pi n(n-1)}} \approx \frac{1.78}{n}
   \]
-  \item $r_{\min}$: 0.13 ($n=20$), 0.025 ($n=100$), 0.0034 ($n=800$), 0.0015 ($n=2000$). More points $\Rightarrow$ $R(n)$ reaches down to finer scales
+  \item $p$ is chosen from null diagnostics alone (size, $c_{95}$ smoothness), never from any alternative's power
+  \item $r_{\min}$: 0.092 ($n=20$), 0.018 ($n=100$), 0.0022 ($n=800$), 0.00089 ($n=2000$). More points $\Rightarrow$ $R(n)$ reaches down to finer scales
 \end{itemize}
 
 \subsection*{Null distribution}
@@ -88,9 +109,10 @@ Everything in this subsection is defined for fixed $n$. In practice, we compute 
     M_n(x) = \max_{r\in R(n)} \frac{|\hat\phi_x(r) - m_0(r;n)|}{s_0(r;n)}
   \]
   \item Determine critical value: $c_{95}(n)$ = 95\% quantile of $M_n$ over these clouds (estimates the 95\% quantile of $M_n(X)$, $X\sim\mathbb P_{0,n}$)
+  \item Repeated on a grid of $n$; $m_0$, $s_0$, $c_{95}$ then smoothed across $n$ (cubic splines in $\log n$) $\Rightarrow$ less Monte Carlo noise, defined at every $n$
 \end{itemize}
 
-\subsection*{Test (studentised global envelope; Myllym\"aki et al.\ 2017)}
+\subsection*{Studentised global envelope (Myllym\"aki et al.\ 2017)}
 \[
   S(x) = \frac{M_n(x)}{c_{95}(n)}, \qquad n = |x|
 \]
@@ -110,44 +132,7 @@ Everything in this subsection is defined for fixed $n$. In practice, we compute 
   \item Units: null s.d.s, relative to the critical value
   \item Property of the model, known before simulation $\Rightarrow$ usable as a sweep coordinate
   \item At fixed shape, $\dt$ grows with $\nb$ ($s_0$ shrinks)
-\end{itemize}
-
-\subsection*{$\dt$ does not transfer well for Mat\'ern II}
-\begin{itemize}
-  \item Hard core $R$: no two points closer than $R$ $\Rightarrow$ $L(r) - r = -r$ for $r < R$
-  \item Size of the hard core in pairs: the CSR pairs it forbids,
-  \[
-    \mu_R = \mu(R;\nb) = \tfrac12 \nb(\nb-1)\pi R^2 = p\,\big(R/r_{\min}(\nb)\big)^2
-  \]
-  \item For $\dt \lesssim 1$ the hard core lies below $r_{\min}$ ($\mu_R < p$), where $\dt$ does not look. $\dt$ sees only the deficit it leaves above $r_{\min}$, which decays like $1/r$ $\Rightarrow$ maximum at $r_{\min}$ for 82\% of Mat\'ern $\theta$ $\Rightarrow$ Mat\'ern $\dt$ is set by the cutoff $p$, not by the model
-  \item A nearest-neighbour test sees the hard core directly: reject CSR if no pair is closer than $d$, with $\mu(d) \approx 3$ ($\mathbb P_0(\text{no pair within } d) \approx e^{-\mu(d)} = 0.05$; 2.97 measured)
-  \item Same $\dt$, very different difficulty (all 20\,000 simulated Mat\'ern patterns; nearest-neighbour test calibrated to 5\% on the Poisson pool):
-
-  \smallskip
-  \begin{tabular}{@{}lrrrrrr@{}}
-  \toprule
-  $\dt$ bin & (0.1, 0.2] & (0.2, 0.3] & (0.3, 0.5] & (0.5, 1] & (1, 2] & (2, 4] \\
-  \midrule
-  $L$ test power & 0.06 & 0.07 & 0.12 & 0.34 & 0.86 & 1.00 \\
-  Nearest-neighbour test power & 0.23 & 0.63 & 0.97 & 1.00 & 1.00 & 1.00 \\
-  \bottomrule
-  \end{tabular}
-  \item So $\dt$ is a fair difficulty axis only for departures visible inside $R(\nb)$ (the cluster families). For Mat\'ern we use $\mu_R$ as the regime coordinate:
-  \begin{itemize}
-    \item Unit: pairs removed; detectable by the nearest-neighbour test from $\mu_R \approx 3$ on
-    \item Same ordering as $\dt$ (Spearman 0.999) and free of $\nb$: at fixed $\mu_R$, $L$-test power flat across $\nb$ terciles while $R$ varies $4\times$
-    \item Sweep unchanged: Mat\'ern still drawn on $\dt \in [0.1, 4]$, which induces $\mu_R \in [1, 46]$
-    \item Mat\'ern not pooled with the cluster families in $\dt$-binned results
-  \end{itemize}
-\end{itemize}
-
-\subsection*{Smoothing in $n$}
-\begin{itemize}
-  \item True $m_0$, $s_0$, $c_{95}$ smooth in $n$; raw per-$n$ estimates noisy
-  \item Dense grid alone does not help: leave-one-out interpolation error on the old 20-point grid $\approx$ Monte Carlo noise
-  \item Fit across $n$ $\Rightarrow$ borrow strength from neighbouring $n$; defined at every $n$, no interpolation rule
-  \item $s_0 \propto n^{-1}$ at small $r$, slower at large $r$ $\Rightarrow$ fit $n\,m_0$, $n\,s_0$ (slowly varying)
-  \item Cubic B-splines in $\log n$
+  \item Depends on the cutoff when the departure lives below $r_{\min}$: a hard core of radius $R<r_{\min}$ enters $\dt$ only through the pair deficit it leaves above $r_{\min}$, diluted by the CSR count there, so its $\dt$ scales with $p$ (Mat\'ern II; 02)
 \end{itemize}
 
 %==============================================================================
@@ -172,27 +157,15 @@ Everything in this subsection is defined for fixed $n$. In practice, we compute 
   \item $n$ grid: $\mathrm{round}(20 \cdot 1.03^k)$ up to 2000 $\Rightarrow$ 153 values
   \item Per grid $n$: 6000 fit + 6000 calibration patterns
   \item Validation: 50\,000 patterns, $n$ log-uniform integer on $[20, 2000]$
-  \item $p = 10$ pairs; $\alpha = 0.05$; knots: 8 interior (moments), 4 interior ($c_{95}$)
+  \item $p = 5$ pairs; $\alpha = 0.05$; knots: 8 interior (moments), 4 interior ($c_{95}$)
 \end{itemize}
 
 \subsection*{Steps}
 \begin{enumerate}
-  \item \textbf{Simulate} (\texttt{simulate --jobs 10}; $\sim$55 min on 10 cores)
-  \begin{itemize}
-    \item Seed key: (\texttt{pilot}, \texttt{poisson}, $n\cdot 10^5 + \text{rep}$, PATTERN)
-    \item Validation key: (\texttt{pilot}, \texttt{poisson}, $i < 10^5$); $n$ from PARAMS, points from PATTERN
-    \item One \texttt{float32} file per $n$ ($12000 \times 512$), atomic, resumable; 3.6\,GB total
-  \end{itemize}
-  \item \textbf{Fit} (\texttt{fit})
-  \begin{itemize}
-    \item Per $n$, fit batch: pointwise mean, s.d., Monte Carlo s.e.s
-    \item Weighted least squares per radius: $n\,m_0$, $n\,s_0$ on spline basis in $\log n$
-    \item Per $n$, calibration batch: max statistic under \emph{fitted} moments $\to$ raw $c_{95}$, s.e.
-    \item Weighted spline fit of $c_{95}$ in $\log n$
-    \item Store knots + coefficients (100\,KB)
-  \end{itemize}
-  \item \textbf{Validate} (\texttt{validate}): rejection rate on validation patterns, overall and in 6 $\log n$ bands
-  \item \textbf{Use}: \texttt{Tables().statistic(curves, n)} (test), \texttt{Tables().delta\_tilde(L\_minus\_r, nbar)} ($\dt$)
+  \item \textbf{Simulate}: null curves for every grid $n$, stored
+  \item \textbf{Fit}: moments and $c_{95}$ per $n$, splines in $\log n$ $\to$ \texttt{tables.npz}
+  \item \textbf{Validate}: size on fresh patterns at random $n$
+  \item \textbf{Relabel} (\texttt{scripts/relabel.py}): after a refit, recompute $\dt$ for every swept $\theta$ under the new tables; manifests keep \texttt{delta} (the sampling target) and \texttt{delta\_tilde} (current, what regimes use)
 \end{enumerate}
 
 \subsection*{Results}
@@ -201,12 +174,14 @@ Everything in this subsection is defined for fixed $n$. In practice, we compute 
 Check & Result & Reference \\
 \midrule
 Fitted $m_0$ vs raw, mean $z^2$ & 0.94 & $\approx 0.92$ ($1 - \text{params}/\text{grid}$) \\
-Fitted $s_0$ vs raw, mean $z^2$ & 0.97 & $\approx 0.92$ \\
-Max relative error of $s_0$ & 3.9\% & --- \\
-$c_{95}$ range; max s.e. & 2.75--3.21; 0.03 & --- \\
-Size, 50\,000 patterns & 0.0515 ($z = 1.5$) & 0.05 \\
-Size by $n$ band & 0.049--0.054, all $|z| \le 1.8$ & 0.05 \\
-Centring gap $\max|m_0|/s_0/c_{95}$ & 0.02--0.03 & --- \\
+Fitted $s_0$ vs raw, mean $z^2$ & 0.96 & $\approx 0.92$ \\
+Max relative error of $s_0$ & 4.0\% & --- \\
+Fitted $c_{95}$ vs raw, mean $z^2$ & 0.97 & $\approx 0.95$ \\
+$c_{95}$ range; max s.e. & 2.87--3.28; 0.030 & --- \\
+Size, 50\,000 patterns & 0.0518 ($z = 1.8$) & 0.05 \\
+Size by $n$ band & 0.049--0.056, all $|z| \le 2.4$ & 0.05 \\
+Size, 20\,000 Poisson sweep patterns & 0.0496 & 0.05 \\
+Centring gap $\max|m_0|/s_0/c_{95}$ & 0.026--0.044 & --- \\
 \bottomrule
 \end{tabular}
 
@@ -221,49 +196,6 @@ Centring gap $\max|m_0|/s_0/c_{95}$ & 0.02--0.03 & --- \\
   \item One-off: agrees with the previous implementation (\texttt{baselines/vihrs.py}) to $10^{-9}$
 \end{itemize}
 
-%==============================================================================
-\section{Statistical notes}
-
-\subsection*{Sample splitting}
-\begin{itemize}
-  \item Three disjoint sets: fit ($m_0$, $s_0$), calibration ($c_{95}$), validation (size)
-  \item $c_{95}$ from same patterns as moments $\Rightarrow$ downward-biased critical value
-  \item Size on calibration batch is 5\% by construction $\Rightarrow$ validation needs fresh patterns
-  \item $c_{95}$ computed under the \emph{fitted} moments $\Rightarrow$ calibrates the statistic actually used
-  \item Validation $n$ random integers $\Rightarrow$ mostly off-grid, tests the smoother between grid points
-\end{itemize}
-
-\subsection*{Fit diagnostics}
-\begin{itemize}
-  \item $z = (\text{raw} - \text{fit})/\text{s.e.}$; pure noise $\Rightarrow$ mean $z^2 \approx 1 - \text{params}/\text{grid points}$
-  \item s.e.\ of $s_0$ uses the fourth moment: $\sqrt{(\mu_4 - s^4)/N}/(2s)$ (small-$r$ tails non-Gaussian)
-  \item $c_{95}$ s.e.\ from order statistics: $(q_{.96}-q_{.94})/0.02 \cdot \sqrt{.95\cdot.05/N}$
-  \item Per-$n$ mean $z^2$ varies widely (0.07--4.5): residuals strongly correlated across $r$ $\Rightarrow$ few effective d.o.f.\ per $n$; band averages $\approx 1$, no trend
-\end{itemize}
-
-\subsection*{Centring}
-\begin{itemize}
-  \item $\hat K$ unbiased under binomial; $\hat L = \sqrt{\hat K/\pi}$ is not (Jensen) $\Rightarrow$ $m_0 \ne 0$
-  \item $\dt$ uncentred, test centred $\Rightarrow$ gap $\le 0.03$ in $\dt$ units on $R(n)$
-  \item Old tables ($r \ge 0.01$ for all $n$): gap 0.16 at $n=50$ --- caused by low-pair radii
-\end{itemize}
-
-\subsection*{Interpretation of $\dt$}
-\begin{itemize}
-  \item Defined through a classical L-test $\Rightarrow$ yardstick of that test, not an omnibus distance
-  \item Classical baseline partly calibrated to the axis: state explicitly
-  \item Sup over $r$: one radius decides; multi-scale models (nested Thomas) summarised by their most visible scale
-  \item $L$ only: hard cores below $r_{\min}$ are invisible to $\dt$ (Mat\'ern II, above)
-  \item Design $\dt$ at $\nb$, not realised $n$: per-pattern difficulty scatters around the label (most for Cox processes)
-  \item $\dt=1$ at $\nb$ does not mean $S=1$ on a pattern: $S$ is random around $\dt$
-\end{itemize}
-
-\subsection*{Scope and limits}
-\begin{itemize}
-  \item Tables valid for $n \in [20, 2000]$; outside raises (simulated pool: $n$ = 44--961)
-  \item $W$ fixed unit square; weight formula requires $r \le 0.5$
-  \item $R(n)$ depends on $n$: at small $n$ small-scale structure invisible by construction
-  \item Curves stored $\Rightarrow$ $p$, $\alpha$, knots changeable without re-simulation
-\end{itemize}
+Further statistical notes: \texttt{01\_departure\_notes.md}.
 
 \end{document}

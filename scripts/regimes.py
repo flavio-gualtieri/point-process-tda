@@ -5,7 +5,7 @@
     python scripts/regimes.py --task classify --reference dtm_k10/h01
 
 Nothing about regimes exists during training. A run's predictions carry `case_id`, which joins to
-data/simulation/<family>/manifest.csv for the regime coordinates (nbar, delta), so the binning here
+data/simulation/<family>/manifest.csv for the regime coordinates (nbar, delta_tilde), so the binning here
 can change without retraining anything.
 
 A run is discovered by its directory, results/<task>/<group>/<features>/<variant>/seed_<n>/, and
@@ -61,8 +61,14 @@ N_DELTA_BINS, N_NBAR_BINS, N_BOOT = 8, 3, 1000
 
 
 def manifest(families: list[str]) -> pd.DataFrame:
+    """Regime coordinates per pattern. Binning uses `delta_tilde` (delta-tilde under the null tables
+    in force now, written by scripts/relabel.py), not `delta` (the sweep's target under whichever
+    tables were in force when the patterns were drawn). They differ after a refit at a new cutoff."""
     frames = [pd.read_csv(SIMULATION / f / "manifest.csv") for f in families]
-    return pd.concat(frames, ignore_index=True).set_index("case_id")[["family", "theta", "nbar", "delta"]]
+    rows = pd.concat(frames, ignore_index=True).set_index("case_id")
+    if "delta_tilde" not in rows:
+        raise SystemExit("manifests have no `delta_tilde` column -- run scripts/relabel.py first")
+    return rows[["family", "theta", "nbar", "delta_tilde"]].rename(columns={"delta_tilde": "delta"})
 
 
 def edges(cfg: Config) -> tuple[np.ndarray, np.ndarray]:

@@ -27,8 +27,10 @@ class Rules:
     min_pairs: float
 
     @classmethod
-    def load(cls, tables: Tables, path: Path = CONFIG) -> Rules:
-        return cls(**yaml.safe_load(path.read_text())["rules"], min_pairs=tables.min_pairs)
+    def load(cls, path: Path = CONFIG) -> Rules:
+        """min_pairs is the shape rule's own floor, from the simulation config: the sweep's notion of
+        "a scale worth resolving" is fixed by design, not by whatever cutoff the null tables use."""
+        return cls(**yaml.safe_load(path.read_text())["rules"])
 
     def r_lo(self, nbar: float) -> float:
         return float(r_min(nbar, self.min_pairs))

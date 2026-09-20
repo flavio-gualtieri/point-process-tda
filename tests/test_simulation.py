@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,8 +9,12 @@ from cloudforger.simulation.families import FAMILIES, Rules, cv, delta
 from cloudforger.simulation.sweep import DATA, Config, draw_theta, sample_patterns
 
 TABLES = Tables()
-RULES = Rules.load(TABLES)
+RULES = Rules.load()
 CFG = Config.load()
+
+# The stored sweep solved its amplitudes against the tables in force at generation time (p = 10),
+# so reproducing a stored pattern needs that frozen copy, not whatever tables.npz holds now.
+SWEEP_TABLES = Tables(Path(__file__).resolve().parents[1] / "configs" / "departure" / "tables_sweep_p10.npz")
 
 
 @pytest.mark.parametrize("name", ["thomas", "nested", "lgcp", "matern2"])
@@ -33,7 +39,7 @@ def test_stored_pattern_regenerates(name):
     m = pd.read_csv(DATA / name / "manifest.csv")
     z = np.load(DATA / name / "points.npz")
     k = 2 * 123 + 1
-    theta = draw_theta(FAMILIES[name](RULES), TABLES, CFG, 123)
+    theta = draw_theta(FAMILIES[name](RULES), SWEEP_TABLES, CFG, 123)
     rep, pts, _ = list(sample_patterns(name, theta, CFG, 123))[1]
     assert m.case_id[k] == f"{name}-00123-1"
     np.testing.assert_array_equal(pts, z["points"][z["offsets"][k]:z["offsets"][k + 1]])

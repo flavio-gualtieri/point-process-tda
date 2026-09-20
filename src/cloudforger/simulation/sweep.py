@@ -93,7 +93,7 @@ def run_shard(fam_name: str, shard: int, cfg: Config) -> Path:
     if path.exists():
         return path
     tables = Tables()
-    fam = FAMILIES[fam_name](Rules.load(tables))
+    fam = FAMILIES[fam_name](Rules.load())
     points, rows = [], []
     for index in range(shard * cfg.shard_size, min((shard + 1) * cfg.shard_size, cfg.thetas)):
         theta = draw_theta(fam, tables, cfg, index)

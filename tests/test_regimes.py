@@ -37,7 +37,7 @@ def _manifests(simulation: Path, thetas: list[int], rng) -> pd.DataFrame:
             nbar = float(np.exp(rng.uniform(np.log(110), np.log(790))))
             for rep in (0, 1):
                 rows.append({"case_id": f"{family}-{theta:05d}-{rep}", "family": family, "theta": theta,
-                             "rep": rep, "nbar": nbar, "delta": delta, "n": int(nbar),
+                             "rep": rep, "nbar": nbar, "delta": delta, "delta_tilde": delta, "n": int(nbar),
                              "kappa": 20.0, "mu": 5.0, "sigma": 0.02})
         frame = pd.DataFrame(rows)
         (simulation / family).mkdir(parents=True, exist_ok=True)

@@ -51,14 +51,29 @@ def theta(tables, rules, name, level):
     return fam, amp, model
 
 
+AMPLITUDE = {"thomas": r"\mu", "nested": r"\mu_2", "lgcp": r"\sigma^2", "matern2": "R"}
+
+
+def amplitude_label(name, amp):
+    """What the amplitude is worth in this cell. Matern also gets mu_R, the CSR pairs its hard core
+    forbids (01): the Matern row looks like CSR at every level, and mu_R is why."""
+    if name == "matern2":
+        mu_r = 0.5 * NBAR * (NBAR - 1) * np.pi * amp**2
+        return rf"$R={amp:.3f}$, $\mu_R={mu_r:.0f}$"
+    return rf"${AMPLITUDE[name]}={amp:.2g}$"
+
+
 def gallery(tables, rules, root):
     cols = list(reversed(LEVELS)) + [0.0]
-    fig, axes = plt.subplots(len(STRUCTURED), len(cols), figsize=(7.2, 4.6))
+    fig, axes = plt.subplots(len(STRUCTURED), len(cols), figsize=(7.2, 5.0), layout="constrained")
     for i, name in enumerate(STRUCTURED):
         for j, level in enumerate(cols):
             rng = case_rng(root, "pilot", name if level else "poisson", GALLERY + 10 * j, PATTERN)
+            amp = None if level == 0 else theta(tables, rules, name, level)[1]
             pts = SAMPLERS["poisson"](rng, NBAR) if level == 0 else SAMPLERS[name](rng, **theta(tables, rules, name, level)[2])
             ax = axes[i, j]
+            if amp is not None:
+                ax.set_xlabel(amplitude_label(name, amp), fontsize=6.2, color=INK2, labelpad=1.5)
             ax.scatter(pts[:, 0], pts[:, 1], s=1.6, c=INK, linewidths=0)
             ax.set(xlim=(0, 1), ylim=(0, 1), xticks=[], yticks=[], aspect="equal")
             ax.grid(False)
@@ -123,9 +138,9 @@ def power():
         m = pd.read_csv(DATA / name / "manifest.csv")
         m["S"] = realised_statistic(name)
         frames[name] = m
-        b = np.digitize(m.delta, edges) - 1
+        b = np.digitize(m.delta_tilde, edges) - 1        # -1 / len(mid) = outside the plotted range
         rate = np.array([(m.S[b == k] > 1).mean() for k in range(len(mid))])
-        se = np.sqrt(rate * (1 - rate) / np.bincount(b, minlength=len(mid)))
+        se = np.sqrt(rate * (1 - rate) / np.array([(b == k).sum() for k in range(len(mid))]))
         axes[0].errorbar(mid, rate, yerr=1.96 * se, color=SERIES[name], linewidth=1.5, marker="o", markersize=3,
                          label=LABEL[name])
         med = [np.median(m.S[b == k]) for k in range(len(mid))]
@@ -139,7 +154,7 @@ def power():
     thirds = np.quantile(pooled.nbar, [0, 1 / 3, 2 / 3, 1])
     for k, color in enumerate(("#86b6ef", "#2a78d6", "#104281")):
         sub = pooled[(pooled.nbar >= thirds[k]) & (pooled.nbar <= thirds[k + 1])]
-        b = np.digitize(sub.delta, edges) - 1
+        b = np.digitize(sub.delta_tilde, edges) - 1
         axes[1].plot(mid, [(sub.S[b == j] > 1).mean() for j in range(len(mid))], color=color, linewidth=1.5,
                      marker="o", markersize=3, label=rf"$\bar n\in[{thirds[k]:.0f},{thirds[k + 1]:.0f}]$")
     axes[1].axhline(size, color=MUTED, linestyle="--", linewidth=1)
@@ -180,7 +195,7 @@ def prior():
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     tables = Tables()
-    rules = Rules.load(tables)
+    rules = Rules.load()
     gallery(tables, rules, Config.load().root)
     curves(tables, rules)
     prior()

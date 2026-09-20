@@ -15,7 +15,7 @@ OFFSET = 10**9   # pilot indices above the null-curve range
 
 
 def check_theta(fam_name: str, index: int, patterns: int, cfg: Config, tables: Tables, radii: int = 16) -> dict:
-    fam = FAMILIES[fam_name](Rules.load(tables))
+    fam = FAMILIES[fam_name](Rules.load())
     theta = draw_theta(fam, tables, cfg, index)
     model = dict(theta["model"])
     if fam_name == "lgcp":
