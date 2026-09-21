@@ -7,6 +7,12 @@ recovered after the refactor and the full data regeneration that follows it.
 
 Created 2026-09-02.
 
+> **Every path named below is a path at the tag, not on `main`.** `writeup/`,
+> `configs/frozen/`, `scripts/generate.py`, `results/experiments.jsonl` and the
+> legacy `data/` layout were all removed from the working branches by the
+> training refactor and the cleanup that followed. Start from
+> `git checkout legacy-pre-kernel` (or the bundle) and they are all there.
+
 ---
 
 ## Pointers
