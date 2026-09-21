@@ -1,0 +1,166 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+
+\newcommand{\dt}{\tilde\delta}
+\newcommand{\nb}{\bar n}
+\newcommand{\R}{\mathbb R}
+
+\title{01 --- Departure from CSR: $\dt$ and null tables}
+\date{17 September 2026}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\section{Theory}
+
+\subsection*{Setting}
+\begin{itemize}
+  \item Window $W=[0,1]^2$
+  \item $\nb$ = expected number of points in $W$.
+  \item Point cloud $x = \{x_1,\dots,x_n\} \subset W$; $n(x) = |x|$ denotes realised number of points
+\end{itemize}
+
+\subsection*{Estimator}
+\begin{itemize}
+  \item Centred $L$-function of a pattern $x$, built from Ripley's $K$ function:
+  \[
+    \hat\phi_x(r) = \sqrt{\hat K_x(r)/\pi} - r,
+    \qquad
+    (= 0 \text{ under CSR})
+  \]
+  \item Evaluated on a fixed grid $0<r_1<\dots<r_K=0.25$, giving $\hat\phi_x \in \R^{K}$
+\end{itemize}
+
+\subsection*{Radius set}
+Everything in this subsection is defined for fixed $n(x)$. The test and $\dt$ only use radii in
+\[
+  R(n) = \{r_k : \mu(r_k;n) \ge p\} = [r_{\min}(n), 0.25],
+  \qquad
+  \mu(r;n) = \tfrac12 n(n-1)\pi r^2,
+\]
+i.e.\ radii with at least $p$ expected pairs closer than $r$ under $\mathbb P_{0,n}$.
+\begin{itemize}
+  \item This is because with few pairs, $\hat\phi$ takes a handful of values and the standardised deviation is heavy-tailed (at $n=99$, $\mathbb P(|z|>3)$ is $10\times$ Gaussian for $\mu<0.3$, $3\times$ for $\mu\in[3,10)$). Such radii win the null maximum too often, raising $c_{95}$ and costing power at every other radius
+  \item Binding constraint is the smoothness of $c_{95}(n)$, needed for the spline across $n$. Below $p\approx5$ the raw $c_{95}$ has structure at large $n$ that no spline follows:
+
+  \smallskip
+  \begin{tabular}{@{}lrrr@{}}
+  \toprule
+  $p$ & $c_{95}$ mean $z^2$ (expect $\approx1$) & residual s.d. & Monte Carlo noise \\
+  \midrule
+  10 & 0.77 & 0.019 & 0.022 \\
+  \textbf{5} & \textbf{0.97} & \textbf{0.023} & \textbf{0.022} \\
+  4 & 1.62 & 0.036 & 0.029 \\
+  3 & 5.22 & 0.040 & 0.026 \\
+  \bottomrule
+  \end{tabular}
+
+  \smallskip
+  \item Use use $p=5$. Then
+  \[
+    r_{\min}(n) = \sqrt{\frac{2p}{\pi n(n-1)}} \approx \frac{1.78}{n}
+  \]
+\end{itemize}
+
+\subsection*{Null distribution}
+We compute the null distribution at every $n(x)$ on a grid.
+\begin{itemize}
+  \item Generate $12\,000$ CSR clouds from $\mathbb P_{0,n}$
+  \item Estimate null moments for $r \in R(n)$ using half of the CSR clouds:
+  \[
+    m_0(r;n) = \mathbb E_{0,n}\big[\hat\phi_X(r)\big],
+    \qquad
+    s_0(r;n) = \mathrm{sd}_{0,n}\big[\hat\phi_X(r)\big]
+  \]
+  \item Using remaining half of CSR clouds, compute maximum deviation of each cloud $x$:
+  \[
+    M_n(x) = \max_{r\in R(n)} \frac{|\hat\phi_x(r) - m_0(r;n)|}{s_0(r;n)}
+  \]
+  \item Determine critical value: $c_{95}(n)$ = 95\% quantile of $M_n$ over these clouds.
+  \item Repeated for every $n(x)$ on grid, then smooth $m_0$, $s_0$, $c_{95}$ across $n(x)$ (cubic splines in $\log n$) $\Rightarrow$ less Monte Carlo noise.
+\end{itemize}
+
+\subsection*{Studentised global envelope (Myllym\"aki et al.\ 2017)}
+\begin{itemize}
+  \item Reject CSR at 5\% iff $M_n(x) > c_{95}(n)$, $n = |x|$; size $0.05$ by definition of $c_{95}$ (up to Monte Carlo error)
+  \item We define the "distance from CSR" $\dt$:
+    \[
+      \dt(\theta,\nb) = \frac{1}{c_{95}(\nb)} \max_{r\in R(\nb)} \frac{|L_\theta(r) - r|}{s_0(r;\nb)}
+    \]
+  \item Same functional as $M_n$, applied to the closed-form $L_\theta$ at $\nb$, uncentred ($m_0 = 0$)
+  \item $\dt(\text{CSR}) = 0$ exactly and $\dt = 1$ is on the rejection boundary
+  \item Units: null s.d.s, relative to the critical value
+  \item This property is known before simulation, so is usable as a sweep coordinate
+  \item At fixed shape, $\dt$ grows with $\nb$ ($s_0$ shrinks)
+  \item Depends on the cutoff when the departure lives below $r_{\min}$: a hard core of radius $R<r_{\min}$ enters $\dt$ only through the pair deficit it leaves above $r_{\min}$, diluted by the CSR count there, so its $\dt$ scales with $p$
+\end{itemize}
+
+%==============================================================================
+\section{Implemented pipeline}
+
+\subsection*{Code}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\texttt{src/cloudforger/classical/lfunction.py} & $\hat K$, $\hat L - r$, weights, $L-r$ from $K - \pi r^2$ \\
+\texttt{src/cloudforger/departure/config.py}   & config, $n$ grid, paths \\
+\texttt{src/cloudforger/departure/simulate.py} & null patterns $\to$ stored curves \\
+\texttt{src/cloudforger/departure/fit.py}      & curves $\to$ spline tables \\
+\texttt{src/cloudforger/departure/tables.py}   & tables $\to$ $M_n$, $c_{95}$, $\dt$ \\
+\texttt{src/cloudforger/departure/validate.py} & size on fresh patterns \\
+\texttt{scripts/departure.py}                  & CLI: \texttt{simulate}, \texttt{fit}, \texttt{validate} \\
+\texttt{configs/departure/}                    & \texttt{config.yaml}, \texttt{tables.npz}, \texttt{report.json} \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Configuration}
+\begin{itemize}
+  \item $n$ grid: $\mathrm{round}(20 \cdot 1.03^k)$ up to 2000 $\Rightarrow$ 153 values
+  \item Per grid $n$: 6000 fit + 6000 calibration patterns
+  \item Validation: 50\,000 patterns, $n$ log-uniform integer on $[20, 2000]$
+  \item $p = 5$ pairs; $\alpha = 0.05$; knots: 8 interior (moments), 4 interior ($c_{95}$)
+\end{itemize}
+
+\subsection*{Steps}
+\begin{enumerate}
+  \item \textbf{Simulate}: null curves for every grid $n$, stored
+  \item \textbf{Fit}: moments and $c_{95}$ per $n$, splines in $\log n$ $\to$ \texttt{tables.npz}
+  \item \textbf{Validate}: size on fresh patterns at random $n$
+  \item \textbf{Relabel} (\texttt{scripts/relabel.py}): after a refit, recompute $\dt$ for every swept $\theta$ under the new tables; manifests keep \texttt{delta} (the sampling target) and \texttt{delta\_tilde} (current, what regimes use)
+\end{enumerate}
+
+\subsection*{Results}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Check & Result & Reference \\
+\midrule
+Fitted $m_0$ vs raw, mean $z^2$ & 0.94 & $\approx 0.92$ ($1 - \text{params}/\text{grid}$) \\
+Fitted $s_0$ vs raw, mean $z^2$ & 0.96 & $\approx 0.92$ \\
+Max relative error of $s_0$ & 4.0\% & --- \\
+Fitted $c_{95}$ vs raw, mean $z^2$ & 0.97 & $\approx 0.95$ \\
+$c_{95}$ range; max s.e. & 2.87--3.28; 0.030 & --- \\
+Size, 50\,000 patterns & 0.0518 ($z = 1.8$) & 0.05 \\
+Size by $n$ band & 0.049--0.056, all $|z| \le 2.4$ & 0.05 \\
+Size, 20\,000 Poisson sweep patterns & 0.0496 & 0.05 \\
+Centring gap $\max|m_0|/s_0/c_{95}$ & 0.026--0.044 & --- \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Estimator checks}
+\begin{itemize}
+  \item \texttt{tests/test\_lfunction.py}:
+  \begin{itemize}
+    \item Weights vs brute-force circle fraction: $|\Delta| < 10^{-3}$
+    \item Two points at distance 0.1: $\hat K = 0$ below, $=1$ above
+    \item $\mathbb E\hat K = \pi r^2$ under binomial (400 patterns, within 3\%)
+  \end{itemize}
+  \item One-off: agrees with the previous implementation (\texttt{baselines/vihrs.py}) to $10^{-9}$
+\end{itemize}
+
+Further statistical notes: \texttt{01\_departure\_notes.md}.
+
+\end{document}

@@ -1,0 +1,150 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem,graphicx}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+
+\newcommand{\dt}{\tilde\delta}
+\newcommand{\nb}{\bar n}
+\newcommand{\rmin}{r_{\min}(\nb)}
+
+\title{02 --- Simulation: families, prior, constraints}
+\date{20 September 2026}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\section{Generation}
+
+One pool of patterns swept over the regime coordinates $(\nb,\dt)$: expected count and departure from CSR. Train and test sets are carved from it later. Every structured family gets the same $(\nb,\dt)$ distribution, so the regime of a pattern says nothing about which family produced it. Two patterns per parameter $\theta$, so bias and variance can be separated at fixed $\theta$.
+
+\subsection*{Parameterisation}
+Each $\theta$ can be interpreted as three components: (1) the expected count $\nb$; (2) a \emph{shape} - i.e. what length scale the structure lives; (3) \emph{amplitude} - i.e. how strong it is at that scale. Only the amplitude is used to sweep the target $\dt$ at fixed $nb$.
+
+\begin{itemize}
+  \item \textbf{Poisson}: homogeneous, intensity $\nb$. No structure.
+  \item \textbf{Thomas}: parents at intensity $\kappa$, each with Poisson($\mu$) offspring displaced by $N(0,\sigma^2 I)$. Shape $\sigma$, amplitude $\mu$.
+  \item \textbf{Nested}: the same construction at two levels --- meta-parents at $\kappa$, Poisson($\mu_1$) parents at scale $\sigma_1$, Poisson($\mu_2$) children at scale $\sigma_2$. Shape $(\sigma_2,\ \rho=\sigma_1/\sigma_2,\ \mu_1)$, amplitude $\mu_2$.
+  \item \textbf{LGCP}: $\Lambda = e^{\mu+Y}$ with $\mathrm{Cov}\,Y = \sigma^2 e^{-r/s}$. Shape $s$, amplitude $\sigma^2$.
+  \item \textbf{Mat\'ern II}: primaries at $\lambda_p$, thinned by a hard core of radius $R$. No shape; amplitude $R$.
+\end{itemize}
+
+In each family one further parameter is not free: it is fixed by $\nb$ once the others are chosen ($\kappa=\nb/\mu$ for Thomas, $\kappa=\nb/(\mu_1\mu_2)$ for nested, $\mu=\log\nb-\sigma^2/2$ for the LGCP, and $\lambda_p$ from $\nb=(1-e^{-\lambda_p\pi R^2})/(\pi R^2)$ for Mat\'ern). So moving the amplitude at fixed $(\nb,\text{shape})$ keeps the expected count and the scale of the structure unchanged, and changes only its strength. Sending the amplitude to zero gives CSR: for Thomas, $\mu\to0$ forces $\kappa=\nb/\mu\to\infty$, and a superposition of very many parents with about one point each is Poisson($\nb$).
+
+$\dt$ increases monotonically with the amplitude (checked on grids), so a target $\dt$ has exactly one amplitude. It is found by root-finding on the closed-form $K$ rather than by simulation.
+
+\subsection*{Validity rules}
+Four rules remove parameters for which $\dt$ would be a misleading label. The first two restrict the shape, the last two cap the amplitude. Tolerances $\varepsilon=0.2$, $c=0.45$; the rules use the window $[\rmin,0.25]$ with $\rmin = r_{\min}(\nb)$ at 10 expected pairs (\texttt{rules.min\_pairs} in \texttt{configs/simulation}). That floor is a design choice about which scales are worth sweeping and is deliberately fixed: the test's own cutoff (01, $p=5$) can be refitted without moving the shape prior.
+
+\begin{enumerate}
+  \item \textbf{Structure inside $R(\nb)$.} $\dt$ only looks at $R(\nb)$, so structure sitting mostly below $\rmin$ or above $0.25$ would be invisible to it and patterns with the same $\dt$ would not be equally hard. Requiring most of the structure to fall inside the window gives $\sigma\le0.098$ (Thomas), $s\le0.155$ (LGCP), and matching bounds on the inner and outer nested scales.
+  \item \textbf{Nested levels distinguishable.} Otherwise nested is just a Thomas process. The two scales must be separated ($\rho\ge2.49$) and both must carry a non-negligible share of the clustering ($1\le\mu_1\le4$).
+  \item \textbf{Enough independent units.} $\dt$ is defined at $\nb$, so it only means something if the realised $n$ stays near $\nb$; a few large clusters make $n$ swing. Rule: the coefficient of variation of $n$, available in closed form, is at most $c=0.45$.
+  \item \textbf{Mat\'ern packing.} Type II thinning cannot pass a fill of $\pi R^2\nb=1$ and degenerates near it; capped at $0.95$.
+\end{enumerate}
+
+\subsection*{Range of $\dt$}
+The rules cap how much departure each family can reach. Largest $\dt$ attainable:
+
+\smallskip
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+$\nb$ & 100 & 152 & 230 & 348 & 528 & 800 \\
+\midrule
+Thomas & 16.4 & 26.4 & 41.6 & 64.6 & 99.9 & 154 \\
+Nested & 14.1 & 23.4 & 38.0 & 60.9 & 96.0 & 149 \\
+LGCP & 16.9 & 26.9 & 41.6 & 63.1 & 94.5 & 147 \\
+Mat\'ern II & 4.2 & 5.2 & 6.4 & 7.9 & 9.8 & 11.8 \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+Mat\'ern is the binding family, and its cap is physical rather than a choice of tolerance (raising the fill from 0.95 to 0.999 moves it by 2\%). The range common to all families at all $\nb$ is therefore $\dt\in[0.1,4]$, inside which $\nb$ and $\dt$ can be drawn independently. The lower end is provisional: any larger floor gives a subset of this pool.
+
+\smallskip
+\textbf{Mat\'ern II is never visibly regular.} Write $\mu_R = \tfrac12\nb(\nb-1)\pi R^2$ for the CSR pairs the hard core forbids ($\mu_R = p$ exactly when $R = \rmin$, so it says whether the hard core is inside the window $\dt$ looks at). As $\lambda_p\to\infty$ the retained intensity tends to $1/(\pi R^2)$, so the fill $\pi R^2\nb$ saturates at 1. Two points closer than $R$ are two discs of radius $R/2$ overlapping, so that is a packing fraction of $0.25$, against $0.91$ for dense packing. Even at its own limit the family is only mildly inhibited, which is why the Mat\'ern row of Fig.~\ref{fig:patterns} looks like CSR at every $\dt$: the cause is the family, not the prior, the $\dt$ cap or any constraint on $n$. Strong regularity would need a different repulsive model (Mat\'ern III, sequential inhibition, a hard-core Gibbs process or a DPP). The headroom above $\dt=4$ is also real but uninformative: the feasible maximum is 4.2 at $\nb=100$ and 11.8 at $\nb=800$, and every $\theta$ there has $\mu_R\ge47$, where every method already saturates.
+
+\subsection*{Prior}
+The draw order is part of the definition.
+\begin{enumerate}
+  \item $\nb\sim$ log-uniform$[100,800]$.
+  \item $\dt\sim$ log-uniform$[0.1,4]$ (Poisson: $\dt=0$, skip the rest).
+  \item Shape: each coordinate log-uniform on the box allowed by rules 1--2 at that $\nb$; redraw until valid and until the target $\dt$ is reachable.
+  \item Amplitude: the unique value hitting the target $\dt$, subject to the rule-3/4 caps.
+\end{enumerate}
+Because the shape is drawn after $\dt$ and from its own uniforms, the shape distribution is the same at every $\dt$. The amplitude is never drawn, so its distribution is whatever the $\dt$ prior induces; this is the effective prior that any learned estimator will shrink towards.
+
+\smallskip
+\textbf{$\dt$ was drawn under the $p=10$ tables.} The patterns are untouched by the refit to $p=5$, but $\dt$ is a function of the tables, so every $\theta$ carries two numbers: \texttt{delta}, the target it was drawn and solved for, and \texttt{delta\_tilde}, its $\dt$ under the tables now (\texttt{scripts/relabel.py}); regimes are binned on the latter. For the cluster families the relabelling is a uniform 1--2\% shrink, so their prior is still log-uniform (KS $p$ 0.30--0.58) and still independent of $\nb$ ($\chi^2$ $p$ 0.09--0.90). For Mat\'ern it is nonlinear (median $\times1.40$), so its prior is no longer log-uniform: the range is 0.126--3.95, and the 8 reporting bins hold 431--2860 $\theta$ instead of $\approx1250$. Re-solving the Mat\'ern amplitudes would restore it, at the cost of re-simulating that family. The amplitude solve itself used those tables, so the tables that generated the sweep are kept frozen at \texttt{configs/departure/tables\_sweep\_p10.npz}; reproducing a stored pattern from its seed needs them, not the current ones.
+
+
+%==============================================================================
+\section{Implemented pipeline}
+
+\subsection*{Code}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\texttt{src/cloudforger/simulation/seeding.py}   & addressed random streams \\
+\texttt{src/cloudforger/simulation/families.py}  & rules, shape boxes, $K-\pi r^2$, CV, $\dt$, amplitude solve \\
+\texttt{src/cloudforger/simulation/processes.py} & the five samplers \\
+\texttt{src/cloudforger/simulation/lgcp\_grid.py} & LGCP grid size \\
+\texttt{src/cloudforger/simulation/sweep.py}     & $\theta$ draw, replicate patterns, shards \\
+\texttt{src/cloudforger/simulation/check.py}     & mean $\hat K$ vs closed form \\
+\texttt{scripts/simulate.py}                     & CLI: \texttt{run}, \texttt{merge}, \texttt{check} \\
+\texttt{scripts/feasibility.py}                  & maximum reachable $\dt$ \\
+\texttt{scripts/simulation\_figures.py}          & figures of this document \\
+\texttt{configs/simulation/config.yaml}          & $\nb$, $\dt$ range, rules, sizes \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Validation}
+\begin{itemize}
+  \item The closed-form $K$ agrees with the previous implementation to $10^{-10}$.
+  \item Every sampler reproduces its own closed-form $K$: over 500 patterns at each of 8 $\theta$ per family, the largest deviation is $2.8$ standard errors against a $3.4$ threshold, and relative error stays under $3\%$.
+  \item The draw is exactly log-uniform in the target \texttt{delta}. After relabelling to \texttt{delta\_tilde} (Prior) the cluster families still pass: $\log\dt$ uniform (KS $p$ 0.30--0.58) and independent of $\nb$ ($\chi^2$ $p$ 0.09--0.90), every $(\nb,\dt)$ cell within 9\% of its expected count. Mat\'ern does not (KS $p<10^{-3}$; cells $-53\%$ to $+121\%$), though $\nb$ and $\dt$ stay independent ($\chi^2$ $p=0.72$).
+  \item Realised $n$ ranges 44--961, no pattern redrawn. The CV rule never binds in this range (max 0.34 against a cap of 0.45); it would only matter at larger $\dt$.
+  \item The 5\% $L$-test of 01 rejects 4.9\% of the 20\,000 Poisson patterns.
+  \item The two patterns of a $\theta$ agree on rejection 77--87\% of the time, so a single pattern is a noisy but not arbitrary read of its regime.
+\end{itemize}
+
+%==============================================================================
+\section{Analysis}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figs/02_regime_patterns.pdf}
+\caption{One pattern per cell, $\nb=400$, fixed shape per family (Thomas $\sigma=0.03$; nested $\sigma_2=0.008$, $\rho=5$, $\mu_1=3$; LGCP $s=0.04$). Only the amplitude changes along a row, and its value is printed under each panel. For Mat\'ern that is the hard core $R$, with $\mu_R$, the CSR pairs it forbids: the row looks like CSR throughout because even at $\dt=4$ the hard core is about a quarter of the mean spacing $1/\sqrt{\nb}=0.05$.}
+\label{fig:patterns}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figs/02_power.pdf}
+\caption{The 5\% L-test of 01 on all 100\,000 simulated patterns. Left: rejection rate by family, 12 log-bins of $\dt$, 95\% intervals. Middle: pooled over families, by $\nb$ tercile. Right: median realised $M_n/c_{95}$ (dashed: $M_n/c_{95}=\dt$; dotted: CSR median).}
+\label{fig:power}
+\end{figure}
+
+\subsection*{What the figures show}
+\begin{itemize}
+  \item \textbf{The amplitude does what it should} (Fig.~\ref{fig:patterns}): along each row only the amplitude moves, and by $\dt\le0.25$ the patterns are visually CSR while the scale of the structure is unchanged.
+  \item \textbf{Equal $\dt$ means equal difficulty} for the $L$ test, across families (Fig.~\ref{fig:power}, left):
+
+  \smallskip
+  \begin{tabular}{@{}lrrrrrr@{}}
+  \toprule
+  $\dt$ bin & (0.1, 0.2] & (0.2, 0.4] & (0.4, 0.8] & (0.8, 1.25] & (1.25, 2] & (2, 4] \\
+  \midrule
+  Thomas & 0.076 & 0.128 & 0.336 & 0.709 & 0.954 & 0.998 \\
+  Nested & 0.070 & 0.131 & 0.370 & 0.786 & 0.974 & 1.000 \\
+  LGCP & 0.081 & 0.149 & 0.387 & 0.752 & 0.920 & 0.987 \\
+  Mat\'ern II & 0.071 & 0.093 & 0.290 & 0.683 & 0.984 & 1.000 \\
+  \bottomrule
+  \end{tabular}
+  \item \textbf{$\dt$ absorbs $\nb$} (middle): the three $\nb$ terciles agree within 0.03 in every bin, which is what lets the two regime coordinates be read separately.
+  \item \textbf{Floor and ceiling} (left and right): below $\dt\approx0.25$ the classical test is at its noise floor and the median realised $M_n/c_{95}$ is that of CSR; above $\dt\approx1.25$ it rejects almost always and $M_n/c_{95}$ tracks $\dt$. The interesting band is in between.
+  \item \textbf{Mat\'ern still lags at the weak end} (left): its hard core is only partly inside $R(\nb)$, so part of the departure is seen second hand (01). The cutoff $p=10\to5$ closed most of the gap --- at $\dt\in(0.4,0.8]$ Mat\'ern went from 0.214 to 0.290 against 0.34--0.39 for the clusters, and it now overtakes them above $\dt\approx1.25$ --- but below $\dt\approx0.4$ it is still the easier family for a test that looks at nearest-neighbour distances rather than at $L$.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,297 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+
+\newcommand{\dt}{\tilde\delta}
+\newcommand{\nb}{\bar n}
+
+\title{5 --- Results}
+\date{}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\section{Experiments}
+
+\subsection*{Run matrix}
+Six tasks: 5-way classification, and parameter estimation for each of the five families. Each run through both arms at every feature setting.
+\begin{itemize}
+  \item \textbf{PH arm}, 18 settings: 6 filtrations (Rips, alpha, DTM$_{5,10,15,20}$) $\times$ $\{H_0,\ H_1,\ H_0{+}H_1\}$
+  \item \textbf{Classical arm}, 4 settings:
+  \begin{itemize}
+    \item $L$ on \texttt{fixed} alone (VIHRS feature set)
+    \item $L,F,G,J$ all on \texttt{fixed}, stacked
+    \item $L,F,G,J$ all on \texttt{sqrtn}, stacked
+    \item $L$ on \texttt{fixed}, $F,G,J$ on \texttt{sqrtn} (per-function grids, one encoder each)
+  \end{itemize}
+  \item $6\times(18+4)=132$ configurations $\times$ 10 seeds $=1320$ runs, all complete
+\end{itemize}
+
+\subsection*{Conduct}
+\begin{itemize}
+  \item Everything is evaluated on the same 2000 test $\theta$ per family, fixed before any run and untouched until evaluation
+  \item Best epoch ranges 7--196 with median 34. Six runs of 1320 reached the 200-epoch cap, all of them Mat\'ern parameters and five of them on a 1-D $H_0$ input
+  \item Seed sd of a marginal cell estimate is $0.001$--$0.004$ for accuracy, an order of magnitude below the $\theta$ bootstrap width
+\end{itemize}
+
+\subsection*{Regime coordinate}
+Cells are 8 log-$\dt$ bins on $[0.1,4]$ and 3 log-$\nb$ bins on $[100,800]$, edges from the prior and shared by every family and method. Binning is on $\dt$ \emph{recomputed under the current null tables}, whose radius set keeps radii with at least $p=5$ expected CSR pairs. The prior was swept against the earlier $p=10$ tables, so the label of a fixed $\theta$ has moved, and by different amounts per family:
+
+\smallskip
+\begin{tabular}{@{}lrrrrrrrrr@{}}
+\toprule
+test $\theta$ per $\dt$ bin & 0.10 & 0.16 & 0.25 & 0.40 & 0.63 & 1.00 & 1.59 & 2.52 & $\dt_5/\dt_{10}$ \\
+\midrule
+Thomas   & 244 & 259 & 247 & 235 & 271 & 243 & 266 & 230 & 0.98 \\
+nested   & 270 & 227 & 272 & 272 & 263 & 245 & 239 & 209 & 0.99 \\
+LGCP     & 223 & 281 & 272 & 229 & 279 & 227 & 258 & 225 & 0.99 \\
+Mat\'ern & \textbf{73} & 232 & 208 & 230 & 175 & 262 & \textbf{588} & 232 & 1.40 \\
+\midrule
+all four & 810 & 999 & 999 & 966 & 988 & 977 & 1351 & 896 & \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+\begin{itemize}
+  \item For the three clustering families the relabelling is a uniform $-1$--$2\%$ and the bins stay flat at $\approx250$ $\theta$
+  \item Mat\'ern moves: median ratio $1.40$, peaking at $1.86$ near $\dt_{10}\approx0.8$ and back to $0.99$ in the top two bins. A hard core of radius $R<r_{\min}$ enters $\dt$ only through the pair deficit it leaves \emph{above} $r_{\min}$, diluted by the CSR count there (01, 02); dropping $p$ to 5 extends $R(n)$ below $R$ and the deficit is seen directly. At large $R$ the core is already inside $R(n)$ at either cutoff, so the label does not move
+  \item Consequence: Mat\'ern's prior is no longer flat across $\dt$ bins. Cell estimates are unaffected --- each is read within its own bin --- but the Mat\'ern intervals are wide at $\dt=0.10$ (73 $\theta$) and tight at $1.59$ (588 $\theta$)
+  \item The sweep itself is unchanged. The shape-rule floor in \texttt{configs/simulation} stays at 10 expected pairs: that is a choice about which scales are worth sweeping, deliberately not the test's cutoff
+  \item Poisson has $\dt=0$ and falls in no $\dt$ bin. It appears in the marginal and $\nb$ rows only, so a $\dt$ cell of the classification task holds four families and chance in it is $0.25$
+\end{itemize}
+
+%==============================================================================
+\section{Classification}
+
+Accuracy on the whole test prior, mean over 10 seeds (chance $0.2$; bootstrap half-widths $\approx0.008$):
+
+\smallskip
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+ & Rips & alpha & DTM$_5$ & DTM$_{10}$ & DTM$_{15}$ & DTM$_{20}$ \\
+\midrule
+$H_0$       & 0.494 & 0.493 & 0.470 & 0.477 & 0.476 & 0.473 \\
+$H_1$       & 0.338 & 0.362 & 0.317 & 0.319 & 0.320 & 0.319 \\
+$H_0{+}H_1$ & 0.489 & \textbf{0.495} & 0.471 & 0.472 & 0.472 & 0.468 \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+Classical arm:
+
+\smallskip
+\begin{tabular}{@{}lr@{}}
+\toprule
+$L$ \texttt{fixed} (VIHRS set)       & 0.518 \\
+$L,F,G,J$ \texttt{fixed}             & 0.539 \\
+$L,F,G,J$ \texttt{sqrtn}             & \textbf{0.540} \\
+$L,F,G,J$ per-function grids         & 0.535 \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+Paired against the best classical setting ($L,F,G,J$ \texttt{sqrtn}), same $\theta$ resamples:
+\begin{itemize}
+  \item $L$ alone: $-0.023$ $[-0.027,-0.019]$
+  \item alpha $H_0{+}H_1$: $-0.046$ $[-0.050,-0.041]$
+  \item DTM$_{10}$ $H_0$: $-0.064$ $[-0.069,-0.059]$
+  \item Adding $H_1$ to $H_0$: $-0.005$ to $+0.002$, negative for four of six filtrations
+\end{itemize}
+
+\subsection*{By regime}
+$\dt$ cells hold four families (Poisson has $\dt=0$), so chance in them is $0.25$; $\nb$ cells hold five, so chance is $0.2$.
+
+\smallskip
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+accuracy by $\dt$ & 0.10 & 0.16 & 0.25 & 0.40 & 0.63 & 1.00 & 1.59 & 2.52 \\
+\midrule
+$L,F,G,J$ \texttt{sqrtn} & 0.101 & 0.189 & \textbf{0.312} & \textbf{0.439} & \textbf{0.486} & \textbf{0.627} & \textbf{0.783} & \textbf{0.780} \\
+$L$ \texttt{fixed}       & 0.106 & \textbf{0.201} & 0.308 & 0.428 & 0.468 & 0.602 & 0.731 & 0.673 \\
+Rips $H_0$               & 0.088 & 0.165 & 0.244 & 0.380 & 0.438 & 0.567 & 0.722 & 0.683 \\
+alpha $H_0$              & 0.086 & 0.167 & 0.241 & 0.377 & 0.436 & 0.572 & 0.722 & 0.678 \\
+DTM$_{10}$ $H_0$         & 0.093 & 0.143 & 0.200 & 0.323 & 0.429 & 0.578 & 0.731 & 0.721 \\
+DTM$_{10}$ $H_1$         & \textbf{0.113} & 0.179 & 0.190 & 0.233 & 0.274 & 0.358 & 0.473 & 0.522 \\
+\bottomrule
+\end{tabular}
+
+\medskip
+\begin{tabular}{@{}lrrrcrrrrr@{}}
+\toprule
+ & \multicolumn{3}{c}{accuracy by $\nb$} & & \multicolumn{5}{c}{recall by family (all regimes)} \\
+\cmidrule(r){2-4}\cmidrule(l){6-10}
+ & 100 & 200 & 400 & & Pois. & Thomas & nested & Mat\'ern & LGCP \\
+\midrule
+$L,F,G,J$ \texttt{sqrtn} & \textbf{0.544} & \textbf{0.544} & \textbf{0.533} & & \textbf{0.773} & 0.213 & \textbf{0.426} & 0.903 & \textbf{0.386} \\
+$L$ \texttt{fixed}       & 0.518 & 0.518 & 0.518 & & 0.764 & \textbf{0.214} & 0.415 & \textbf{0.908} & 0.288 \\
+Rips $H_0$               & 0.508 & 0.499 & 0.475 & & 0.760 & 0.210 & 0.340 & 0.845 & 0.316 \\
+alpha $H_0$              & 0.509 & 0.498 & 0.472 & & 0.758 & 0.200 & 0.339 & 0.848 & 0.321 \\
+DTM$_{10}$ $H_0$         & 0.495 & 0.483 & 0.451 & & 0.707 & 0.198 & 0.419 & 0.714 & 0.346 \\
+DTM$_{10}$ $H_1$         & 0.334 & 0.314 & 0.310 & & 0.390 & 0.116 & 0.237 & 0.556 & 0.297 \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Regime Breakdown}
+The marginal recalls above split by $\dt$. Restricted to one family, accuracy is that family's recall, so these are the same cells as the table above, cut by truth rather than pooled. Three settings: the best classical, the best PH ($H_0$ on a geometric filtration), and DTM$_{10}$ $H_0$, the density-field filtration.
+
+\smallskip
+\begin{tabular}{@{}llrrrrrrrr@{}}
+\toprule
+ & recall by $\dt$ & 0.10 & 0.16 & 0.25 & 0.40 & 0.63 & 1.00 & 1.59 & 2.52 \\
+\midrule
+Thomas   & $L,F,G,J$ \texttt{sqrtn} & 0.027 & 0.033 & 0.062 & 0.080 & 0.156 & \textbf{0.286} & \textbf{0.466} & \textbf{0.615} \\
+         & Rips $H_0$               & \textbf{0.043} & 0.048 & 0.070 & 0.106 & \textbf{0.190} & 0.273 & 0.424 & 0.536 \\
+         & DTM$_{10}$ $H_0$         & 0.037 & \textbf{0.058} & \textbf{0.086} & \textbf{0.109} & 0.170 & 0.271 & 0.391 & 0.470 \\
+\addlinespace
+nested   & $L,F,G,J$ \texttt{sqrtn} & 0.110 & 0.139 & \textbf{0.231} & \textbf{0.403} & \textbf{0.551} & 0.635 & \textbf{0.697} & 0.727 \\
+         & Rips $H_0$               & 0.080 & 0.109 & 0.162 & 0.279 & 0.416 & 0.494 & 0.560 & 0.717 \\
+         & DTM$_{10}$ $H_0$         & \textbf{0.116} & \textbf{0.145} & 0.219 & 0.356 & 0.532 & \textbf{0.653} & 0.672 & \textbf{0.746} \\
+\addlinespace
+Mat\'ern & $L,F,G,J$ \texttt{sqrtn} & \textbf{0.351} & \textbf{0.500} & \textbf{0.872} & \textbf{0.982} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} \\
+         & Rips $H_0$               & 0.282 & 0.369 & 0.619 & 0.883 & 0.969 & \textbf{1.000} & \textbf{1.000} & \textbf{1.000} \\
+         & DTM$_{10}$ $H_0$         & 0.210 & 0.270 & 0.312 & 0.537 & 0.706 & 0.863 & 0.986 & \textbf{1.000} \\
+\addlinespace
+LGCP     & $L,F,G,J$ \texttt{sqrtn} & \textbf{0.090} & 0.116 & 0.193 & \textbf{0.304} & \textbf{0.424} & \textbf{0.554} & \textbf{0.697} & \textbf{0.773} \\
+         & Rips $H_0$               & 0.082 & \textbf{0.150} & 0.198 & 0.276 & 0.365 & 0.462 & 0.544 & 0.474 \\
+         & DTM$_{10}$ $H_0$         & 0.089 & 0.115 & \textbf{0.198} & 0.290 & 0.408 & 0.496 & 0.556 & 0.666 \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+The same recalls by $\nb$ (Poisson appears here, having no $\dt$ bin):
+
+\smallskip
+\begin{tabular}{@{}lrrrcrrrcrrr@{}}
+\toprule
+ & \multicolumn{3}{c}{$L,F,G,J$ \texttt{sqrtn}} & & \multicolumn{3}{c}{Rips $H_0$} & & \multicolumn{3}{c}{DTM$_{10}$ $H_0$} \\
+\cmidrule(r){2-4}\cmidrule(lr){6-8}\cmidrule(l){10-12}
+$\nb$    & 100 & 200 & 400 & & 100 & 200 & 400 & & 100 & 200 & 400 \\
+\midrule
+Poisson  & \textbf{0.781} & 0.778 & 0.762 & & 0.744 & 0.779 & 0.759 & & 0.707 & 0.716 & 0.698 \\
+Thomas   & \textbf{0.261} & 0.217 & 0.161 & & 0.247 & 0.207 & 0.175 & & 0.234 & 0.203 & 0.155 \\
+nested   & 0.401 & 0.431 & \textbf{0.447} & & 0.309 & 0.343 & 0.367 & & 0.395 & 0.431 & 0.430 \\
+Mat\'ern & 0.886 & 0.905 & \textbf{0.918} & & \textbf{0.897} & 0.855 & 0.780 & & 0.777 & 0.714 & 0.647 \\
+LGCP     & 0.379 & \textbf{0.391} & 0.389 & & 0.332 & 0.313 & 0.304 & & 0.351 & 0.359 & 0.329 \\
+\bottomrule
+\end{tabular}
+
+%==============================================================================
+\section{Parameters}
+
+RMSE in log units, pooled over a family's targets, over the whole test prior:
+
+\smallskip
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+ & Poisson & Thomas & nested & Mat\'ern & LGCP \\
+\midrule
+$L,F,G,J$ \texttt{fixed} & \textbf{0.063} & \textbf{0.878} & \textbf{0.593} & 0.118 & \textbf{0.627} \\
+$L,F,G,J$ \texttt{sqrtn} & \textbf{0.063} & 0.896 & \textbf{0.593} & 0.127 & 0.631 \\
+$L$ \texttt{fixed}       & \textbf{0.063} & 0.890 & 0.596 & 0.117 & 0.632 \\
+Rips $H_0$               & \textbf{0.063} & 1.021 & 0.605 & \textbf{0.101} & 0.671 \\
+alpha $H_0$              & \textbf{0.063} & 1.020 & 0.605 & 0.102 & 0.672 \\
+alpha $H_0{+}H_1$        & \textbf{0.063} & 0.946 & 0.602 & 0.107 & 0.668 \\
+DTM$_{10}$ $H_0$         & \textbf{0.063} & 0.945 & 0.606 & 0.158 & 0.682 \\
+DTM$_{10}$ $H_1$         & \textbf{0.063} & 1.019 & 0.684 & 0.319 & 0.873 \\
+\bottomrule
+\end{tabular}
+
+\subsection*{Regime Breakdown}
+Pooled log-RMSE by $\dt$: the best classical setting ($L,F,G,J$ \texttt{fixed}) against the family's best PH setting, and their paired difference on the same $\theta$ resamples. Positive means PH is worse; $^\ast$ marks a 95\% interval that excludes $0$.
+
+\smallskip
+{\small
+\begin{tabular}{@{}llrrrrrrrr@{}}
+\toprule
+ & pooled log-RMSE by $\dt$ & 0.10 & 0.16 & 0.25 & 0.40 & 0.63 & 1.00 & 1.59 & 2.52 \\
+\midrule
+Thomas   & $L,F,G,J$ \texttt{fixed}      & \textbf{1.215} & \textbf{1.117} & \textbf{0.919} & \textbf{0.880} & \textbf{0.915} & \textbf{0.676} & \textbf{0.525} & \textbf{0.459} \\
+         & DTM$_5$ $H_0{+}H_1$           & 1.230 & 1.140 & 0.969 & 0.932 & 1.011 & 0.730 & 0.618 & 0.487 \\
+         & \quad paired                  & $+.015$ & $+.023$ & $+.050^\ast$ & $+.052^\ast$ & $+.095^\ast$ & $+.054^\ast$ & $+.093^\ast$ & $+.028$ \\
+\addlinespace
+nested   & $L,F,G,J$ \texttt{fixed}      & \textbf{0.732} & \textbf{0.641} & \textbf{0.605} & \textbf{0.619} & \textbf{0.596} & \textbf{0.568} & 0.450 & 0.433 \\
+         & alpha $H_0{+}H_1$             & 0.754 & 0.662 & 0.612 & 0.628 & 0.605 & 0.592 & \textbf{0.445} & \textbf{0.398} \\
+         & \quad paired                  & $+.022^\ast$ & $+.021^\ast$ & $+.008$ & $+.009$ & $+.010$ & $+.024^\ast$ & $-.006$ & $-.035^\ast$ \\
+\addlinespace
+Mat\'ern & $L,F,G,J$ \texttt{fixed}      & \textbf{0.170} & \textbf{0.134} & \textbf{0.105} & 0.119 & 0.131 & 0.118 & 0.100 & 0.120 \\
+         & Rips $H_0$                    & 0.181 & 0.146 & 0.112 & \textbf{0.120} & \textbf{0.108} & \textbf{0.085} & \textbf{0.064} & \textbf{0.054} \\
+         & \quad paired                  & $+.010^\ast$ & $+.012^\ast$ & $+.007^\ast$ & $+.001$ & $-.024^\ast$ & $-.033^\ast$ & $-.036^\ast$ & $-.066^\ast$ \\
+\addlinespace
+LGCP     & $L,F,G,J$ \texttt{fixed}      & \textbf{0.888} & \textbf{0.800} & \textbf{0.724} & \textbf{0.640} & \textbf{0.576} & \textbf{0.448} & \textbf{0.352} & \textbf{0.297} \\
+         & alpha $H_0{+}H_1$             & 0.917 & 0.831 & 0.743 & 0.685 & 0.622 & 0.543 & 0.421 & 0.339 \\
+         & \quad paired                  & $+.029^\ast$ & $+.031^\ast$ & $+.020^\ast$ & $+.045^\ast$ & $+.046^\ast$ & $+.094^\ast$ & $+.068^\ast$ & $+.042^\ast$ \\
+\bottomrule
+\end{tabular}
+}
+
+\smallskip
+\begin{itemize}
+  \item Thomas, nested and LGCP improve with $\dt$ in both arms. LGCP improves strictly, while the two clustering families plateau at $\dt\approx0.4$--$0.6$
+  \item On Mat\'ern the classical arm is flat over the whole range ($0.105$--$0.170$, no trend above $\dt\approx0.25$) while Rips $H_0$ falls $0.181\to0.054$
+  \item Classical arm leads everywhere except Mat\'ern above $\dt\approx0.4$ and nested's top two bins. On nested, PH is ahead by $0.006$ at $\dt=1.59$ and by $0.035$ at $2.52$; only the second paired interval clears $0$, so the top bin is the one win that is established
+  \item Only Mat\'ern's gap widens with $\dt$. LGCP's and Thomas's are widest in the middle and close again at the extremes, where both arms are either uninformative or saturated.
+\end{itemize}
+
+\smallskip
+The same, pooled by $\nb$:
+
+\smallskip
+\begin{tabular}{@{}lrrrcrrrcrrr@{}}
+\toprule
+ & \multicolumn{3}{c}{$L,F,G,J$ \texttt{fixed}} & & \multicolumn{3}{c}{Rips $H_0$} & & \multicolumn{3}{c}{DTM$_{10}$ $H_0$} \\
+\cmidrule(r){2-4}\cmidrule(lr){6-8}\cmidrule(l){10-12}
+$\nb$    & 100 & 200 & 400 & & 100 & 200 & 400 & & 100 & 200 & 400 \\
+\midrule
+Poisson  & \textbf{0.079} & \textbf{0.061} & \textbf{0.043} & & \textbf{0.079} & 0.062 & \textbf{0.043} & & 0.080 & 0.062 & \textbf{0.043} \\
+Thomas   & \textbf{0.791} & \textbf{0.870} & \textbf{0.967} & & 0.882 & 1.010 & 1.155 & & 0.836 & 0.925 & 1.062 \\
+nested   & \textbf{0.520} & \textbf{0.586} & \textbf{0.660} & & 0.521 & 0.602 & 0.678 & & 0.534 & 0.605 & 0.668 \\
+Mat\'ern & 0.132 & 0.112 & 0.108 & & \textbf{0.103} & \textbf{0.094} & \textbf{0.105} & & 0.159 & 0.150 & 0.165 \\
+LGCP     & \textbf{0.537} & \textbf{0.631} & \textbf{0.698} & & 0.560 & 0.673 & 0.758 & & 0.575 & 0.685 & 0.766 \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+More points make every shape parameter \emph{harder}, in both arms: at fixed $\dt$ a larger $\nb$ means a weaker per-point departure, since $\dt$ is defined at $\nb$ and the draw is independent of it. Poisson is the exception --- its target is $\nb$ itself, and $0.079/0.061/0.043$ tracks $1/\sqrt{\nb}$ ($0.084/0.059/0.042$ at the bins' geometric centres), the MLE floor for $n\mid\nb$, reached by all 22 inputs.
+
+\subsection*{Mat\'ern $R$ by regime}
+The one target where the arms separate, at target rather than pooled resolution. Log-RMSE by $\dt$ bin, and the paired difference of Rips $H_0$ against $L,F,G,J$ \texttt{fixed} on the same $\theta$ resamples:
+
+\smallskip
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+$\dt$ & 0.10 & 0.16 & 0.25 & 0.40 & 0.63 & 1.00 & 1.59 & 2.52 \\
+\midrule
+$L,F,G,J$ \texttt{fixed} & \textbf{0.230} & \textbf{0.177} & 0.133 & 0.156 & 0.174 & 0.156 & 0.126 & 0.147 \\
+$L$ \texttt{fixed}       & 0.241 & 0.184 & \textbf{0.130} & \textbf{0.150} & 0.160 & 0.147 & 0.124 & 0.153 \\
+alpha $H_0$              & 0.249 & 0.197 & 0.145 & 0.158 & 0.142 & 0.108 & \textbf{0.066} & 0.047 \\
+Rips $H_0$               & 0.246 & 0.197 & 0.145 & 0.157 & \textbf{0.138} & \textbf{0.105} & \textbf{0.066} & \textbf{0.040} \\
+DTM$_{10}$ $H_0$         & 0.386 & 0.305 & 0.190 & 0.203 & 0.221 & 0.218 & 0.173 & 0.113 \\
+\midrule
+paired, Rips $H_0$       & $+0.016$ & $+0.020$ & $+0.012$ & $+0.000$ & $-0.037$ & $-0.051$ & $-0.060$ & $-0.107$ \\
+\quad lower              & $+0.005$ & $+0.013$ & $+0.004$ & $-0.007$ & $-0.046$ & $-0.057$ & $-0.063$ & $-0.112$ \\
+\quad upper              & $+0.027$ & $+0.027$ & $+0.019$ & $+0.007$ & $-0.027$ & $-0.044$ & $-0.056$ & $-0.102$ \\
+\bottomrule
+\end{tabular}
+
+%==============================================================================
+\section{Observations}
+
+\begin{itemize}
+  \item \textbf{PH's edge is Mat\'ern's hard core}, above $\dt\approx0.4$ only. Paired difference on $R$ changes sign there, interval excludes $0$; top bin $0.040$ vs $0.147$ ($3.7\times$). A forbidden spacing is a length $H_0$ records and $\hat K$ averages over
+  \item \textbf{Estimation, not identification.} The classical arm recognises Mat\'ern earlier (recall $1.0$ by $\dt\approx0.6$, PH by $\approx1.0$) and stays ahead on $R$ until $\dt\approx0.4$; PH only overtakes where the family is already certain
+  \item \textbf{Classification goes to the classical arm}: $-0.046$ paired at best, ahead in every $\dt$ bin from $0.16$. With $L$ alone (VIHRS) the gap is $-0.023$, mostly LGCP recall ($0.288\to0.386$); the rest comes from $F,G,J$
+  \item \textbf{Where the classification gap lives.} Against Rips $H_0$ per family: nested in the middle ($0.403$ vs $0.279$ at $\dt=0.40$), Mat\'ern below saturation ($0.872$ vs $0.619$ at $0.25$), LGCP at the top ($0.773$ vs $0.474$). Thomas is level or behind until $\dt\approx1$, Poisson level throughout. Thomas below $\dt\approx0.6$ is where every method fails --- recall $0.03$--$0.19$ against $0.25$ chance, and $56$--$71\%$ of those patterns are called Poisson
+  \item \textbf{$H_1$ does not pay.} At most $+0.002$ over $H_0$, weakest input alone for every family and task; in 2-D the loops are the complement of clusters already in $H_0$
+  \item \textbf{Geometry vs density.} Rips/alpha beat DTM on classification ($0.495$ vs $0.477$) and Mat\'ern; DTM wins only LGCP recall ($0.386$ vs $0.321$), the one density-field departure. By regime the split is sharper: DTM$_{10}$ leads Rips on nested in every $\dt$ bin and on LGCP from $\dt\approx0.25$ up, and trails it on Mat\'ern in every bin below saturation
+  \item \textbf{PH degrades with $\nb$, classical does not} ($0.509\to0.472$ vs $0.544\to0.533$): $\sqrt n$ rescaling makes persistence images $\nb$-invariant in geometry, not information. The per-family split locates it --- Mat\'ern recall goes $0.897\to0.780$ under Rips $H_0$ while the classical arm goes $0.886\to0.918$. Thomas falls in both arms and nested rises in both, so neither contributes to the gap
+  \item \textbf{$\nb$ hurts estimation in both arms.} Pooled log-RMSE rises with $\nb$ for every clustering family and both arms (Thomas $0.79\to0.97$ classical, $0.88\to1.16$ Rips $H_0$): at fixed $\dt$ more points means a weaker per-point departure. Poisson inverts it because its target is $\nb$
+  \item \textbf{Low-$\dt$ bins are below chance} ($0.25$ for four families): the modal prediction is Poisson ($68\%$ of the bottom bin, $59\%$ of the next), excluded there by construction --- a property of the prior, not the methods
+  \item \textbf{Some targets carry no feature information}: Poisson $\nb$ is $0.063$ for all 22 inputs ($\log n$ solves it); nested $\mu_1$ stays at its prior sd ($\approx0.397$); Thomas $\kappa$ and $\mu$ agree within $0.003$, being one target given $\kappa=\nb/\mu$
+  \item \textbf{The $p=10\to5$ relabelling moves Mat\'ern only} ($\dt$ up $1.4\times$ at the median, $1.9\times$ near $\dt\approx0.8$; the other three families within $2\%$), because a sub-$r_{\min}$ hard core is the one departure the cutoff hides. The Mat\'ern $\dt$ curves above are therefore read on an unevenly populated prior, $73$ to $588$ test $\theta$ per bin
+\end{itemize}
+
+\end{document}
