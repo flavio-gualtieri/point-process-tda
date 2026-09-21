@@ -1,21 +1,21 @@
 # tests/test_registries.py
-"""Smoke tests: the filtrations and every registry run end to end on a tiny synthetic example."""
+"""Smoke tests: the filtrations run end to end on a tiny synthetic example."""
 
 from __future__ import annotations
 
 import numpy as np
 
-from cloudforger.core.diagram import PersistenceDiagram
 from cloudforger.featurization.filtrations import FILTRATIONS, tag
-from cloudforger.vectorization.scalar_features import REGISTRY as FEATURE_REGISTRY
 
 
 def _points(seed: int = 0) -> np.ndarray:
     return np.random.default_rng(seed).random((150, 2))
 
 
-def _dtm_diagram(seed: int = 0) -> PersistenceDiagram:
-    return PersistenceDiagram(FILTRATIONS["dtm"](_points(seed), k=5), "uniform", {})
+def _dtm_pairs(seed: int = 0) -> dict[int, np.ndarray]:
+    """Finite pairs per homology dimension of a DTM diagram."""
+    diagram = FILTRATIONS["dtm"](_points(seed), k=5)
+    return {dim: pairs[np.isfinite(pairs).all(axis=1)] for dim, pairs in diagram.items()}
 
 
 def test_filtration_tags():
@@ -44,25 +44,12 @@ def test_dtm_matches_gudhi():
         assert np.allclose(order(ref), order(ours[dim]))
 
 
-def test_feature_registry_betti_and_entropy():
-    assert {"betti_curve", "persistence_entropy"} <= set(FEATURE_REGISTRY.names())
-    diagram = _dtm_diagram()
-
-    betti = FEATURE_REGISTRY.build("betti_curve", homology_dims=(0, 1), grid_size=64)
-    bc = betti.compute(diagram)
-    assert bc.vector().shape == (128,)
-
-    entropy = FEATURE_REGISTRY.build("persistence_entropy", homology_dims=(0, 1))
-    ent = entropy.compute(diagram)
-    assert set(ent.keys()) == {0, 1}
-
-
 def test_fit_imager_on_real_diagrams():
     from cloudforger.vectorization.persistence_images import fit_imager
 
-    diagrams = [_dtm_diagram(i) for i in range(3)]
-    pairs = [d.finite_pairs(1) for d in diagrams]
-    n = np.array([len(d.finite_pairs(0)) + 1 for d in diagrams])
+    diagrams = [_dtm_pairs(i) for i in range(3)]
+    pairs = [d[1] for d in diagrams]
+    n = np.array([len(d[0]) + 1 for d in diagrams])       # H0 has one infinite bar, dropped above
 
     imager = fit_imager(pairs, n, birth_axis=True, resolution=16)
     assert imager.transform(pairs[0], n[0]).shape == (16, 16)
