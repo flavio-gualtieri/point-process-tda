@@ -65,7 +65,7 @@ def fake_data(tmp_path, monkeypatch):
     rng = np.random.default_rng(0)
     simulation, featurization = tmp_path / "simulation", tmp_path / "featurization"
     n_rows = sum(_write_family(simulation, featurization, f, ["rips", "dtm_k10"], rng) for f in FAMILIES)
-    monkeypatch.setattr(D, "SIMULATION", simulation)
+    monkeypatch.setattr(D, "BANK", simulation)
     monkeypatch.setattr(D, "FEATURIZATION", featurization)
     monkeypatch.setattr(D, "FAMILIES", tuple(FAMILIES))
     return n_rows
@@ -90,7 +90,7 @@ def test_split_and_channel_stacking(fake_data):
 
 def test_train_script_writes_test_predictions(fake_data, tmp_path, monkeypatch):
     train = _train_module()
-    monkeypatch.setattr(train.D, "SIMULATION", D.SIMULATION)
+    monkeypatch.setattr(train.D, "BANK", D.BANK)
     monkeypatch.setattr(train.D, "FEATURIZATION", D.FEATURIZATION)
     monkeypatch.setattr(train.D, "FAMILIES", tuple(FAMILIES))
     out = tmp_path / "run"
@@ -111,7 +111,7 @@ def test_train_script_writes_test_predictions(fake_data, tmp_path, monkeypatch):
 
 def test_params_task_predicts_in_parameter_units(fake_data, tmp_path, monkeypatch):
     train = _train_module()
-    monkeypatch.setattr(train.D, "SIMULATION", D.SIMULATION)
+    monkeypatch.setattr(train.D, "BANK", D.BANK)
     monkeypatch.setattr(train.D, "FEATURIZATION", D.FEATURIZATION)
     out = tmp_path / "params"
 
@@ -120,7 +120,7 @@ def test_params_task_predicts_in_parameter_units(fake_data, tmp_path, monkeypatc
                 "--out", str(out)])
 
     z = np.load(out / "predictions.npz")
-    manifest = pd.read_csv(D.SIMULATION / "thomas" / "manifest.csv").set_index("case_id")
+    manifest = pd.read_csv(D.BANK / "thomas" / "manifest.csv").set_index("case_id")
     truth = manifest.loc[list(z["case_id"]), D.TARGETS["thomas"]].to_numpy()
     assert np.allclose(z["y_true"], truth, rtol=1e-5)   # y_true is in parameter units, not standardized
     assert (z["y_pred"] > 0).all()                      # log targets come back positive
@@ -169,7 +169,7 @@ def _write_curves(tmp_path, rng, grids=("sqrtn_u2", "fixed")):
     """Minimal data/classical/<family>/<grid>/curves.npz for the classical arm."""
     root = tmp_path / "classical"
     for family in FAMILIES:
-        manifest = pd.read_csv(D.SIMULATION / family / "manifest.csv")
+        manifest = pd.read_csv(D.BANK / family / "manifest.csv")
         for grid in grids:
             out = {"case_id": manifest.case_id.to_numpy(str), "axis": np.linspace(0, 2, 64)}
             for name in ("L", "F", "G", "J"):
@@ -211,7 +211,7 @@ def test_curves_on_different_grids_get_their_own_encoders(fake_data, tmp_path, m
 def test_train_script_runs_the_classical_arm(fake_data, tmp_path, monkeypatch):
     train = _train_module()
     for module in (D, train.D):
-        monkeypatch.setattr(module, "SIMULATION", D.SIMULATION)
+        monkeypatch.setattr(module, "BANK", D.BANK)
         monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
         monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
         monkeypatch.setattr(module, "CLASSICAL", _write_curves(tmp_path, np.random.default_rng(2)))
@@ -235,7 +235,7 @@ def test_several_seeds_share_one_feature_build(fake_data, tmp_path, monkeypatch,
     cover every seed of a feature set without re-rasterizing per seed."""
     train = _train_module()
     for module in (D, train.D):
-        monkeypatch.setattr(module, "SIMULATION", D.SIMULATION)
+        monkeypatch.setattr(module, "BANK", D.BANK)
         monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
         monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
     monkeypatch.setattr(train, "RESULTS", tmp_path / "results")
@@ -253,7 +253,7 @@ def test_several_seeds_share_one_feature_build(fake_data, tmp_path, monkeypatch,
 def test_finished_seeds_are_skipped(fake_data, tmp_path, monkeypatch, capsys):
     train = _train_module()
     for module in (D, train.D):
-        monkeypatch.setattr(module, "SIMULATION", D.SIMULATION)
+        monkeypatch.setattr(module, "BANK", D.BANK)
         monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
         monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
     monkeypatch.setattr(train, "RESULTS", tmp_path / "results")

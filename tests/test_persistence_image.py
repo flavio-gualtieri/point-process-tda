@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from cloudforger.featurization.filtrations import alpha, dtm, rips
-from cloudforger.simulation.sweep import DATA
+from cloudforger.simulation.bank import DATA
 from cloudforger.vectorization.persistence_images import PersistenceImager, Scaling, fit_imager
 
 RNG = np.random.default_rng(0)

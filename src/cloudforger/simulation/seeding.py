@@ -10,7 +10,7 @@ from __future__ import annotations
 from numpy.random import PCG64DXSM, Generator, SeedSequence
 
 DV = 3
-SET_ID = {"pilot": 8, "sweep": 10}
+SET_ID = {"pilot": 8, "bank": 11}
 FAMILY_ID = {"poisson": 0, "thomas": 1, "nested": 2, "matern2": 3, "lgcp": 5}
 PARAMS, PATTERN = 0, 1
 

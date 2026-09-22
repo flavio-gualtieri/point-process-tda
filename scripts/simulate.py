@@ -1,8 +1,8 @@
-"""Simulate the sweep.
+"""Simulate the cloud bank.
 
     python scripts/simulate.py run --jobs 10                       # every shard of every family (resumable)
     python scripts/simulate.py run --family lgcp --shard 3         # one shard (e.g. one SLURM array task)
-    python scripts/simulate.py merge                               # -> data/simulation/<family>/{points.npz, manifest.csv}
+    python scripts/simulate.py merge --family thomas               # -> data/bank/<family>/{points.npz, manifest.csv}
     python scripts/simulate.py check --jobs 10                     # samplers vs closed-form K
 """
 
@@ -20,7 +20,7 @@ import pandas as pd
 from cloudforger.departure.tables import Tables
 from cloudforger.simulation.check import check_theta
 from cloudforger.simulation.families import FAMILIES
-from cloudforger.simulation.sweep import DATA, Config, run_shard
+from cloudforger.simulation.bank import DATA, Config, run_shard
 
 ORDER = ("poisson", "thomas", "nested", "matern2", "lgcp")
 
@@ -48,7 +48,7 @@ def cmd_run(cfg, args):
 
 
 def cmd_merge(cfg, args):
-    for fam in ORDER:
+    for fam in ([args.family] if args.family else ORDER):
         paths = sorted((DATA / "shards" / fam).glob("shard_*.npz"))
         expected = math.ceil(cfg.thetas / cfg.shard_size)
         if len(paths) != expected:
@@ -65,7 +65,7 @@ def cmd_merge(cfg, args):
                  offsets=np.concatenate([[0], np.cumsum(sizes)]))
         manifest.to_csv(out / "manifest.csv", index=False)
         print(f"{fam:8s} {len(manifest)} patterns, n {manifest.n.min()}-{manifest.n.max()}, "
-              f"max pattern tries {manifest.pattern_tries.max()}", flush=True)
+              f"max tries: draw {manifest.draw_tries.max()}, pattern {manifest.pattern_tries.max()}", flush=True)
 
 
 def _check(args):
@@ -86,7 +86,9 @@ def main():
     r.add_argument("--shard", type=int)
     r.add_argument("--jobs", type=int, default=1)
     r.set_defaults(func=cmd_run)
-    sub.add_parser("merge").set_defaults(func=cmd_merge)
+    m = sub.add_parser("merge")
+    m.add_argument("--family", choices=list(FAMILIES))
+    m.set_defaults(func=cmd_merge)
     c = sub.add_parser("check")
     c.add_argument("--thetas", type=int, default=6)
     c.add_argument("--patterns", type=int, default=400)

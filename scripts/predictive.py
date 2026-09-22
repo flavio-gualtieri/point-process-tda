@@ -95,37 +95,17 @@ ALPHA, B_DEFAULT, THETAS_DEFAULT = 0.05, 99, 400
 
 # ---------------------------------------------------------------- theta -> the two model views
 
-def excess_args(family: str, p: dict) -> tuple[float, dict, float | None]:
-    """Model parameters -> (nbar, shape, amp), the arguments Family.excess takes.
-
-    The inverse of Family.model. Matern's nbar is the intensity left by the type II thinning,
-    (1 - exp(-lam_p pi R^2)) / (pi R^2), which is always positive and always inside the packing
-    bound, so a wild theta_hat cannot push it outside the closed form's domain."""
-    if family == "poisson":
-        return p["nbar"], {}, None
-    if family == "thomas":
-        return p["kappa"] * p["mu"], {"sigma": p["sigma"]}, p["mu"]
-    if family == "nested":
-        return (p["kappa"] * p["mu1"] * p["mu2"],
-                {"sigma2": p["sigma2"], "rho": p["sigma1"] / p["sigma2"], "mu1": p["mu1"]},
-                p["mu2"])
-    if family == "lgcp":
-        return p["nbar"], {"s": p["s"]}, p["sigma2"]
-    a = math.pi * p["R"] ** 2
-    return -math.expm1(-p["lam_p"] * a) / a, {}, p["R"]
-
-
-def sampler_args(family: str, p: dict, tables: Tables) -> dict | None:
-    """Model parameters -> the keyword arguments of processes.SAMPLERS[family].
-
-    The target columns already ARE those keywords for every family but LGCP, which is trained on
-    nbar (mu_log is the one target that can go negative) and needs a grid size. `None` when no grid
-    below lgcp_grid's cap discretises this theta_hat finely enough."""
+def model_of(family: str, p: dict, tables: Tables | None = None) -> dict | None:
+    """Target columns -> model parameters. Only LGCP differs: it is trained on nbar rather than
+    mu_log, the one target that can go negative, and needs a grid size to be simulated. `None`
+    when no grid below lgcp_grid's cap discretises this theta_hat finely enough."""
     if family != "lgcp":
         return dict(p)
+    model = {"mu_log": math.log(p["nbar"]) - p["sigma2"] / 2, "sigma2": p["sigma2"], "s": p["s"]}
+    if tables is None:
+        return model
     M = grid_size(p["sigma2"], p["s"], p["nbar"], tables)
-    return None if M is None else {"mu_log": math.log(p["nbar"]) - p["sigma2"] / 2,
-                                   "sigma2": p["sigma2"], "s": p["s"], "M": M}
+    return None if M is None else {**model, "M": M}
 
 
 # ---------------------------------------------------------------- tier 1
@@ -134,7 +114,7 @@ def model_curves(fam, family: str, rows: list[dict]) -> np.ndarray:
     """(N, 512) closed-form L(r) - r, one row per parameter vector."""
     out = np.empty((len(rows), len(RADII)))
     for i, p in enumerate(rows):
-        out[i] = l_minus_r_from_excess(fam.excess(RADII, *excess_args(family, p)))
+        out[i] = l_minus_r_from_excess(fam.excess(RADII, model_of(family, p)))
     return out
 
 
@@ -142,7 +122,7 @@ def tier1(family: str, true_rows: list[dict], pred_rows: list[dict], tables: Tab
     """D(theta_hat, theta), studentised at the TRUE nbar -- the noise scale of the data being
     scored, and the one guaranteed to sit inside the null tables' range."""
     fam = FAMILIES[family](Rules.load())
-    nbar = np.array([excess_args(family, p)[0] for p in true_rows])
+    nbar = np.array([fam.nbar(model_of(family, p)) for p in true_rows])
     gap = model_curves(fam, family, pred_rows) - model_curves(fam, family, true_rows)
     return tables.delta_tilde(gap, nbar)
 
@@ -173,7 +153,7 @@ def _task(args) -> float:
     """One test pattern: simulate B from theta_hat, rank the observed curves among them."""
     family, pred, observed, seed, n_sims = args
     tables, f_grid = _worker_state()
-    model = sampler_args(family, pred, tables)
+    model = model_of(family, pred, tables)
     if model is None:
         return math.nan
     if family == "lgcp":

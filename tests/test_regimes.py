@@ -66,10 +66,10 @@ def _write_classify_run(results: Path, filtration: str, rows: pd.DataFrame, rng,
 def fake_results(tmp_path, monkeypatch):
     rng = np.random.default_rng(0)
     regimes = _regimes_module()
-    simulation, results = tmp_path / "simulation", tmp_path / "results"
+    bank, results = tmp_path / "bank", tmp_path / "results"
     thetas = [8000 + i for i in range(120)]
-    rows = _manifests(simulation, thetas, rng)
-    monkeypatch.setattr(regimes, "SIMULATION", simulation)
+    rows = _manifests(bank, thetas, rng)
+    monkeypatch.setattr(regimes, "BANK", bank)
     _write_classify_run(results, "dtm_k10", rows, rng, strength=0.20)
     _write_classify_run(results, "rips", rows, rng, strength=0.05)
     return regimes, results, tmp_path

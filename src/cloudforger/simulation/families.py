@@ -1,4 +1,10 @@
-"""Families: shape support, closed-form K(r) - pi r^2, validity rules, amplitude solve."""
+"""Families: the conditional draw that makes a theta, and the closed-form K(r) - pi r^2.
+
+Each family draws its parameters in model order, every bound conditioned on what is already
+drawn. Two independent dials do the work for the cluster families: richness (points per cluster)
+says whether the pattern is really a cluster process, and omega = sigma * sqrt(parent intensity)
+says whether you can see it -- omega << 1 leaves crisp clusters, omega >> 1 smears them into CSR.
+"""
 
 from __future__ import annotations
 
@@ -10,9 +16,6 @@ import numpy as np
 import yaml
 from scipy.optimize import brentq
 
-from ..classical.lfunction import R_MAX, RADII, l_minus_r_from_excess
-from ..departure.tables import Tables, r_min
-
 CONFIG = Path(__file__).resolve().parents[3] / "configs" / "simulation" / "config.yaml"
 _R = np.linspace(0.0, 1.0, 4001)
 _K = np.arange(1, 81)
@@ -20,28 +23,28 @@ _K = np.arange(1, 81)
 
 @dataclass(frozen=True)
 class Rules:
-    eps: float
     cv_max: float
+    kappa_min: float
+    sigma_max: float
+    omega: tuple[float, float]
+    mu_min: float
+    mu2_min: float
+    meta_min: float
+    rho: tuple[float, float]
     matern_fill: float
-    mu1_min: float
-    min_pairs: float
+    core_min: float
+    lgcp_var_min: float
+    lgcp_s_min: float
+    lgcp_s_max: float
 
     @classmethod
     def load(cls, path: Path = CONFIG) -> Rules:
-        """min_pairs is the shape rule's own floor, from the simulation config: the sweep's notion of
-        "a scale worth resolving" is fixed by design, not by whatever cutoff the null tables use."""
-        return cls(**yaml.safe_load(path.read_text())["rules"])
+        d = yaml.safe_load(path.read_text())["rules"]
+        return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in d.items()})
 
-    def r_lo(self, nbar: float) -> float:
-        return float(r_min(nbar, self.min_pairs))
 
-    @property
-    def gauss(self) -> float:
-        return 1 / (2 * math.sqrt(math.log(1 / self.eps)))
-
-    @property
-    def expo(self) -> float:
-        return 1 / math.log(1 / self.eps)
+def log_uniform(rng, lo: float, hi: float) -> float:
+    return float(lo * (hi / lo) ** rng.random())
 
 
 def gauss_step(r, sigma):
@@ -50,124 +53,130 @@ def gauss_step(r, sigma):
 
 class Family:
     name = ""
-    amplitude = ""
-    shape_keys: tuple[str, ...] = ()
+    params: tuple[str, ...] = ()      # model keys, in the order the sampler takes them
 
     def __init__(self, rules: Rules):
         self.rules = rules
 
-    def shape_box(self, nbar) -> dict[str, tuple[float, float]]:
-        return {}
-
-    def valid_shape(self, nbar, shape) -> bool:
-        return all(lo <= shape[k] <= hi for k, (lo, hi) in self.shape_box(nbar).items())
-
-    def amp_bounds(self, nbar, shape) -> tuple[float, float]:
+    def draw(self, rng, nbar: float) -> dict | None:
+        """Model parameters, or None if the bounds leave no room at this nbar."""
         raise NotImplementedError
 
-    def excess(self, r, nbar, shape, amp) -> np.ndarray:
+    def nbar(self, p: dict) -> float:
         raise NotImplementedError
 
-    def model(self, nbar, shape, amp) -> dict[str, float]:
+    def excess(self, r, p: dict) -> np.ndarray:
         raise NotImplementedError
+
+    def draw_sigma(self, rng, kappa: float) -> float | None:
+        """Cluster scale from omega = sigma sqrt(kappa). None if the cost guard leaves no room."""
+        lo, hi = self.rules.omega
+        hi = min(hi, self.rules.sigma_max * math.sqrt(kappa))
+        return None if hi <= lo else log_uniform(rng, lo, hi) / math.sqrt(kappa)
 
 
 class Poisson(Family):
-    name = "poisson"
+    name, params = "poisson", ("nbar",)
 
-    def excess(self, r, nbar, shape, amp):
-        return np.zeros_like(np.asarray(r, float))
-
-    def model(self, nbar, shape, amp):
+    def draw(self, rng, nbar):
         return {"nbar": nbar}
+
+    def nbar(self, p):
+        return p["nbar"]
+
+    def excess(self, r, p):
+        return np.zeros_like(np.asarray(r, float))
 
 
 class Thomas(Family):
-    name, amplitude, shape_keys = "thomas", "mu", ("sigma",)
+    name, params = "thomas", ("kappa", "mu", "sigma")
 
-    def shape_box(self, nbar):
-        g = self.rules.gauss
-        return {"sigma": (g * self.rules.r_lo(nbar), g * R_MAX)}
+    def draw(self, rng, nbar):
+        hi = nbar / self.rules.kappa_min
+        if hi <= self.rules.mu_min:
+            return None
+        mu = log_uniform(rng, self.rules.mu_min, hi)
+        sigma = self.draw_sigma(rng, nbar / mu)
+        return None if sigma is None else {"kappa": nbar / mu, "mu": mu, "sigma": sigma}
 
-    def amp_bounds(self, nbar, shape):
-        return 1e-6, nbar
+    def nbar(self, p):
+        return p["kappa"] * p["mu"]
 
-    def excess(self, r, nbar, shape, amp):
-        return gauss_step(r, shape["sigma"]) * amp / nbar
-
-    def model(self, nbar, shape, amp):
-        return {"kappa": nbar / amp, "mu": amp, "sigma": shape["sigma"]}
+    def excess(self, r, p):
+        return gauss_step(r, p["sigma"]) / p["kappa"]
 
 
 class Nested(Family):
-    name, amplitude, shape_keys = "nested", "mu2", ("sigma2", "rho", "mu1")
+    name, params = "nested", ("kappa", "mu1", "mu2", "sigma1", "sigma2")
 
-    def rho_min(self):
-        e = self.rules.eps
-        return math.sqrt(math.log(1 / e) / -math.log1p(-e) - 1)
+    def draw(self, rng, nbar):
+        c = self.rules
+        hi = nbar / (c.kappa_min * c.mu2_min)
+        if hi <= c.mu2_min:
+            return None
+        mu2 = log_uniform(rng, c.mu2_min, hi)
+        lo, hi = max(1.0, c.meta_min / mu2), nbar / (c.kappa_min * mu2)
+        if hi <= lo:
+            return None
+        mu1 = log_uniform(rng, lo, hi)
+        kappa = nbar / (mu1 * mu2)
+        sigma1 = self.draw_sigma(rng, kappa)
+        if sigma1 is None:
+            return None
+        return {"kappa": kappa, "mu1": mu1, "mu2": mu2,
+                "sigma1": sigma1, "sigma2": sigma1 / log_uniform(rng, *c.rho)}
 
-    def shape_box(self, nbar):
-        g, lo = self.rules.gauss, self.rules.gauss * self.rules.r_lo(nbar)
-        rho_max = math.sqrt((g * R_MAX / lo) ** 2 - 1)
-        return {"sigma2": (lo, g * R_MAX / math.hypot(1, self.rho_min())),
-                "rho": (self.rho_min(), rho_max),
-                "mu1": (self.rules.mu1_min, (1 - self.rules.eps) / self.rules.eps)}
+    def nbar(self, p):
+        return p["kappa"] * p["mu1"] * p["mu2"]
 
-    def valid_shape(self, nbar, shape):
-        return super().valid_shape(nbar, shape) and shape["sigma2"] * math.hypot(1, shape["rho"]) <= self.rules.gauss * R_MAX
-
-    def amp_bounds(self, nbar, shape):
-        return 1e-6, nbar / shape["mu1"]
-
-    def excess(self, r, nbar, shape, amp):
-        s2, rho, mu1 = shape["sigma2"], shape["rho"], shape["mu1"]
-        inv_kappa = mu1 * amp / nbar
-        return gauss_step(r, s2) * inv_kappa / mu1 + gauss_step(r, s2 * math.hypot(1, rho)) * inv_kappa
-
-    def model(self, nbar, shape, amp):
-        s2 = shape["sigma2"]
-        return {"kappa": nbar / (shape["mu1"] * amp), "mu1": shape["mu1"], "mu2": amp,
-                "sigma1": shape["rho"] * s2, "sigma2": s2}
-
-
-class LGCP(Family):
-    name, amplitude, shape_keys = "lgcp", "sigma2", ("s",)
-
-    def shape_box(self, nbar):
-        x = self.rules.expo
-        return {"s": (x * self.rules.r_lo(nbar), x * R_MAX)}
-
-    def amp_bounds(self, nbar, shape):
-        return 1e-6, 10.0
-
-    def excess(self, r, nbar, shape, amp):
-        r = np.asarray(r, float)[..., None]
-        a = _K / shape["s"]
-        coef = np.exp(_K * math.log(amp) - np.cumsum(np.log(_K)))
-        return 2 * np.pi * np.sum(coef * -(np.expm1(-a * r) + a * r * np.exp(-a * r)) / a**2, axis=-1)
-
-    def model(self, nbar, shape, amp):
-        return {"mu_log": math.log(nbar) - amp / 2, "sigma2": amp, "s": shape["s"]}
+    def excess(self, r, p):
+        return (gauss_step(r, p["sigma2"]) / p["mu1"]
+                + gauss_step(r, math.hypot(p["sigma1"], p["sigma2"]))) / p["kappa"]
 
 
 class Matern2(Family):
-    name, amplitude = "matern2", "R"
+    name, params = "matern2", ("R", "lam_p")
 
-    def amp_bounds(self, nbar, shape):
-        return 1e-6, math.sqrt(self.rules.matern_fill / (math.pi * nbar))
+    def draw(self, rng, nbar):
+        core = log_uniform(rng, self.rules.core_min, math.sqrt(self.rules.matern_fill / math.pi))
+        R = core / math.sqrt(nbar)
+        x = math.pi * R**2 * nbar
+        return {"R": R, "lam_p": nbar * -math.log1p(-x) / x}
 
-    def excess(self, r, nbar, shape, amp):
-        R, r = amp, np.asarray(r, float)
-        lam_p = self.model(nbar, shape, amp)["lam_p"]
+    def nbar(self, p):
+        a = math.pi * p["R"] ** 2
+        return -math.expm1(-p["lam_p"] * a) / a
+
+    def excess(self, r, p):
+        R, r = p["R"], np.asarray(r, float)
         t = np.linspace(R, 2 * R, 2001)
-        cum = np.concatenate([[0.0], np.cumsum(np.diff(t) * np.pi * (t[1:] * _matern_pcf(t[1:], lam_p, R)
-                                                                      + t[:-1] * _matern_pcf(t[:-1], lam_p, R)))])
+        pcf = _matern_pcf(t, p["lam_p"], R)
+        cum = np.concatenate([[0.0], np.cumsum(np.diff(t) * np.pi * (t[1:] * pcf[1:] + t[:-1] * pcf[:-1]))])
         inner = np.interp(r, t, cum) - np.pi * r**2
         return np.where(r < R, -np.pi * r**2, np.where(r <= 2 * R, inner, cum[-1] - 4 * np.pi * R**2))
 
-    def model(self, nbar, shape, amp):
-        x = math.pi * amp**2 * nbar
-        return {"R": amp, "lam_p": nbar * -math.log1p(-x) / x}
+
+class LGCP(Family):
+    name, params = "lgcp", ("mu_log", "sigma2", "s", "M")
+
+    def draw(self, rng, nbar):
+        c = self.rules
+        lo = c.lgcp_s_min / math.sqrt(nbar)
+        if lo >= c.lgcp_s_max:
+            return None
+        s = log_uniform(rng, lo, c.lgcp_s_max)
+        build = lambda v: {"mu_log": math.log(nbar) - v / 2, "sigma2": v, "s": s}
+        hi = cv_cap(self, build, c.lgcp_var_min, 10.0)
+        return None if hi is None else build(log_uniform(rng, c.lgcp_var_min, hi))
+
+    def nbar(self, p):
+        return math.exp(p["mu_log"] + p["sigma2"] / 2)
+
+    def excess(self, r, p):
+        r = np.asarray(r, float)[..., None]
+        a = _K / p["s"]
+        coef = np.exp(_K * math.log(p["sigma2"]) - np.cumsum(np.log(_K)))
+        return 2 * np.pi * np.sum(coef * -(np.expm1(-a * r) + a * r * np.exp(-a * r)) / a**2, axis=-1)
 
 
 def _matern_pcf(r, lam_p, R):
@@ -180,26 +189,18 @@ def _matern_pcf(r, lam_p, R):
     return np.where(r < R, 0.0, np.where(r >= 2 * R, 1.0, rho2 / lam**2))
 
 
-FAMILIES: dict[str, type[Family]] = {f.name: f for f in (Poisson, Thomas, Nested, LGCP, Matern2)}
+FAMILIES: dict[str, type[Family]] = {f.name: f for f in (Poisson, Thomas, Nested, Matern2, LGCP)}
 
 
-def cv(fam: Family, nbar, shape, amp) -> float:
+def cv(fam: Family, p: dict) -> float:
     """sd(n) / nbar from K via the isotropic set covariogram of W (valid to r = 1)."""
-    e = fam.excess(_R, nbar, shape, amp)
-    return math.sqrt(1 / nbar + (1 - 3 / np.pi) * e[-1] + np.trapezoid((4 - 2 * _R) / np.pi * e, _R))
+    e = fam.excess(_R, p)
+    return math.sqrt(1 / fam.nbar(p) + (1 - 3 / np.pi) * e[-1] + np.trapezoid((4 - 2 * _R) / np.pi * e, _R))
 
 
-def delta(fam: Family, tables: Tables, nbar, shape, amp) -> float:
-    return float(tables.delta_tilde(l_minus_r_from_excess(fam.excess(RADII, nbar, shape, amp)), nbar)[0])
-
-
-def amp_max(fam: Family, nbar, shape) -> float:
-    lo, hi = fam.amp_bounds(nbar, shape)
-    f = lambda la: cv(fam, nbar, shape, math.exp(la)) - fam.rules.cv_max
+def cv_cap(fam: Family, build, lo: float, hi: float) -> float | None:
+    """Largest value with cv <= cv_max, where `build` turns a value into model parameters."""
+    f = lambda v: cv(fam, build(math.exp(v))) - fam.rules.cv_max
+    if f(math.log(lo)) > 0:
+        return None
     return hi if f(math.log(hi)) <= 0 else math.exp(brentq(f, math.log(lo), math.log(hi), xtol=1e-6))
-
-
-def solve(fam: Family, tables: Tables, nbar, shape, target) -> float | None:
-    lo, hi = fam.amp_bounds(nbar, shape)[0], amp_max(fam, nbar, shape)
-    f = lambda la: delta(fam, tables, nbar, shape, math.exp(la)) - target
-    return None if f(math.log(hi)) < 0 else math.exp(brentq(f, math.log(lo), math.log(hi), xtol=1e-8))

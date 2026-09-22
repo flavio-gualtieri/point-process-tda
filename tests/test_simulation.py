@@ -1,46 +1,61 @@
-from pathlib import Path
+import math
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from cloudforger.departure.tables import Tables
-from cloudforger.simulation.families import FAMILIES, Rules, cv, delta
-from cloudforger.simulation.sweep import DATA, Config, draw_theta, sample_patterns
+from cloudforger.simulation.bank import DATA, Config, draw_theta, sample_patterns
+from cloudforger.simulation.families import FAMILIES, Rules, cv
 
 TABLES = Tables()
 RULES = Rules.load()
 CFG = Config.load()
-
-# The stored sweep solved its amplitudes against the tables in force at generation time (p = 10),
-# so reproducing a stored pattern needs that frozen copy, not whatever tables.npz holds now.
-SWEEP_TABLES = Tables(Path(__file__).resolve().parents[1] / "configs" / "departure" / "tables_sweep_p10.npz")
+STRUCTURED = ["thomas", "nested", "matern2", "lgcp"]
 
 
-@pytest.mark.parametrize("name", ["thomas", "nested", "lgcp", "matern2"])
-def test_theta_hits_target_within_rules(name):
+@pytest.mark.parametrize("name", STRUCTURED)
+def test_draw_respects_the_rules(name):
     fam = FAMILIES[name](RULES)
-    for i in range(5):
+    for i in range(8):
         t = draw_theta(fam, TABLES, CFG, i)
-        assert fam.valid_shape(t["nbar"], t["shape"])
-        assert delta(fam, TABLES, t["nbar"], t["shape"], t["amp"]) == pytest.approx(t["delta"], rel=1e-6)
-        assert cv(fam, t["nbar"], t["shape"], t["amp"]) <= RULES.cv_max
+        p, nbar = t["model"], t["nbar"]
+        assert fam.nbar(p) == pytest.approx(nbar, rel=1e-9)     # the draw really hits its nbar
+        assert cv(fam, p) <= RULES.cv_max
+        assert set(fam.params) <= set(p)
+        if name in ("thomas", "nested"):
+            assert p["kappa"] >= RULES.kappa_min
+            sigma = p["sigma"] if name == "thomas" else p["sigma1"]
+            assert RULES.omega[0] <= sigma * math.sqrt(p["kappa"]) <= RULES.omega[1]
+        if name == "thomas":
+            assert p["mu"] >= RULES.mu_min
+        if name == "nested":
+            assert p["mu2"] >= RULES.mu2_min and p["mu1"] * p["mu2"] >= RULES.meta_min
+            assert RULES.rho[0] <= p["sigma1"] / p["sigma2"] <= RULES.rho[1]
+        if name == "matern2":
+            assert p["R"] * math.sqrt(nbar) >= RULES.core_min
+            assert math.pi * p["R"] ** 2 * nbar <= RULES.matern_fill
 
 
-def test_rules_reproduce_old_bounds():
-    assert FAMILIES["thomas"](RULES).shape_box(400)["sigma"][1] == pytest.approx(0.0985, abs=1e-4)
-    assert FAMILIES["lgcp"](RULES).shape_box(400)["s"][1] == pytest.approx(0.1553, abs=1e-4)
-    assert FAMILIES["nested"](RULES).rho_min() == pytest.approx(2.49, abs=0.01)
+@pytest.mark.parametrize("name", STRUCTURED)
+def test_richness_and_smearing_are_independent(name):
+    """The two dials must both move: a bank drawn on one of them is the failure the design fixes."""
+    fam = FAMILIES[name](RULES)
+    drawn = [draw_theta(fam, TABLES, CFG, i)["model"] for i in range(60)]
+    for key in {"thomas": ("mu", "sigma"), "nested": ("mu2", "sigma1"),
+                "matern2": ("R",), "lgcp": ("sigma2", "s")}[name]:
+        v = np.array([p[key] for p in drawn])
+        assert v.max() / v.min() > 3
 
 
-@pytest.mark.skipif(not (DATA / "thomas" / "manifest.csv").exists(), reason="no simulated data")
+@pytest.mark.skipif(not (DATA / "thomas" / "manifest.csv").exists(), reason="no bank on disk")
 @pytest.mark.parametrize("name", ["poisson", "matern2", "lgcp"])
 def test_stored_pattern_regenerates(name):
     m = pd.read_csv(DATA / name / "manifest.csv")
     z = np.load(DATA / name / "points.npz")
-    k = 2 * 123 + 1
-    theta = draw_theta(FAMILIES[name](RULES), SWEEP_TABLES, CFG, 123)
-    rep, pts, _ = list(sample_patterns(name, theta, CFG, 123))[1]
+    k = CFG.reps * 123 + 1
+    theta = draw_theta(FAMILIES[name](RULES), TABLES, CFG, 123)
+    _, pts, _ = list(sample_patterns(name, theta, CFG, 123))[1]
     assert m.case_id[k] == f"{name}-00123-1"
     np.testing.assert_array_equal(pts, z["points"][z["offsets"][k]:z["offsets"][k + 1]])
 

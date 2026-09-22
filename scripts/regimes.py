@@ -5,7 +5,7 @@
     python scripts/regimes.py --task classify --reference dtm_k10/h01
 
 Nothing about regimes exists during training. A run's predictions carry `case_id`, which joins to
-data/simulation/<family>/manifest.csv for the regime coordinates (nbar, delta_tilde), so the binning here
+data/bank/<family>/manifest.csv for the regime coordinates (nbar, delta_tilde), so the binning here
 can change without retraining anything.
 
 A run is discovered by its directory, results/<task>/<group>/<features>/<variant>/seed_<n>/, and
@@ -57,17 +57,20 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from cloudforger.simulation.sweep import Config, DATA as SIMULATION   # noqa: E402
+from cloudforger.simulation.bank import Config, DATA as BANK   # noqa: E402
 
 RESULTS = ROOT / "results"
-N_DELTA_BINS, N_NBAR_BINS, N_BOOT = 8, 3, 1000
+N_NBAR_BINS, N_BOOT = 3, 1000
+# delta-tilde is a label, not a design coordinate, so its range is a property of the bank
+# rather than of the config. Fixed edges, shared by every family, so cells are comparable.
+DELTA_EDGES = np.geomspace(0.05, 32.0, 11)
 
 
 def manifest(families: list[str]) -> pd.DataFrame:
     """Regime coordinates per pattern. Binning uses `delta_tilde` (delta-tilde under the null tables
     in force now, written by scripts/relabel.py), not `delta` (the sweep's target under whichever
     tables were in force when the patterns were drawn). They differ after a refit at a new cutoff."""
-    frames = [pd.read_csv(SIMULATION / f / "manifest.csv") for f in families]
+    frames = [pd.read_csv(BANK / f / "manifest.csv") for f in families]
     rows = pd.concat(frames, ignore_index=True).set_index("case_id")
     if "delta_tilde" not in rows:
         raise SystemExit("manifests have no `delta_tilde` column -- run scripts/relabel.py first")
@@ -75,8 +78,7 @@ def manifest(families: list[str]) -> pd.DataFrame:
 
 
 def edges(cfg: Config) -> tuple[np.ndarray, np.ndarray]:
-    """Fixed log-spaced edges from the sweep's own prior, so every family and method shares cells."""
-    return (np.geomspace(*cfg.delta, N_DELTA_BINS + 1), np.geomspace(*cfg.nbar, N_NBAR_BINS + 1))
+    return DELTA_EDGES, np.geomspace(*cfg.nbar, N_NBAR_BINS + 1)
 
 
 def bin_left(values: np.ndarray, edge: np.ndarray) -> np.ndarray:

@@ -1,6 +1,6 @@
 """Diagrams for every simulated pattern, one shard of patterns at a time.
 
-Input   data/simulation/<family>/{points.npz, manifest.csv}
+Input   data/bank/<family>/{points.npz, manifest.csv}
 Shard   data/featurization/shards/<family>/<tag>/shard_<i>.npz
 Merged  data/featurization/<family>/<tag>/diagrams.npz (shards deleted), rows in manifest.csv order:
             case_id          (P,)
@@ -22,9 +22,10 @@ import yaml
 
 from .filtrations import FILTRATIONS, tag
 
+from ..simulation.bank import DATA as BANK
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONFIG = PROJECT_ROOT / "configs" / "featurization" / "config.yaml"
-SIMULATION = PROJECT_ROOT / "data" / "simulation"
 DATA = PROJECT_ROOT / "data" / "featurization"
 
 
@@ -44,11 +45,11 @@ class Config:
 
 
 def families() -> list[str]:
-    return sorted(p.parent.name for p in SIMULATION.glob("*/points.npz"))
+    return sorted(p.parent.name for p in BANK.glob("*/points.npz"))
 
 
 def n_shards(family: str, cfg: Config) -> int:
-    return math.ceil(len(pd.read_csv(SIMULATION / family / "manifest.csv")) / cfg.shard_size)
+    return math.ceil(len(pd.read_csv(BANK / family / "manifest.csv")) / cfg.shard_size)
 
 
 def _pack(diagrams: list[dict[int, np.ndarray]], maxdim: int) -> dict[str, np.ndarray]:
@@ -65,7 +66,7 @@ def run_shard(family: str, tag_: str, shard: int, cfg: Config) -> Path:
         return path
     spec = {k: v for k, v in cfg.spec(tag_).items() if k != "name"}
     compute = FILTRATIONS[cfg.spec(tag_)["name"]]
-    z = np.load(SIMULATION / family / "points.npz")
+    z = np.load(BANK / family / "points.npz")
     points, offsets = z["points"], z["offsets"]
     lo, hi = shard * cfg.shard_size, min((shard + 1) * cfg.shard_size, len(offsets) - 1)
     diagrams = [compute(points[offsets[i]:offsets[i + 1]], maxdim=cfg.maxdim, **spec) for i in range(lo, hi)]
@@ -80,7 +81,7 @@ def merge(family: str, tag_: str, cfg: Config) -> Path:
     path, shards = DATA / family / tag_ / "diagrams.npz", DATA / "shards" / family / tag_
     if path.exists() and not shards.exists():
         return path
-    case_id = pd.read_csv(SIMULATION / family / "manifest.csv").case_id.to_numpy(str)
+    case_id = pd.read_csv(BANK / family / "manifest.csv").case_id.to_numpy(str)
     paths = sorted(shards.glob("shard_*.npz"))
     if len(paths) != n_shards(family, cfg):
         raise SystemExit(f"{family}/{tag_}: {len(paths)} of {n_shards(family, cfg)} shards")

@@ -141,7 +141,7 @@ def fake_simulation(tmp_path, monkeypatch):
              offsets=np.concatenate([[0], np.cumsum([len(p) for p in patterns])]))
     pd.DataFrame({"case_id": [f"toy-{i:05d}-0" for i in range(len(patterns))]}).to_csv(
         sim / "toy" / "manifest.csv", index=False)
-    monkeypatch.setattr(C, "SIMULATION", sim)
+    monkeypatch.setattr(C, "BANK", sim)
     monkeypatch.setattr(C, "DATA", tmp_path / "classical")
     return patterns
 

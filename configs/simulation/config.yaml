@@ -1,17 +1,25 @@
 root: 70519940839025816406438102027139626253   # shared with configs/departure
 
-nbar: {low: 100, high: 800}
-
-rules:
-  eps: 0.2           # structure correlation >= eps at r_min(nbar), <= eps at r = 0.25; nested separation and balance
-  cv_max: 0.45       # sd(n) / nbar
-  matern_fill: 0.95  # pi R^2 nbar
-  mu1_min: 1.0       # nested: parents per meta-cluster
-  min_pairs: 10      # shape-rule radius floor r_lo = r_min(nbar, min_pairs); a design choice about
-                     # which scales are worth sweeping, deliberately NOT the test's cutoff
-
-delta: {low: 0.1, high: 4}    # target delta-tilde, log-uniform; poisson has delta = 0
-thetas: 10000                 # per family
+nbar: {low: 75, high: 950}
+thetas: 50000                 # per family
 reps: 2                       # patterns per theta
 n: {low: 20, high: 2000}      # patterns conditioned on n in range (null tables' domain)
-shard_size: 250
+shard_size: 500
+
+# Richness and smearing are independent dials: richness (points per cluster) decides whether the
+# pattern is really a cluster process, omega decides whether you can see it. Nothing here refers to
+# departure -- delta-tilde is a label applied afterwards, so the bank never moves when it changes.
+rules:
+  cv_max: 0.30        # sd(n) / nbar; keeps realised n inside the null tables' domain
+  kappa_min: 10       # clusters in the window
+  sigma_max: 1.5      # cost guard only: the parent window grows as (1 + 10 sigma)^2
+  omega: [0.2, 8.0]   # sigma * sqrt(parent intensity): <1 crisp clusters, >1 smeared towards CSR
+  mu_min: 1.0         # thomas: points per cluster
+  mu2_min: 1.0        # nested: children per parent
+  meta_min: 2.0       # nested: points per meta-cluster
+  rho: [2.49, 10.0]   # nested: scale separation sigma1 / sigma2
+  matern_fill: 0.95   # pi R^2 nbar
+  core_min: 0.05      # matern: hard core, in mean-spacing units
+  lgcp_var_min: 0.05  # lgcp: field variance
+  lgcp_s_min: 0.10    # lgcp: correlation range, in mean-spacing units (resolvable)
+  lgcp_s_max: 0.20    # lgcp: absolute; the largest range the circulant embedding supports

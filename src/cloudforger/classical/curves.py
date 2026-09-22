@@ -1,6 +1,6 @@
 """Summary-function curves for every simulated pattern, one family and grid at a time.
 
-Input   data/simulation/<family>/{points.npz, manifest.csv}
+Input   data/bank/<family>/{points.npz, manifest.csv}
 Output  data/classical/<family>/<tag>/curves.npz, rows in manifest.csv order:
             case_id          (P,)
             L, F, G, J       (P, 512) float32
@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from ..featurization.sweep import SIMULATION, families
+from ..featurization.sweep import BANK, families
 from .functions import GRID_SIZE, NAMES, axis, curves, tag
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -52,8 +52,8 @@ def run(family: str, tag_: str, cfg: Config) -> Path:
     if path.exists():
         return path
     spec = cfg.spec(tag_)
-    case_id = pd.read_csv(SIMULATION / family / "manifest.csv").case_id.to_numpy(str)
-    z = np.load(SIMULATION / family / "points.npz")
+    case_id = pd.read_csv(BANK / family / "manifest.csv").case_id.to_numpy(str)
+    z = np.load(BANK / family / "points.npz")
     points, offsets = z["points"], z["offsets"]
     if len(offsets) - 1 != len(case_id):
         raise SystemExit(f"{family}: {len(offsets) - 1} patterns for {len(case_id)} manifest rows")

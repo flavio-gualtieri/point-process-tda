@@ -24,7 +24,7 @@ from cloudforger.classical.curves import Config, families, run, tag   # noqa: E4
 
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--family", help="default: every family under data/simulation")
+    p.add_argument("--family", help="default: every family under data/bank")
     p.add_argument("--tag", help="default: every grid in the config (fixed, sqrtn_u2)")
     args = p.parse_args(argv)
 

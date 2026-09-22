@@ -1,6 +1,6 @@
 """Diagrams on disk -> persistence images, targets and splits, in memory.
 
-    data/simulation/<family>/manifest.csv           one row per pattern (case_id, theta, nbar, n, ...)
+    data/bank/<family>/manifest.csv           one row per pattern (case_id, theta, nbar, n, ...)
     data/featurization/<family>/<tag>/diagrams.npz  its diagrams, h<d> + h<d>_offsets in manifest order
     data/classical/<family>/<grid>/curves.npz       its L/F/G/J curves (the classical arm)
 
@@ -31,7 +31,7 @@ import pandas as pd
 import torch.utils.data
 
 from ..classical.curves import DATA as CLASSICAL
-from ..featurization.sweep import DATA as FEATURIZATION, SIMULATION
+from ..featurization.sweep import DATA as FEATURIZATION, BANK
 from ..simulation.split import split_of
 from ..vectorization.persistence_images import PersistenceImager, Scaling, fit_imager
 
@@ -58,7 +58,7 @@ class Dataset:
 def load_manifest(families: list[str]) -> pd.DataFrame:
     frames = []
     for family in families:
-        m = pd.read_csv(SIMULATION / family / "manifest.csv")
+        m = pd.read_csv(BANK / family / "manifest.csv")
         m["split"] = split_of(m["theta"].to_numpy())
         frames.append(m)
     return pd.concat(frames, ignore_index=True)
