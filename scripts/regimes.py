@@ -32,7 +32,10 @@ regime curves.
 
 Metrics: accuracy and nll (mean negative log posterior of the true family) for classification; for
 parameters, rmse_log per target and over all targets, in LOG units, because the parameters span
-orders of magnitude and were trained on a log scale.
+orders of magnitude and were trained on a log scale. If scripts/predictive.py has been run, its
+per-pattern columns (dtilde, envelope_p, envelope_reject) are picked up from predictive.npz and
+treated like any other metric; a metric scored on only some thetas is NaN elsewhere and those rows
+are dropped cell by cell, so `n_thetas` is per metric, not per cell.
 
 Uncertainty is a bootstrap over TEST THETAS, not patterns: the two replicates of a theta share their
 parameters, so they are resampled together. Seeds are averaged per pattern before aggregating, and
@@ -117,9 +120,18 @@ def per_pattern(seed_dirs: list[Path]) -> tuple[pd.DataFrame, list[str]]:
             for j, column in enumerate(run["targets"]["columns"]):
                 scores[f"rmse_log:{column}"] = square[:, j]
             scores["rmse_log"] = square.mean(axis=1)
+        extra = seed_dir / "predictive.npz"
+        if extra.exists():                 # scripts/predictive.py: dtilde, envelope_p, envelope_reject
+            more = np.load(extra)
+            if not np.array_equal(more["case_id"], z["case_id"]):
+                raise SystemExit(f"{seed_dir}: predictive.npz covers different patterns")
+            scores.update({k: v for k, v in more.items() if k != "case_id"})
         frames.append(pd.DataFrame(scores, index=case_id))
 
     metrics = list(frames[0].columns)
+    if any(list(f.columns) != metrics for f in frames[1:]):
+        raise SystemExit(f"{seed_dirs[0].parent}: the seeds of this run carry different metrics -- "
+                         f"scripts/predictive.py must be run for EVERY seed of a run, or none")
     mean = sum(frames) / len(frames)
     for i, frame in enumerate(frames):
         mean[[f"{m}__seed{i}" for m in metrics]] = frame.to_numpy()
@@ -192,13 +204,17 @@ def rows_for_run(key, table, metrics, n_seeds, reference, reference_id, rng, n_b
                 if len(pair) != len(subset) or not np.array_equal(pair.theta.to_numpy(), subset.theta.to_numpy()):
                     raise SystemExit(f"{key}: reference run covers different thetas")
                 values = np.column_stack([values[:, 0], pair[metric].to_numpy()])
+            keep = np.isfinite(values).all(axis=1)     # tier-2 metrics score a subsample of thetas
+            if keep.sum() < min_thetas:
+                continue
+            values, scored = values[keep], subset[keep]
             point, lo, hi = bootstrap(values, metric, rng, n_boot)
-            seeds = [estimate(metric, subset[f"{metric}__seed{i}"].to_numpy().mean()) for i in range(n_seeds)]
+            seeds = [estimate(metric, scored[f"{metric}__seed{i}"].to_numpy().mean()) for i in range(n_seeds)]
             out.append({
                 "task": task, "group": group, "features": features, "variant": variant,
                 "target": metric.split(":")[1] if ":" in metric else ("all" if task == "params" else ""),
                 "metric": metric.split(":")[0], "family": family,
-                "nbar_bin": nbar_bin, "delta_bin": delta_bin, "n_thetas": len(subset),
+                "nbar_bin": nbar_bin, "delta_bin": delta_bin, "n_thetas": len(scored),
                 "estimate": point, "lo": lo, "hi": hi, "seed_sd": float(np.std(seeds, ddof=1)) if n_seeds > 1 else np.nan,
                 "reference": reference_id, "n_seeds": n_seeds,
             })
