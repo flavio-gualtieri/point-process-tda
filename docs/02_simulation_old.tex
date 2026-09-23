@@ -1,0 +1,82 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem,graphicx}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+
+\newcommand{\dt}{\tilde\delta}
+\newcommand{\nb}{\bar n}
+\newcommand{\rmin}{r_{\min}(\nb)}
+
+\title{2 --- Simulation: families, prior, constraints}
+\date{}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\section{Generation}
+For each family we sweep over $(\nb,\dt)$ (expected count and departure from CSR); train and test sets are carved from this pool of clouds.
+
+\subsection*{Parameterisation}
+\begin{itemize}
+  \item Each $\theta$ splits into $\nb$, a \emph{shape} (the length scale the structure lives at) and an \emph{amplitude} (how strong it is at that scale). 
+  \item At fixed $\nb$ and shape the amplitude moves $\dt$: it is monotone in the amplitude (checked on grids).
+  \item Amplitude $\to0$ recovers CSR.
+\end{itemize}
+Shape/amplitude parameters for each family:
+\begin{itemize}
+  \item \textbf{Poisson}: homogeneous, intensity $\nb$. No structure ($\dt=0$)
+  \item \textbf{Thomas}: parents at intensity $\kappa$, each with Poisson($\mu$) offspring displaced by $N(0,\sigma^2 I)$. Shape $\sigma$, amplitude $\mu$ (with $\kappa=\nb/\mu$, so $\mu\to0$ is a superposition of many one-point parents, i.e.\ Poisson($\nb$))
+  \item \textbf{Nested}: same construction at two levels: meta-parents at $\kappa$, Poisson($\mu_1$) parents at scale $\sigma_1$, Poisson($\mu_2$) children at scale $\sigma_2$. Shape $(\sigma_2,\ \rho=\sigma_1/\sigma_2,\ \mu_1)$, amplitude $\mu_2$
+  \item \textbf{LGCP}: $\Lambda = e^{\mu+Y}$ with $\mathrm{Cov}\,Y = \sigma^2 e^{-r/s}$. Shape $s$, amplitude $\sigma^2$
+  \item \textbf{Mat\'ern II}: primaries at $\lambda_p$, thinned by a hard core of radius $R$. No shape; amplitude $R$
+\end{itemize}
+Draw order:
+\begin{itemize}
+    \item $\nb\sim$ log-uniform$[100,800]$
+    \item $\dt\sim$ log-uniform$[0.1,4]$ (Poisson: skip the rest)
+    \item Sweep shape on log-uniform intervals allowed by constraints
+\end{itemize}
+
+\subsection*{Constraints}
+Four rules drop parameters for which $\dt$ would be a misleading label. All use the window $[\rmin,0.25]$, with $\rmin$ set at 10 expected pairs.
+\begin{itemize}
+  \item \textbf{Structure sits inside the window.} Structure outside the window is invisible to $\dt$. So $\sigma\le0.098$ (Thomas), $s\le0.155$ (LGCP), and matching bounds on the two nested scales
+  \item \textbf{Nested levels stay distinguishable.} Otherwise nested is just Thomas: scales separated ($\rho\ge2.49$) and both clustering non-negligibly ($1\le\mu_1\le4$)
+  \item \textbf{Counts stay near $\nb$.} $\dt$ is defined at $\nb$, so a few large clusters swinging $n$ breaks the label: CV of $n$ (closed form) at most $0.45$
+  \item \textbf{Mat\'ern packing.} Type II thinning cannot pass a fill of $\pi R^2\nb=1$ and degenerates near it; capped at $0.95$
+\end{itemize}
+
+\subsection*{Range of $\dt$}
+\begin{itemize}
+  \item The constraints cap how much departure each family can reach. Largest attainable $\dt$:
+
+  \smallskip
+  \begin{tabular}{@{}lrrrrrr@{}}
+  \toprule
+  $\nb$ & 100 & 152 & 230 & 348 & 528 & 800 \\
+  \midrule
+  Thomas & 16.4 & 26.4 & 41.6 & 64.6 & 99.9 & 154 \\
+  Nested & 14.1 & 23.4 & 38.0 & 60.9 & 96.0 & 149 \\
+  LGCP & 16.9 & 26.9 & 41.6 & 63.1 & 94.5 & 147 \\
+  Mat\'ern II & 4.2 & 5.2 & 6.4 & 7.9 & 9.8 & 11.8 \\
+  \bottomrule
+  \end{tabular}
+
+  \smallskip
+  \item Common range at all $\nb$ is $\dt\in[0.1,4]$, inside which $\nb$ and $\dt$ can be drawn independently.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figs/02_regime_patterns.pdf}
+\caption{One pattern per cell, $\nb=400$, fixed shape per family (Thomas $\sigma=0.03$; nested $\sigma_2=0.008$, $\rho=5$, $\mu_1=3$; LGCP $s=0.04$).
+Amplitude changes along rows (value stated under each panel).
+For Mat\'ern that is the hard core $R$, with $\mu_R$, the CSR pairs it forbids: the row looks like CSR throughout 
+because even at $\dt=4$ the hard core is about a quarter of the mean spacing $1/\sqrt{\nb}=0.05$.}
+\label{fig:patterns}
+\end{figure}
+
+\end{document}

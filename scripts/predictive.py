@@ -13,8 +13,10 @@ tier 1  `dtilde`: the closed-form distance between the fitted and the true proce
 
             D = max_r |L_hat(r) - L_theta(r)| / s0(r; nbar) / c95(nbar),
 
-        i.e. departure.tables.delta_tilde with the TRUE model's L(r) - r in place of the CSR line
-        that delta-tilde measures from. D = 1 means the fitted and the true process differ by as
+        i.e. departure.tables.delta_tilde under the pointwise `sup` reduction, with the TRUE
+        model's L(r) - r in place of the CSR line that delta-tilde measures from. The reduction is
+        pinned rather than inherited: a distance needs a norm, and the extremum-first reductions
+        are not one (see tier1). D = 1 means the fitted and the true process differ by as
         much as it takes to reject CSR at 5%; D = 0.2 means five times less than that. Both curves
         are the closed form in simulation.families, so there is no simulation and this runs over
         every run in seconds.
@@ -118,13 +120,23 @@ def model_curves(fam, family: str, rows: list[dict]) -> np.ndarray:
     return out
 
 
+DISTANCE = "sup"          # tier 1 needs a NORM; see tier1()
+
+
 def tier1(family: str, true_rows: list[dict], pred_rows: list[dict], tables: Tables) -> np.ndarray:
     """D(theta_hat, theta), studentised at the TRUE nbar -- the noise scale of the data being
-    scored, and the one guaranteed to sit inside the null tables' range."""
+    scored, and the one guaranteed to sit inside the null tables' range.
+
+    Pinned to the pointwise `sup`, NOT to whatever `tables.DEFAULT` is. This is a distance between
+    two model curves, and only a pointwise reduction of |gap| is one: it is symmetric, it is zero
+    exactly when the curves agree, and it grows with the gap. The extremum-first reductions are
+    calibrated against the CSR noise floor rather than against 0, so on a gap curve they would
+    score a perfect fit as a negative number and would read the signed extremum of the gap instead
+    of its size. They are departure coordinates; they are not norms."""
     fam = FAMILIES[family](Rules.load())
     nbar = np.array([fam.nbar(model_of(family, p)) for p in true_rows])
     gap = model_curves(fam, family, pred_rows) - model_curves(fam, family, true_rows)
-    return tables.delta_tilde(gap, nbar)
+    return tables.delta_tilde(gap, nbar, DISTANCE)
 
 
 # ---------------------------------------------------------------- tier 2

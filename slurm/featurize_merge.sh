@@ -14,8 +14,9 @@
 # data/featurization/<family>/<tag>/diagrams.npz, then deletes data/featurization/shards/.
 #
 # Single-threaded and I/O bound: merge() concatenates one (family, tag) pair at a time, so peak
-# memory is one pair's diagrams, not all 30. Runs as one job rather than per-pair because it also
-# prunes the shared shards/ parent directories, which would race across concurrent tasks.
+# memory is one pair's 200 shards plus the concatenated copy, ~2 G for the bank's 100000 patterns
+# per family -- not all 30 pairs. Runs as one job rather than per-pair because it also prunes the
+# shared shards/ parent directories, which would race across concurrent tasks.
 #
 #   sbatch --dependency=afterok:<array job id> slurm/featurize_merge.sh
 

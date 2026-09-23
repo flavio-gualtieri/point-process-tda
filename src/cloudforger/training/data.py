@@ -4,9 +4,10 @@
     data/featurization/<family>/<tag>/diagrams.npz  its diagrams, h<d> + h<d>_offsets in manifest order
     data/classical/<family>/<grid>/curves.npz       its L/F/G/J curves (the classical arm)
 
-Two feature sources, one contract: build() rasterizes diagrams, build_curves() reads summary
-functions, and both return a Dataset whose `images` maps a channel key to a (N, ...) array with one
-encoder per key. Everything after this module is shared, so the arms are comparable by construction.
+Three feature sources, one contract: build() rasterizes diagrams, build_diagrams() pads them for
+the PersLay arm to vectorize itself, build_curves() reads summary functions, and all three return a
+Dataset whose `images` maps a channel key to a (N, ...) array with one encoder per key. Everything
+after this module is shared, so the arms are comparable by construction.
 
 Rows are ordered by (family, manifest order), and every array here keeps that order, so `case_id`
 identifies a row all the way to predictions.npz.
@@ -34,6 +35,7 @@ from ..classical.curves import DATA as CLASSICAL
 from ..featurization.sweep import DATA as FEATURIZATION, BANK
 from ..simulation.split import split_of
 from ..vectorization.persistence_images import PersistenceImager, Scaling, fit_imager
+from ..vectorization.perslay import DiagramPadder, fit_padder
 
 FAMILIES = ("poisson", "thomas", "nested", "matern2", "lgcp")
 
@@ -48,7 +50,7 @@ class Dataset:
     manifest: pd.DataFrame                  # one row per pattern, with a `split` column
     images: dict                            # channel key -> (N, n_tags, ...) float32; one encoder each
     covariates: np.ndarray                  # (N, 1) float32: log n
-    imagers: dict[tuple[str, int], PersistenceImager]
+    imagers: dict[tuple[str, int], PersistenceImager | DiagramPadder]   # the fitted vectorizer
     norm: dict[int, tuple[np.ndarray, np.ndarray]]
 
     def index(self, split: str) -> np.ndarray:
@@ -138,6 +140,57 @@ def build(
 def _covariates(n: np.ndarray, train: np.ndarray) -> np.ndarray:
     covariates = np.log(n.astype(np.float32)).reshape(-1, 1)
     return (covariates - covariates[train].mean()) / covariates[train].std()
+
+
+def build_diagrams(
+    families: list[str],
+    tags: list[str],
+    dims: list[int],
+    coverage: float = 0.99,
+    max_points: int = 1024,
+    scaling: Scaling = Scaling(),
+    verbose: bool = True,
+) -> Dataset:
+    """The PersLay arm: the same diagrams, padded instead of rasterized.
+
+    Everything build() fixes stays fixed -- manifest order, the sqrt(n) coordinate scaling, statistics
+    fitted on train rows only, log n as the covariate -- so a PersLay run and an image run on the same
+    filtration differ in one thing, whether the vectorization is calibrated or learned.
+
+    A channel is (N, n_tags, capacity, 3): the padder standardizes the coordinates itself (pooled over
+    train points, one (mean, std) per tag channel, exactly as the image z-score is pooled over train
+    pixels), so there is no second normalization here and no sqrt -- a padded diagram is a list of
+    coordinates, not a mass with a heavy tail.
+
+    No birth_axis here either: rips/alpha H0 births are all 0, so that column standardizes to a
+    constant the layer can only ignore, which is what the 1-D image says by dropping it.
+    """
+    manifest = load_manifest(families)
+    n = manifest["n"].to_numpy()
+    train = manifest.index[manifest["split"] == "train"].to_numpy()
+
+    images, padders, norm = {}, {}, {}
+    for dim in dims:
+        channels, stats = [], []
+        for tag in tags:
+            pairs = [p for family in families for p in load_pairs(family, tag, dim)]
+            if len(pairs) != len(manifest):
+                raise ValueError(f"{tag} H{dim}: {len(pairs)} diagrams for {len(manifest)} patterns")
+            padder, truncated = fit_padder([pairs[i] for i in train], n[train], coverage=coverage,
+                                           max_points=max_points, scaling=scaling)
+            channel = np.empty((len(pairs), *padder.shape), dtype=np.float32)
+            for i, pair in enumerate(pairs):
+                channel[i] = padder.transform(pair, int(n[i]))
+            padders[(tag, dim)] = padder
+            channels.append(channel)
+            stats.append((padder.mean, padder.std))
+            if verbose:
+                print(f"  [diagram] {tag} H{dim}: {channel.shape[1:]} {padder.params} "
+                      f"({truncated:.1%} of train diagrams truncated)", flush=True)
+        images[dim] = np.stack(channels, axis=1)
+        norm[dim] = (np.stack([m for m, _ in stats]), np.stack([s for _, s in stats]))
+
+    return Dataset(manifest, images, _covariates(n, train), padders, norm)
 
 
 def load_curves(family: str, grid: str, name: str) -> np.ndarray:

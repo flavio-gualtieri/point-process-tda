@@ -10,7 +10,12 @@ shard_size: 500
 # pattern is really a cluster process, omega decides whether you can see it. Nothing here refers to
 # departure -- delta-tilde is a label applied afterwards, so the bank never moves when it changes.
 rules:
-  cv_max: 0.30        # sd(n) / nbar; keeps realised n inside the null tables' domain
+  cv_max: 0.30        # sd(n) / nbar. NOT about the null tables' n domain -- the n filter in
+                      # bank.sample_patterns already guarantees that. This bounds the gap
+                      # between the pattern's realised n and the nbar delta-tilde is labelled
+                      # at: label drift is ~linear in cv, ~20% at 1 sd here, ~35% at 0.45.
+                      # The cluster families invert it into the omega support (families.
+                      # cv_floor) rather than rejecting on it, so it never reshapes kappa/mu.
   kappa_min: 10       # clusters in the window
   sigma_max: 1.5      # cost guard only: the parent window grows as (1 + 10 sigma)^2
   omega: [0.2, 8.0]   # sigma * sqrt(parent intensity): <1 crisp clusters, >1 smeared towards CSR

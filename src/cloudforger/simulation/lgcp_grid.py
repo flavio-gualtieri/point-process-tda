@@ -41,7 +41,8 @@ def grid_bias(sigma2: float, s: float, M: int) -> np.ndarray:
 
 def grid_size(sigma2: float, s: float, nbar: float, tables: Tables,
               tol: float = 0.1, M_min: int = 128, M_max: int = 4096) -> int | None:
-    _, s0, _, mask = tables.moments(nbar)
+    _, s0 = tables.moments(nbar)
+    mask = tables.window(nbar)          # the sup's radius set: where the test actually looks
     s0K = 2 * np.pi * RADII * s0[0]
     M = M_min
     while M <= M_max:

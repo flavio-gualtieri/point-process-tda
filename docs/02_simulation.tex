@@ -7,76 +7,167 @@
 
 \newcommand{\dt}{\tilde\delta}
 \newcommand{\nb}{\bar n}
+\newcommand{\cvmax}{\mathrm{cv}_{\max}}
 \newcommand{\rmin}{r_{\min}(\nb)}
+\newcommand{\code}[1]{\texttt{#1}}
 
-\title{2 --- Simulation: families, prior, constraints}
+\title{2 --- Simulation: the cloud bank}
 \date{}
 
 \begin{document}
 \maketitle
 
 %==============================================================================
-\section{Generation}
-For each family we sweep over $(\nb,\dt)$ (expected count and departure from CSR); train and test sets are carved from this pool of clouds.
+\section{What the bank is}
+The bank is a pool of $50\,000$ parameter vectors $\theta$ per family, each realised as $2$ patterns on $W=[0,1]^2$: $500\,000$ clouds in all. Train, validation and test sets are carved from it afterwards.
 
-\subsection*{Parameterisation}
+The design principle is that \textbf{the bank is drawn on physical parameters and knows nothing about departure from CSR}. The departure label $\dt$ is applied afterwards by \code{scripts/relabel.py}, as a deterministic function of $(\theta,\nb)$ and the null tables. Refitting the tables, or adding a reduction, is a relabelling and never a re-simulation.
+
+This inverts the earlier design, which swept $(\nb,\dt)$ directly and solved for the physical parameters. Sweeping $\dt$ makes the bank a hostage of the null tables: every change to the calibration invalidates every cloud. It also forces the design onto a coordinate that is not identifiable --- many $\theta$ share a $\dt$ --- so the pool silently concentrates on whichever pre-image the solver happened to find.
+
+%==============================================================================
+\section{Two dials}
+Every structured family is drawn on two independent dials.
 \begin{itemize}
-  \item Each $\theta$ splits into $\nb$, a \emph{shape} (the length scale the structure lives at) and an \emph{amplitude} (how strong it is at that scale). 
-  \item At fixed $\nb$ and shape the amplitude moves $\dt$: it is monotone in the amplitude (checked on grids).
-  \item Amplitude $\to0$ recovers CSR.
+  \item \textbf{Richness} --- points per cluster. Decides whether the pattern is \emph{really} a cluster process, or a superposition of so many one-point parents that it is Poisson in disguise.
+  \item \textbf{Smearing} --- $\omega = \sigma\sqrt{\kappa}$, the cluster scale in units of the parent spacing. Decides whether you can \emph{see} it: $\omega\ll1$ leaves crisp clusters, $\omega\gg1$ smears them towards CSR.
 \end{itemize}
-Shape/amplitude parameters for each family:
+The two are independent by construction, which is what lets the bank separate ``there is no structure'' from ``there is structure but it is invisible at this resolution''. A bank drawn on one dial alone cannot make that distinction, and it is the distinction the regime analysis rests on.
+
+\textbf{$\nb$ is a budget, not a parameter.} Each family draws $\nb\sim$ log-uniform$[75,950]$, then draws its dials, and the remaining parameter falls out by conservation of the mean count: $\kappa=\nb/\mu$ for Thomas, $\kappa=\nb/(\mu_1\mu_2)$ for nested, and $\lambda_p$ from an exact inversion of the thinning for Mat\'ern. The realised $\nb(\theta)$ reproduces its target to $2\times10^{-13}$.
+
+%==============================================================================
+\section{Bounds are inverted, not rejected}
+Every bound is written into the \emph{support} of the next draw, conditioned on what is already drawn, rather than tested after the fact. This matters more than it sounds.
+
+A rejection is only harmless when it is uniform over the design. The constraints here are not: they concentrate almost entirely in one corner --- few clusters, crisp clusters --- so rejecting on them silently reweights the \emph{richness} dial, which is the one dial that is supposed to be swept freely. Before the constraint on the count variance was inverted, nested rejected $18.2\%$ of draws and the delivered design was tilted away from the sparse corner: $P(\kappa<15)$ was $0.285$ against an intended $0.396$, with every quartile of $\kappa$, $\mu_1$ and $\mu_2$ displaced. Inverting the same constraint restores all of them exactly and leaves no rejections.
+
+Two helpers do this, both solving for the boundary by \code{brentq} on $\log$ of the parameter:
 \begin{itemize}
-  \item \textbf{Poisson}: homogeneous, intensity $\nb$. No structure ($\dt=0$)
-  \item \textbf{Thomas}: parents at intensity $\kappa$, each with Poisson($\mu$) offspring displaced by $N(0,\sigma^2 I)$. Shape $\sigma$, amplitude $\mu$ (with $\kappa=\nb/\mu$, so $\mu\to0$ is a superposition of many one-point parents, i.e.\ Poisson($\nb$))
-  \item \textbf{Nested}: same construction at two levels: meta-parents at $\kappa$, Poisson($\mu_1$) parents at scale $\sigma_1$, Poisson($\mu_2$) children at scale $\sigma_2$. Shape $(\sigma_2,\ \rho=\sigma_1/\sigma_2,\ \mu_1)$, amplitude $\mu_2$
-  \item \textbf{LGCP}: $\Lambda = e^{\mu+Y}$ with $\mathrm{Cov}\,Y = \sigma^2 e^{-r/s}$. Shape $s$, amplitude $\sigma^2$
-  \item \textbf{Mat\'ern II}: primaries at $\lambda_p$, thinned by a hard core of radius $R$. No shape; amplitude $R$
+  \item \code{cv\_cap} --- largest value with $\mathrm{cv}\le\cvmax$, for a parameter in which cv \emph{increases} (LGCP field variance).
+  \item \code{cv\_floor} --- smallest value with $\mathrm{cv}\le\cvmax$, for a parameter in which cv \emph{decreases} (the smearing dial $\omega$: tighter clusters concentrate the count variance). The mirror of \code{cv\_cap}.
 \end{itemize}
-Draw order:
+The constraint does not disappear, it relocates. In nested the count-variance bound now bites only on $\omega$, per $\theta$, on the dial it physically belongs to; the price is that $\omega$ is log-uniform on a $\kappa$-dependent feasible range rather than a fixed one. That is the honest accounting, and it is visible in the manifest.
+
+%==============================================================================
+\section{The count-variance bound}
+One rule is shared by every family: $\mathrm{cv}(n)=\mathrm{sd}(n)/\nb \le \cvmax = 0.30$, computed in closed form from $K$ via the isotropic set covariogram of $W$.
+
+Its purpose is \textbf{not} to keep $n$ inside the null tables' domain $[20,2000]$ --- the pattern-level filter already guarantees that, and even the worst draws the bound rejects land outside the domain only $1$--$3.5\%$ of the time. Its purpose is \textbf{label integrity}. The label $\dt$ is evaluated at $\nb$, but the pattern it labels has a realised $n$. The larger the cv, the further $n$ wanders from $\nb$, and the worse the label describes the cloud it is attached to. Evaluating the same curve at $n=\nb(1\pm\mathrm{cv})$:
+
+\smallskip
+\begin{tabular}{@{}lrr@{}}
+\toprule
+cv band & median label drift, Thomas & nested \\
+\midrule
+$\le0.10$    & $8.6\%$  & $9.1\%$ \\
+$0.10$--$0.20$ & $17.0\%$ & $17.2\%$ \\
+$0.20$--$0.30$ & $26.4\%$ & $27.1\%$ \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+Drift is measured on the \code{ext} scale, relative to $\dt$, over the thetas with $\dt>1$: below the boundary $\dt$ passes through zero and a relative drift stops being meaningful there, though the absolute drift keeps the same shape (median $0.05$, $0.22$, $1.66$ in $\dt$ units for Thomas across the same three bands).
+
+Drift is close to linear in cv, so $\cvmax$ is a direct dial on how much the label may lie: about a quarter of $\dt$ at one standard deviation at the current cap, and by extrapolation nearer $40\%$ at the $0.45$ this replaced.
+
+%==============================================================================
+\section{Families and their constraints}
+
+\subsection*{Poisson}
+Homogeneous, intensity $\nb$. No parameters beyond the budget, no constraints: its closed-form curve is identically zero. Under the default \code{ext} reduction that scores $\dt\approx-0.97$, the CSR noise floor, not $0$ --- see \S\ref{sec:delivers}. It is the null, not a family with a vanishing amplitude.
+
+\subsection*{Thomas}
+Parents at intensity $\kappa$, each with Poisson($\mu$) offspring displaced by $N(0,\sigma^2I)$. Richness $\mu$, smearing $\omega=\sigma\sqrt\kappa$; $\kappa=\nb/\mu$.
 \begin{itemize}
-    \item $\nb\sim$ log-uniform$[100,800]$
-    \item $\dt\sim$ log-uniform$[0.1,4]$ (Poisson: skip the rest)
-    \item Sweep shape on log-uniform intervals allowed by constraints
+  \item $\kappa\ge10$ (\code{kappa\_min}) --- at least $10$ clusters in the window, so $\kappa$ is estimable and the pattern is a cluster process rather than one blob. Enters as the ceiling $\mu\le\nb/10$.
+  \item $\mu\ge1$ (\code{mu\_min}) --- a floor on points per cluster. Below $1$ the process is a thinned Poisson wearing a cluster parameterisation.
+  \item $\omega\in[0.2,8]$ (\code{omega}) --- the smearing dial, log-uniform.
+  \item $\sigma\le1.5$ (\code{sigma\_max}) --- a \emph{cost} guard, not a modelling choice: parents are simulated on $W$ dilated by $5$ displacement s.d.s, so the parent window grows as $(1+10\sigma)^2$. It caps $\omega$ at $\min(8,\,1.5\sqrt\kappa)$, which bites whenever $\kappa<28.4$, i.e.\ for $33.8\%$ of the delivered thetas. It never rejects: $\sigma\le1.5$ would require $\kappa\le0.018$ to leave no room, and $\kappa\ge10$.
+  \item $\mathrm{cv}\le0.30$, inverted into a floor on $\omega$ by \code{cv\_floor}.
 \end{itemize}
+\textbf{Rejections: none.} All four bounds are inverted; the infeasible branches are unreachable, not merely unused. At the top of the feasible $\omega$ range the worst cv over the whole design is $0.129$, so the \code{cv\_floor} failure path cannot fire.
 
-\subsection*{Constraints}
-Four rules drop parameters for which $\dt$ would be a misleading label. All use the window $[\rmin,0.25]$, with $\rmin$ set at 10 expected pairs.
+\subsection*{Nested}
+The same construction at two levels: meta-parents at $\kappa$, Poisson($\mu_1$) parents displaced at scale $\sigma_1$, Poisson($\mu_2$) children at scale $\sigma_2$. Richness $(\mu_1,\mu_2)$, smearing $\omega=\sigma_1\sqrt\kappa$; $\kappa=\nb/(\mu_1\mu_2)$.
 \begin{itemize}
-  \item \textbf{Structure sits inside the window.} Structure outside the window is invisible to $\dt$. So $\sigma\le0.098$ (Thomas), $s\le0.155$ (LGCP), and matching bounds on the two nested scales
-  \item \textbf{Nested levels stay distinguishable.} Otherwise nested is just Thomas: scales separated ($\rho\ge2.49$) and both clustering non-negligibly ($1\le\mu_1\le4$)
-  \item \textbf{Counts stay near $\nb$.} $\dt$ is defined at $\nb$, so a few large clusters swinging $n$ breaks the label: CV of $n$ (closed form) at most $0.45$
-  \item \textbf{Mat\'ern packing.} Type II thinning cannot pass a fill of $\pi R^2\nb=1$ and degenerates near it; capped at $0.95$
+  \item $\kappa\ge10$, as above, entering twice: first as $\mu_2\le\nb/10$, then as $\mu_1\le\nb/(10\mu_2)$ conditioned on the $\mu_2$ already drawn.
+  \item $\mu_2\ge1$ (\code{mu2\_min}) --- children per parent.
+  \item $\mu_1\mu_2\ge2$ (\code{meta\_min}) --- at least two points per meta-cluster. Without it the outer level is a degenerate relabelling of the inner one and nested collapses to Thomas.
+  \item $\rho=\sigma_1/\sigma_2\in[2.49,10]$ (\code{rho}) --- scale separation. The companion to \code{meta\_min}: the two levels must be distinct in \emph{scale}, not merely in count, or the two-level $K$ is indistinguishable from a one-level $K$ at an intermediate $\sigma$.
+  \item $\omega\in[0.2,8]$ with the same $\sigma_1\le1.5$ cost cap, which here bites for $70.4\%$ of thetas because nested $\kappa$ runs lower.
+  \item $\mathrm{cv}\le0.30$, inverted by \code{cv\_floor}. This requires $\rho$ to be drawn \emph{before} $\sigma_1$, since the inversion needs the complete model to evaluate $K$.
 \end{itemize}
+\textbf{Rejections: none.} The two interval-empty branches are unreachable: $\mu_2$ empty needs $\nb<10$, and $\mu_1$ empty needs $\nb\le20$ or $\mu_2\ge\nb/10$, both excluded. The worst cv at the top of the feasible $\omega$ range is $0.184$.
 
-\subsection*{Range of $\dt$}
+\subsection*{Mat\'ern II}
+Primaries at $\lambda_p$, thinned by a hard core of radius $R$: a point survives if it carries the smallest mark within $R$. One dial, the hard core $c=R\sqrt{\nb}$ in mean-spacing units, drawn log-uniform. This is an inhibitory family, so it has no smearing dial --- there is no cluster to smear.
 \begin{itemize}
-  \item The constraints cap how much departure each family can reach. Largest attainable $\dt$:
-
-  \smallskip
-  \begin{tabular}{@{}lrrrrrr@{}}
-  \toprule
-  $\nb$ & 100 & 152 & 230 & 348 & 528 & 800 \\
-  \midrule
-  Thomas & 16.4 & 26.4 & 41.6 & 64.6 & 99.9 & 154 \\
-  Nested & 14.1 & 23.4 & 38.0 & 60.9 & 96.0 & 149 \\
-  LGCP & 16.9 & 26.9 & 41.6 & 63.1 & 94.5 & 147 \\
-  Mat\'ern II & 4.2 & 5.2 & 6.4 & 7.9 & 9.8 & 11.8 \\
-  \bottomrule
-  \end{tabular}
-
-  \smallskip
-  \item Common range at all $\nb$ is $\dt\in[0.1,4]$, inside which $\nb$ and $\dt$ can be drawn independently.
+  \item $c\ge0.05$ (\code{core\_min}) --- the floor.
+  \item $\pi R^2\nb\le0.95$ (\code{matern\_fill}) --- the \emph{packing} bound, entering as $c\le\sqrt{0.95/\pi}=0.5498$. Type~II thinning cannot pass a fill of $1$: writing $x=\pi R^2\nb$, the required primary intensity is $\lambda_p=\nb\,[-\log(1-x)]/x$, which diverges as $x\to1$. Capping at $0.95$ caps the thinning ratio at $\lambda_p/\nb = 3.145$.
 \end{itemize}
+$\lambda_p$ is an \emph{exact} inversion, not an approximation: $x$ depends only on $c$, so $\lambda_p a = -\log(1-x)$ with $a=\pi R^2$, and the closed-form intensity $[1-e^{-\lambda_p a}]/a$ returns $\nb$ identically. Validated against the sampler across the fill range, realised $\bar n$ matches target to $\le0.4\%$.
 
-\begin{figure}[h]
-\centering
-\includegraphics[width=\textwidth]{figs/02_regime_patterns.pdf}
-\caption{One pattern per cell, $\nb=400$, fixed shape per family (Thomas $\sigma=0.03$; nested $\sigma_2=0.008$, $\rho=5$, $\mu_1=3$; LGCP $s=0.04$).
-Amplitude changes along rows (value stated under each panel).
-For Mat\'ern that is the hard core $R$, with $\mu_R$, the CSR pairs it forbids: the row looks like CSR throughout 
-because even at $\dt=4$ the hard core is about a quarter of the mean spacing $1/\sqrt{\nb}=0.05$.}
-\label{fig:patterns}
-\end{figure}
+\textbf{Rejections: none, and the cv bound is unreachable by construction.} A Mat\'ern~II process is under-dispersed relative to CSR, so over the whole design $\mathrm{cv}\le1/\sqrt{\nb}\le1/\sqrt{75}=0.1155$, comfortably below $\cvmax$. The count-variance bound cannot bind for any inhibitory family at these $\nb$. Realised cv runs $0.017$--$0.115$.
+
+\subsection*{LGCP}
+$\Lambda=e^{\mu_{\log}+Y}$ with $\mathrm{Cov}\,Y=\sigma^2e^{-r/s}$, simulated by circulant embedding on a $(2M)^2$ torus. Shape $s$, amplitude $\sigma^2$; $\mu_{\log}=\log\nb-\sigma^2/2$ so the budget holds.
+\begin{itemize}
+  \item $s\ge0.10/\sqrt{\nb}$ (\code{lgcp\_s\_min}) --- the correlation range must be resolvable at the mean spacing. Below it the field decorrelates within a typical nearest-neighbour distance and the pattern is Poisson at every observable scale.
+  \item $s\le0.20$ (\code{lgcp\_s\_max}) --- absolute, and the largest range the circulant embedding supports with a non-negative spectrum.
+  \item $\sigma^2\ge0.05$ (\code{lgcp\_var\_min}) --- the amplitude floor.
+  \item $\sigma^2$ capped by \code{cv\_cap} at $\cvmax$. This is the one place where the count-variance bound is the \emph{active} ceiling for every draw: the nominal hard ceiling of $10$ is never reached (realised $\sigma^2$ tops out at $8.82$), and realised cv sits at exactly $0.300$.
+  \item Grid size $M$ from \code{lgcp\_grid.grid\_size}: the smallest power of two whose discretisation bias in $K$ is below $0.1$ null s.d.s on the test's radius set, searched over $[128,4096]$. This is the one place the bank consults the null tables, and $M$ is written to the manifest so the pattern stays reproducible from it.
+\end{itemize}
+\textbf{Rejections: $865$ of $50\,865$ draws, $1.70\%$} --- the only family that rejects at all. They are entirely the grid search failing to reach the tolerance within $M\le4096$: the $s$-interval-empty branch needs $\nb\le0.25$, and the \code{cv\_cap} failure branch needs cv at the $\sigma^2$ floor to exceed $0.30$, whose maximum over the whole $(\nb,s)$ domain is $0.143$. The rejection is a genuine numerical infeasibility rather than a design bound, and it concentrates at the long-range end: $76\%$ of accepted thetas need only $M=128$, while $875$ sit at the $M=4096$ ceiling.
+
+%==============================================================================
+\section{Pattern-level conditioning}
+Patterns are redrawn until $n\in[20,2000]$, the null tables' domain, so that every cloud in the bank can be given a statistic at all. This is conditioning, and it biases the pattern given $\theta$ --- but only where it fires, and with the count-variance bound in place it essentially never does. Across all $500\,000$ patterns it fired \textbf{once}, for a single nested pattern. The realised $n$ spans $20$--$1716$.
+
+%==============================================================================
+\section{Seeding}
+One addressable stream per $(\mathrm{set},\mathrm{family},\mathrm{index},\mathrm{role})$:
+\[
+  \texttt{Generator(PCG64DXSM(SeedSequence(root, spawn\_key=(DV, set, family, index, role))))}
+\]
+with \code{role} separating the parameter draw from the pattern draw. Any stream can be rebuilt alone, so $\theta_i$ never depends on $\theta_{j<i}$: the bank can be extended, or a single cloud audited, without disturbing what exists. Shards are written atomically and skipped if present, so generation is resumable.
+
+%==============================================================================
+\section{What the bank delivers}\label{sec:delivers}
+\begin{center}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+& & & \multicolumn{4}{c}{$\dt$ (\code{ext} reduction)} & \\
+\cmidrule(lr){4-7}
+Family & thetas & rejected & $q_{05}$ & $q_{50}$ & $q_{95}$ & max & $\dt<1$ \\
+\midrule
+Poisson     & $50\,000$ & $0$   & $-0.979$ & $-0.972$ & $-0.91$ & $-0.88$ & $100.0\%$ \\
+Thomas      & $50\,000$ & $0$   & $-0.887$ & $0.600$  & $13.76$ & $58.6$  & $54.7\%$ \\
+Nested      & $50\,000$ & $0$   & $-0.272$ & $4.839$  & $31.11$ & $92.9$  & $19.6\%$ \\
+Mat\'ern II & $50\,000$ & $0$   & $-0.216$ & $2.546$  & $12.43$ & $19.9$  & $29.1\%$ \\
+LGCP        & $50\,000$ & $865$ & $-0.847$ & $0.860$  & $20.73$ & $96.7$  & $51.8\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\smallskip
+$\dt=1$ is the $5\%$ rejection boundary of the corresponding test, so the last column is the share of each family that is \emph{not} detectable at $\alpha=0.05$ from its $L$-function alone. Every family straddles it, which is the point: a bank that sat entirely on one side would measure nothing.
+
+\textbf{The zero of the scale is the noise floor, not CSR.} \code{ext} takes the extremum of $\hat L(r)-r$ before studentising, and the extremum of a wiggly curve is displaced from $0$ under CSR too. The reference is therefore that free displacement, and $\dt=0$ means ``this departure equals CSR's own noise floor''. Processes below it score negative --- Poisson at $-0.97$, and the $q_{05}$ column for every family --- and are deliberately left unclamped, so the label stays \emph{ordered} below the detection boundary instead of piling up at a floor. \code{DELTA\_EDGES} in \code{scripts/regimes.py} is geometric and does not reach there; that is a presentation choice still to be made, and \code{regimes.py} now reports the share of each family it excludes.
+
+The manifests carry four coordinates on the same bank: \code{delta\_tilde} (the two-arm \code{ext}), its separate repulsion and clustering arms \code{delta\_tilde\_lo} and \code{delta\_tilde\_hi}, and the pointwise \code{delta\_tilde\_sup}. Each is calibrated so that $1$ is its own boundary; they are not interchangeable as numbers. The two arms are a \emph{signed} axis --- repulsion and clustering are opposite departures that a single magnitude collapses together --- and each arm sits at the noise floor across every family the other one carries.
+
+\textbf{Why the reduction was changed, and what it moved.} The pointwise \code{sup} carries a radius window $[\rmin,0.25]$ with $\rmin$ set at $5$ expected pairs, and $32.6\%$ of the Mat\'ern bank has $R<\rmin$ --- the entire hard core below the window. The window is not optional for a \emph{pointwise} statistic: $s_0(r)\to0$ at small $r$, where CSR patterns rarely hold any pair, so the studentised ratio is unstable there. But a hard core's detection boundary sits at $\nb R\approx1.6$, i.e.\ at $R/\rmin\approx0.8$ --- just inside the radii the window discards --- so the sup draws its line slightly above where hard cores actually become detectable.
+
+Taking the extremum \emph{before} studentising removes the need for a window entirely, because nothing is divided by a vanishing $s_0(r)$. It also makes the statistic exact rather than inferential on this family: below $R$ no point has a neighbour, so $\hat K=0$ and $\hat L(r)-r=-r$ identically, and $\min_r(\hat L(r)-r)=-R$ \emph{noiselessly}. Measured power on matched $n$ bears this out: at $\nb=200$ with core $0.1$ ($R/\rmin=0.79$) the sup rejects $19.3\%$ of the time and the \code{lo} arm $81.0\%$; at $\nb=75$ with core $0.2$, $65.4\%$ against $100\%$. All four reductions hold exact size --- $0.0501$ overall for \code{ext} on $50\,000$ fresh off-grid patterns, within $2$ s.e.\ in all six $n$ bands.
+
+The effect on the bank is a recalibration, not a reordering: \code{sup} and \code{ext} agree at $\rho=0.999$ over the whole Mat\'ern bank and $0.987$ on the sub-$\rmin$ stratum. What moves is \emph{where the boundary falls}. On that stratum the share labelled detectable rises from $1.25\%$ to $11.4\%$, and the median $\dt$ from $0.309$ to $0.352$; bank-wide the detectable share rises from $67.2\%$ to $70.9\%$ and the top of the range stretches from $13.0$ to $19.9$.
+
+One caveat on what $\dt$ can order here. On the sub-$\rmin$ stratum $\dt$ correlates with $R$ alone at only $\rho=0.17$ (and the sup at $0.08$), but with $\nb R$ at $\rho=0.98$. That is correct rather than a failure: detectability depends on the core measured in units of the mean spacing, not on $R$, and $\nb$ varies across the bank. A reduction scoring highly against $R$ alone would be one that had stopped tracking detectability.
+
+This is a property of the test, not a defect of the design: the bank's job is to span the physical parameter, and it does. Forcing $R\ge\rmin$ would require an $\nb$-dependent core floor and would delete exactly the near-CSR end of the Mat\'ern design that the boundary analysis needs.
+
+A resolution limit remains, and it is a property of the radius grid rather than of any reduction. \code{RADII} has step $0.25/512$, so at $n\gtrsim500$ a core at the detection boundary ($R\approx1.6/n$) spans only one to three grid steps, and \code{lo} loses its advantage over the sup there.
 
 \end{document}

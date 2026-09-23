@@ -5,8 +5,8 @@
     python scripts/regimes.py --task classify --reference dtm_k10/h01
 
 Nothing about regimes exists during training. A run's predictions carry `case_id`, which joins to
-data/bank/<family>/manifest.csv for the regime coordinates (nbar, delta_tilde), so the binning here
-can change without retraining anything.
+data/bank/<family>/manifest.csv for the regime coordinates (nbar, delta-tilde), so the binning here
+can change without retraining anything -- including which delta-tilde, via --delta-column.
 
 A run is discovered by its directory, results/<task>/<group>/<features>/<variant>/seed_<n>/, and
 nothing here knows which arm produced it -- `features` and `variant` are whatever that arm names
@@ -26,9 +26,9 @@ One long row per (run, cell, metric), so a figure or a table is one filter:
 
 `nbar_bin`/`delta_bin` hold the bin's left edge and are empty on a marginal row; the marginals are
 rows like any other, so "overall accuracy" is not a separate output. `family` is a single family or
-`all`; for a single family, accuracy IS that family's recall. Poisson has delta = 0, so it lands in
-no delta bin and appears only in the marginal and nbar rows -- the overall baseline, not part of the
-regime curves.
+`all`; for a single family, accuracy IS that family's recall. Poisson sits at the CSR noise floor
+(delta < 0 under every reduction but `sup`), so it lands in no delta bin and appears only in the
+marginal and nbar rows -- the overall baseline, not part of the regime curves.
 
 Metrics: accuracy and nll (mean negative log posterior of the true family) for classification; for
 parameters, rmse_log per target and over all targets, in LOG units, because the parameters span
@@ -66,15 +66,43 @@ N_NBAR_BINS, N_BOOT = 3, 1000
 DELTA_EDGES = np.geomspace(0.05, 32.0, 11)
 
 
-def manifest(families: list[str]) -> pd.DataFrame:
-    """Regime coordinates per pattern. Binning uses `delta_tilde` (delta-tilde under the null tables
-    in force now, written by scripts/relabel.py), not `delta` (the sweep's target under whichever
-    tables were in force when the patterns were drawn). They differ after a refit at a new cutoff."""
+def manifest(families: list[str], delta_column: str = "delta_tilde") -> pd.DataFrame:
+    """Regime coordinates per pattern, binned on `delta_column` as written by scripts/relabel.py:
+    `delta_tilde` is the default two-arm `ext` reduction; `delta_tilde_lo`, `delta_tilde_hi` are
+    its separate repulsion and clustering arms and `delta_tilde_sup` the pointwise one. Each is
+    calibrated so that 1 is its own 5% rejection boundary, but they sit on different scales and a
+    table built on one must not be read against another.
+
+    NOTE: under every reduction but `sup`, delta-tilde is NEGATIVE where a process departs from CSR
+    by less than CSR's own noise floor -- that is the point of leaving it unclamped, so the label
+    stays ordered below the detection boundary. DELTA_EDGES is geometric and cannot hold those
+    values, so they bin to NaN and appear only in the marginal rows. `coverage` below reports how
+    much of each family that is; the edges are a presentation choice and have not been changed."""
     frames = [pd.read_csv(BANK / f / "manifest.csv") for f in families]
     rows = pd.concat(frames, ignore_index=True).set_index("case_id")
-    if "delta_tilde" not in rows:
-        raise SystemExit("manifests have no `delta_tilde` column -- run scripts/relabel.py first")
-    return rows[["family", "theta", "nbar", "delta_tilde"]].rename(columns={"delta_tilde": "delta"})
+    if delta_column not in rows:
+        have = [c for c in rows.columns if c.startswith("delta_tilde")]
+        raise SystemExit(f"manifests have no `{delta_column}` column (have: {have or 'none'}) "
+                         f"-- run scripts/relabel.py first")
+    return rows[["family", "theta", "nbar", delta_column]].rename(columns={delta_column: "delta"})
+
+
+_REPORTED: set[str] = set()
+
+
+def _coverage(rows: pd.DataFrame, column: str) -> None:
+    """Say once per family how much of it falls outside DELTA_EDGES, so a label whose range no
+    longer matches the edges cannot quietly drop a third of a family from the regime curves."""
+    for family, g in rows.groupby("family"):
+        if family in _REPORTED:
+            continue
+        _REPORTED.add(family)
+        d = g.drop_duplicates("theta")["delta"].to_numpy()
+        out = (d < DELTA_EDGES[0]) | (d > DELTA_EDGES[-1])
+        if out.mean() > 0.01:
+            print(f"[regimes] {family}: {out.mean():.1%} of thetas fall outside DELTA_EDGES "
+                  f"[{DELTA_EDGES[0]:g}, {DELTA_EDGES[-1]:g}] on `{column}` "
+                  f"(range {d.min():.2f} to {d.max():.2f}) and bin to NaN", flush=True)
 
 
 def edges(cfg: Config) -> tuple[np.ndarray, np.ndarray]:
@@ -229,6 +257,9 @@ def main(argv=None) -> None:
     p.add_argument("--task", choices=["classify", "params"])
     p.add_argument("--reference", help="'<features>/<variant>' to compare every other run "
                    "against, e.g. dtm_k10/h01 or L/vihrs")
+    p.add_argument("--delta-column", default="delta_tilde",
+                   help="manifest column to bin on: delta_tilde (ext, default), delta_tilde_lo, "
+                        "delta_tilde_hi or delta_tilde_sup")
     p.add_argument("--out", type=Path, help="default: <results>/regimes.csv")
     p.add_argument("--n-boot", type=int, default=N_BOOT)
     p.add_argument("--min-thetas", type=int, default=10, help="skip cells with fewer test thetas")
@@ -247,8 +278,9 @@ def main(argv=None) -> None:
         scores, metrics = per_pattern(seed_dirs)
         families = sorted({c.rsplit("-", 2)[0] for c in scores.index})
         if tuple(families) not in rows_cache:
-            rows_cache[tuple(families)] = manifest(families)
+            rows_cache[tuple(families)] = manifest(families, args.delta_column)
         tables[key] = per_theta(scores, rows_cache[tuple(families)], cfg)
+        _coverage(rows_cache[tuple(families)], args.delta_column)
         metrics_of[key], n_seeds_of[key] = metrics, len(seed_dirs)
         print(f"[regimes] {'/'.join(key)}: {len(seed_dirs)} seeds, {len(tables[key])} test thetas", flush=True)
 

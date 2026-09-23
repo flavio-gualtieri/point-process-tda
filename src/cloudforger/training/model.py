@@ -12,9 +12,15 @@ Two ways an input can carry several signals, and which applies is a property of 
   stacked (channels): the classical arm's L, F, G, J, which live on ONE shared r axis, so they go in
   as channels of the first convolution and the encoder can compare them at the same r -- something
   separate encoders can never do, since they only ever meet after pooling.
+
+Only the encoder is about images: PHNet's `encoder` argument swaps in another one of the same
+(B, in_channels, ...) -> (B, embedding_dim) shape, which is how the PersLay arm reuses the fusion
+and the head unchanged (cloudforger.vectorization.perslay).
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
@@ -91,15 +97,20 @@ class PHNet(nn.Module):
         head_hidden_dims: tuple[int, ...] = (64, 32),
         head_dropout: float = 0.1,
         pool_out: int = POOL_OUT,
+        encoder: Callable[[int, int], nn.Module] | None = None,
     ):
         super().__init__()
         self.n_tags = n_tags
         channels = channels or [1] * len(ranks)
-        self.encoders = nn.ModuleList(
-            [ImageEncoder(rank, embedding_dim, conv_channels, dropout, pool_out, c)
-             for rank, c in zip(ranks, channels)]
-        )
-        head_in = len(ranks) * n_tags * embedding_dim + n_covariates
+        # `encoder` builds one per key from (rank, in_channels), for an arm whose inputs are not
+        # images: the PersLay arm passes one, and everything below the encoder -- the pass per
+        # filtration, the concatenation with log n, the head -- is the same either way.
+        if encoder is None:
+            def encoder(rank, c):
+                return ImageEncoder(rank, embedding_dim, conv_channels, dropout, pool_out, c)
+        self.encoders = nn.ModuleList([encoder(rank, c) for rank, c in zip(ranks, channels)])
+        # asked of the encoders rather than assumed: a supplied `encoder` sets its own width.
+        head_in = n_tags * sum(e.embedding_dim for e in self.encoders) + n_covariates
         self.head = mlp(head_in, n_outputs, head_hidden_dims, head_dropout)
 
     def forward(self, images: list[torch.Tensor], covariates: torch.Tensor) -> torch.Tensor:

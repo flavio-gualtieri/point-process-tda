@@ -6,7 +6,21 @@ n: {low: 20, high: 2000, step: 0.03}   # log grid: n_k = round(low * (1 + step)^
 reps: {fit: 6000, calibrate: 6000}      # per grid n: moments from `fit`, c95 from `calibrate`
 validation: 50000                       # fresh patterns at log-uniform random n
 
-min_pairs: 5      # radius set R(n) = {r : expected CSR pairs within r >= min_pairs}; smallest
-                  # cutoff at which c95 stays smooth in n (see report.json, 01)
+min_pairs: 5      # radius set R(n) = {r : expected CSR pairs within r >= min_pairs}, used by the
+                  # WINDOWED reductions only (the sup); `lo`/`hi`/`ext` take the extremum before
+                  # studentising, never divide by a vanishing s0(r), and ignore this entirely.
+                  #
+                  # The bound is not empirical. A fraction e^-min_pairs of CSR patterns have ZERO
+                  # pairs below the edge, and for those L-hat(r) - r = -r exactly: a deterministic
+                  # artefact of the estimator, identical across patterns, not a departure. Those
+                  # patterns share one value of the statistic, so the calibration batch carries an
+                  # ATOM of mass ~e^-min_pairs. It must sit well below the 1 - alpha quantile, so
+                  # e^-min_pairs << alpha: at 1 the atom is 37% and lands ON the boundary (2% of
+                  # patterns tie at exactly c_alpha at n = 781 and 1588, quantile_se collapses to
+                  # 0.006 and those n get ~25x their due weight in the fit); at 3 it is 5%, equal
+                  # to alpha; at 5 it is 0.7% and harmless. Hence 5.
+                  #
+                  # Unwindowed the sup is worse still: c_alpha runs 3.14-4.59 over n, no smooth fit
+                  # tracks it, and the test undershoots (size 0.0477).
 alpha: 0.05
 knots: {moments: 8, c95: 4}             # interior knots of the cubic splines in log n

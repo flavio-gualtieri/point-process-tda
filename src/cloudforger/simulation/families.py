@@ -4,6 +4,10 @@ Each family draws its parameters in model order, every bound conditioned on what
 drawn. Two independent dials do the work for the cluster families: richness (points per cluster)
 says whether the pattern is really a cluster process, and omega = sigma * sqrt(parent intensity)
 says whether you can see it -- omega << 1 leaves crisp clusters, omega >> 1 smears them into CSR.
+
+The dials stay independent only because every bound is inverted into the support rather than
+rejected on: a rejection on cv would fall almost entirely in the crisp, few-cluster corner and
+so would silently reshape the richness dial. See Family.draw_omega, cv_cap and cv_floor.
 """
 
 from __future__ import annotations
@@ -68,11 +72,23 @@ class Family:
     def excess(self, r, p: dict) -> np.ndarray:
         raise NotImplementedError
 
-    def draw_sigma(self, rng, kappa: float) -> float | None:
-        """Cluster scale from omega = sigma sqrt(kappa). None if the cost guard leaves no room."""
+    def draw_omega(self, rng, kappa: float, build) -> dict | None:
+        """Model with the cluster scale drawn log-uniform on the FEASIBLE omega = sigma sqrt(kappa),
+        where `build` turns a sigma into model parameters.
+
+        Both bounds are inverted into the support, never rejected on. sigma_max caps omega from
+        above (a cost guard: the parent window grows as (1 + 10 sigma)^2). cv is strictly decreasing
+        in omega -- tight clusters concentrate the count variance -- so cv <= cv_max is a LOWER
+        bound on omega, and cv_floor solves for it. Rejecting on cv instead would tilt the design
+        away from the crisp, few-cluster corner where the rejection concentrates.
+        """
         lo, hi = self.rules.omega
         hi = min(hi, self.rules.sigma_max * math.sqrt(kappa))
-        return None if hi <= lo else log_uniform(rng, lo, hi) / math.sqrt(kappa)
+        if hi <= lo:
+            return None
+        scale = lambda omega: build(omega / math.sqrt(kappa))
+        lo = cv_floor(self, scale, lo, hi)
+        return None if lo is None else scale(log_uniform(rng, lo, hi))
 
 
 class Poisson(Family):
@@ -96,8 +112,8 @@ class Thomas(Family):
         if hi <= self.rules.mu_min:
             return None
         mu = log_uniform(rng, self.rules.mu_min, hi)
-        sigma = self.draw_sigma(rng, nbar / mu)
-        return None if sigma is None else {"kappa": nbar / mu, "mu": mu, "sigma": sigma}
+        kappa = nbar / mu
+        return self.draw_omega(rng, kappa, lambda sigma: {"kappa": kappa, "mu": mu, "sigma": sigma})
 
     def nbar(self, p):
         return p["kappa"] * p["mu"]
@@ -120,11 +136,9 @@ class Nested(Family):
             return None
         mu1 = log_uniform(rng, lo, hi)
         kappa = nbar / (mu1 * mu2)
-        sigma1 = self.draw_sigma(rng, kappa)
-        if sigma1 is None:
-            return None
-        return {"kappa": kappa, "mu1": mu1, "mu2": mu2,
-                "sigma1": sigma1, "sigma2": sigma1 / log_uniform(rng, *c.rho)}
+        rho = log_uniform(rng, *c.rho)   # before sigma1: the cv inversion needs the whole model
+        return self.draw_omega(rng, kappa, lambda sigma1: {
+            "kappa": kappa, "mu1": mu1, "mu2": mu2, "sigma1": sigma1, "sigma2": sigma1 / rho})
 
     def nbar(self, p):
         return p["kappa"] * p["mu1"] * p["mu2"]
@@ -204,3 +218,15 @@ def cv_cap(fam: Family, build, lo: float, hi: float) -> float | None:
     if f(math.log(lo)) > 0:
         return None
     return hi if f(math.log(hi)) <= 0 else math.exp(brentq(f, math.log(lo), math.log(hi), xtol=1e-6))
+
+
+def cv_floor(fam: Family, build, lo: float, hi: float) -> float | None:
+    """Smallest value with cv <= cv_max, for a `build` whose cv DECREASES in the value.
+
+    The mirror of cv_cap. Returns None when even the largest value is too variable, which is a
+    genuine infeasibility at this nbar rather than a rejectable draw.
+    """
+    f = lambda v: cv(fam, build(math.exp(v))) - fam.rules.cv_max
+    if f(math.log(hi)) > 0:
+        return None
+    return lo if f(math.log(lo)) <= 0 else math.exp(brentq(f, math.log(lo), math.log(hi), xtol=1e-6))

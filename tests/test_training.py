@@ -126,6 +126,43 @@ def test_params_task_predicts_in_parameter_units(fake_data, tmp_path, monkeypatc
     assert (z["y_pred"] > 0).all()                      # log targets come back positive
 
 
+def test_perslay_arm_pads_the_same_diagrams(fake_data):
+    """Same diagrams, same split, same covariate -- only the vectorization differs, which is what
+    makes the two PH arms comparable."""
+    images = D.build(FAMILIES, ["dtm_k10"], [0, 1], resolution=8, verbose=False)
+    padded = D.build_diagrams(FAMILIES, ["dtm_k10"], [0, 1], max_points=16, verbose=False)
+    assert padded.images[0].shape[:2] == images.images[0].shape[:2]     # (patterns, filtrations)
+    assert padded.images[0].shape[2:] == (padded.imagers[("dtm_k10", 0)].capacity, 3)
+    assert np.array_equal(padded.covariates, images.covariates)
+    assert [len(padded.index(s)) for s in ("train", "val", "test")] == [24, 8, 8]
+    # A pattern's real points are its diagram's, and every remaining row is padding.
+    pairs = D.load_pairs(FAMILIES[0], "dtm_k10", 0)[0]
+    assert (padded.images[0][0, 0, :, 2] != 0).sum() == min(len(pairs), padded.images[0].shape[2])
+
+
+def test_train_script_runs_the_perslay_arm(fake_data, tmp_path, monkeypatch):
+    train = _train_module()
+    for module in (D, train.D):
+        monkeypatch.setattr(module, "BANK", D.BANK)
+        monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
+        monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
+    out = tmp_path / "perslay_run"
+
+    train.main(["--task", "classify", "--filtration", "rips", "--dims", "0,1", "--perslay",
+                "--seed", "1", "--max-points", "16", "--perslay-points", "8", "--epochs", "2",
+                "--batch-size", "8", "--out", str(out)])
+
+    z = np.load(out / "predictions.npz")
+    assert len(z["case_id"]) == 8                        # the same test patterns as the image arm
+    assert z["posterior"].shape == (8, len(FAMILIES))
+    run = __import__("json").loads((out / "run.json").read_text())
+    assert run["args"]["perslay"] is True
+    assert 0 < run["imagers"]["rips_h0"]["capacity"] <= 16   # the padder, where the imager would be
+    assert train.run_id(train.parse_args(
+        ["--task", "classify", "--filtration", "rips", "--dims", "0,1", "--perslay"])) == (
+        "all", "rips", "perslay_h01")                    # its own results directory
+
+
 def _blob(cx, cy, r=64, s=4.0):
     y, x = np.mgrid[0:r, 0:r]
     return np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * s * s)).astype(np.float32)

@@ -31,12 +31,19 @@
 # the empty string drops that arm entirely:
 #   TASKS="classify" FILTRATIONS="dtm_k10" CURVES="" SEEDS="1 2 3" bash slurm/train.sh
 #
+# PERSLAY=1 sends the PH arm's diagrams through PersLay instead of rasterizing them, and writes to
+# perslay_h<dims> rather than h<dims>, so it is a second submission over the same matrix rather
+# than a variant of this one (CURVES="" drops the classical arm, which the flag does not touch):
+#   PERSLAY=1 CURVES="" sbatch --array=0-107%20 slurm/train.sh
+#
 # Resumable: a seed whose run.json exists is skipped, so a re-submit only fills the gaps (the
 # features are still built once for whatever seeds remain).
 #
 # Sizing: images are held in memory, ~1.6 GB per 2-D (filtration, homology dim) channel over the
 # 100k classification patterns and a fifth of that per family, plus ~1 min each to rasterize.
-# Rips/alpha H0 are 1-D and negligible. GPU: scripts/train.py uses CUDA when it sees it.
+# Rips/alpha H0 are 1-D and negligible. PersLay holds padded diagrams instead, ~1.2 GB per
+# (filtration, homology dim) channel at the default --max-points 1024. GPU: scripts/train.py uses
+# CUDA when it sees it.
 
 set -euo pipefail
 
@@ -52,6 +59,8 @@ DIMS="${DIMS:-0 1 0,1}"
 # L alone is the VIHRS feature set.
 CURVES="${CURVES-L@fixed,F,G,J L,F,G,J L@fixed,F@fixed,G@fixed,J@fixed L@fixed}"
 SEEDS="${SEEDS:-1 2 3 4 5 6 7 8 9 10}"
+PERSLAY="${PERSLAY:-0}"                                                           # PH arm: 1 -> PersLay
+[ "$PERSLAY" = "1" ] && perslay="--perslay" || perslay=""
 
 runs=()
 for entry in $TASKS; do
@@ -61,7 +70,7 @@ for entry in $TASKS; do
   head="--task $task ${family:+--family $family}"
   for filtration in $FILTRATIONS; do
     for dims in $DIMS; do
-      runs+=("$head --filtration $filtration --dims $dims")
+      runs+=("$head --filtration $filtration --dims $dims $perslay")
     done
   done
   for curves in $CURVES; do

@@ -34,8 +34,7 @@ def check_theta(fam_name: str, index: int, patterns: int, cfg: Config, tables: T
         n = len(pts)
         k[p] = k_function(pts) * n * (n - 1) / nbar**2 if n >= 2 else 0.0
     K = np.pi * RADII**2 + fam.excess(RADII, theta["model"])
-    _, _, _, mask = tables.moments(nbar)
-    ok = mask[0] & (K > 0)
+    ok = tables.window(nbar)[0] & (K > 0)
     sel = np.flatnonzero(ok)[:: max(1, ok.sum() // radii)]
     z = (k[:, sel].mean(0) - K[sel]) / (k[:, sel].std(0, ddof=1) / np.sqrt(patterns))
     return {"family": fam_name, "theta": index, "nbar": round(nbar, 1), "cv": round(theta["cv"], 3),

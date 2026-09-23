@@ -16,10 +16,15 @@
     # the multi-k arm: several filtrations through one shared encoder
     python scripts/train.py --task classify --filtration dtm_k5,dtm_k10,dtm_k15 --dims 0,1 --seed 1
 
-Writes results/<task>/<group>/<filtrations>/h<dims>/seed_<seed>/:
+    # the PersLay arm: the same diagrams, vectorized by the network instead of rasterized
+    python scripts/train.py --task classify --filtration dtm_k10 --dims 0,1 --perslay --seed 1
+
+Writes results/<task>/<group>/<filtrations>/h<dims>/seed_<seed>/ (perslay_h<dims> for that arm,
+so the two vectorizations of one filtration sit side by side):
 
     predictions.npz  case_id, y_true, y_pred (+ posterior when classifying) for every TEST pattern
-    run.json         the arguments, imager parameters, target transform, losses, git stamp
+    run.json         the arguments, the fitted vectorizer's parameters, target transform, losses,
+                     git stamp
     model.pt         the best-validation weights
 
 Everything per regime is computed afterwards by joining predictions.npz to the manifest on case_id;
@@ -46,6 +51,7 @@ from cloudforger.provenance import provenance_stamp                      # noqa:
 from cloudforger.training import data as D, train as T                   # noqa: E402
 from cloudforger.training.model import PHNet                             # noqa: E402
 from cloudforger.vectorization.persistence_images import Scaling         # noqa: E402
+from cloudforger.vectorization.perslay import OPS, PersLay               # noqa: E402
 
 RESULTS = ROOT / "results"
 
@@ -66,6 +72,15 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--seed", default="1", help="one seed, or several ('1,2,3'): the features are "
                                                 "built once and every seed trained from them")
     p.add_argument("--targets", help="params: comma-separated manifest columns (default: the family's own)")
+    p.add_argument("--perslay", action="store_true",
+                   help="PH arm: learn the vectorization (PersLay) instead of rasterizing into "
+                        "persistence images; --resolution/--sigma-pixels/--image-transform do not apply")
+    p.add_argument("--perslay-points", type=int, default=64,
+                   help="PersLay: number of learned point transformations (the vectorization's width)")
+    p.add_argument("--perslay-op", choices=list(OPS), default="sum",
+                   help="PersLay: permutation-invariant pooling over a diagram's points")
+    p.add_argument("--max-points", type=int, default=1024,
+                   help="PersLay: hard cap on a padded diagram's length, whatever --coverage asks for")
     p.add_argument("--resolution", type=int, default=64)
     p.add_argument("--sigma-pixels", type=float, default=1.0)
     p.add_argument("--coverage", type=float, default=0.99)
@@ -91,6 +106,8 @@ def parse_args(argv=None) -> argparse.Namespace:
         p.error("--task classify uses every family; drop --family")
     if bool(args.filtration) == bool(args.curves):
         p.error("pass exactly one of --filtration (PH arm) or --curves (classical arm)")
+    if args.perslay and not args.filtration:
+        p.error("--perslay vectorizes diagrams; it needs --filtration, not --curves")
     return args
 
 
@@ -104,7 +121,8 @@ def run_id(args) -> tuple[str, str, str]:
         # variant carries the grids in curve order, so features + variant reconstruct the spec
         return (group, "+".join(name for name, _ in curves),
                 grids[0] if len(set(grids)) == 1 else "+".join(grids))
-    return group, args.filtration.replace(",", "+"), "h" + "".join(args.dims.split(","))
+    dims = "h" + "".join(args.dims.split(","))
+    return group, args.filtration.replace(",", "+"), f"perslay_{dims}" if args.perslay else dims
 
 
 def output_dir(args, seed: int) -> Path:
@@ -134,6 +152,9 @@ def main(argv=None) -> None:
     if args.curves:
         curves = D.parse_curves(args.curves, args.grid)
         dataset = D.build_curves(families, curves, stack=False if args.curves_separate else None)
+    elif args.perslay:
+        dataset = D.build_diagrams(families, tags, dims, coverage=args.coverage,
+                                   max_points=args.max_points, scaling=scaling)
     else:
         dataset = D.build(families, tags, dims, resolution=args.resolution, sigma_pixels=args.sigma_pixels,
                           coverage=args.coverage, scaling=scaling, transform=args.image_transform)
@@ -159,6 +180,10 @@ def main(argv=None) -> None:
     keys = sorted(dataset.images)
     n_tags = len(tags) if args.filtration else 1   # PH: one pass per filtration; curves: one pass
 
+    def perslay_encoder(rank, channels):
+        return PersLay(embedding_dim=args.embedding_dim, n_transforms=args.perslay_points,
+                       op=args.perslay_op, dropout=args.dropout, in_channels=channels)
+
     # Features are seed-independent (the split is fixed by theta, and every fit -- imager box, pixel
     # z-score, target transform -- uses train rows only), so they are built once above and each seed
     # only re-initializes and retrains the network.
@@ -174,6 +199,7 @@ def main(argv=None) -> None:
             embedding_dim=args.embedding_dim,
             conv_channels=tuple(int(c) for c in args.conv_channels.split(",")),
             dropout=args.dropout,
+            encoder=perslay_encoder if args.perslay else None,
         ).to(args.device)
 
         fit = T.fit(model, loader(train_idx, True), loader(val_idx, False), loss_fn, args.device,
