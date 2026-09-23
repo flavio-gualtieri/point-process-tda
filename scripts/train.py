@@ -48,6 +48,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.provenance import provenance_stamp                      # noqa: E402
+from cloudforger.simulation.split import TEST_END, TRAIN_END, VAL_END    # noqa: E402
 from cloudforger.training import data as D, train as T                   # noqa: E402
 from cloudforger.training.model import PHNet                             # noqa: E402
 from cloudforger.vectorization.persistence_images import Scaling         # noqa: E402
@@ -125,6 +126,28 @@ def run_id(args) -> tuple[str, str, str]:
     return group, args.filtration.replace(",", "+"), f"perslay_{dims}" if args.perslay else dims
 
 
+SPLIT = {"train_end": TRAIN_END, "val_end": VAL_END, "test_end": TEST_END}
+
+
+def run_state(out: Path) -> str:
+    """done / stale / missing.
+
+    A finished run.json is NOT enough to skip a seed: predictions.npz holds the test patterns of
+    whatever split was in force when it was written, so a run from an older cloudforger.simulation
+    .split is not comparable to a fresh one and must not be silently reused. Widening the test block
+    is exactly the case that would otherwise pass unnoticed -- the directory layout does not mention
+    the split, so every path stays the same and only the contents change meaning.
+    """
+    path = out / "run.json"
+    if not path.exists():
+        return "missing"
+    try:
+        saved = json.loads(path.read_text()).get("split")
+    except json.JSONDecodeError:
+        return "stale"
+    return "done" if saved == SPLIT else "stale"
+
+
 def output_dir(args, seed: int) -> Path:
     """results/<task>/<group>/<features>/<variant>/seed_<n>."""
     if args.out:
@@ -135,10 +158,15 @@ def output_dir(args, seed: int) -> Path:
 def main(argv=None) -> None:
     args = parse_args(argv)
     seeds = [int(s) for s in str(args.seed).split(",")]
-    todo = [s for s in seeds if args.force or not (output_dir(args, s) / "run.json").exists()]
+    todo, done = [], []
     for seed in seeds:
-        if seed not in todo:
-            print(f"{output_dir(args, seed)}/run.json exists; --force to retrain")
+        state = run_state(output_dir(args, seed))
+        (todo if args.force or state != "done" else done).append(seed)
+        if state == "stale":
+            print(f"[stale] {output_dir(args, seed)} was trained on a different split "
+                  f"({SPLIT}); retraining", flush=True)
+    for seed in done:
+        print(f"{output_dir(args, seed)}/run.json exists; --force to retrain")
     if not todo:
         return
 
@@ -230,6 +258,7 @@ def main(argv=None) -> None:
             "families": families, "tags": tags, "dims": dims if not args.curves else [],
             "curves": D.parse_curves(args.curves, args.grid) if args.curves else [],
             "curves_stacked": bool(args.curves) and len(dataset.images) == 1 and len(args.curves.split(",")) > 1,
+            "split": SPLIT,
             "n_train": len(train_idx), "n_val": len(val_idx), "n_test": len(test_idx),
             "imagers": {f"{t}_h{d}": im.params for (t, d), im in dataset.imagers.items()},
             "image_transform": args.image_transform,

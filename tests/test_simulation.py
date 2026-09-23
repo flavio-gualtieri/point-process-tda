@@ -63,6 +63,9 @@ def test_stored_pattern_regenerates(name):
 def test_split_by_theta():
     from cloudforger.simulation.split import split_of
 
-    s = split_of(np.arange(12000))
-    assert [(s[:10000] == k).sum() for k in ("train", "val", "test")] == [7000, 1000, 2000]
-    assert (s[10000:] == "train").all()
+    from cloudforger.simulation.split import TEST_END, TRAIN_END, VAL_END
+
+    s = split_of(np.arange(TEST_END + 2000))
+    counts = [(s[:TEST_END] == k).sum() for k in ("train", "val", "test")]
+    assert counts == [TRAIN_END, VAL_END - TRAIN_END, TEST_END - VAL_END]
+    assert (s[TEST_END:] == "train").all()          # a larger sweep only ever grows train

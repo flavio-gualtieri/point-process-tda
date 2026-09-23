@@ -12,38 +12,60 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH -t 24:00:00
 #SBATCH --output=logs/train_%A_%a.out
 #SBATCH --error=logs/train_%A_%a.err
 
-# One array task per (task, features, variant) of the full matrix, via scripts/train.py; each task
-# loops over all 10 seeds in-process, over both feature arms x {5-way classification, parameters
-# for each family}:
-#   PH         6 filtrations x {H0, H1, H0+H1}            = 18 per task
-#   classical  4 curve specs (see CURVES below)          =  4 per task
-# = 132 array tasks x 10 seeds = 1320 runs.
+# One array task per (task, features, variant, seed chunk) of the experiment matrix, via
+# scripts/train.py. Use slurm/matrix.sh to submit the whole thing; this script is the worker and is
+# also what you run bare to inspect the run list.
 #
 #   bash slurm/train.sh                     # print the run list and the --array range, submit nothing
-#   sbatch --array=0-131%20 slurm/train.sh  # %20 caps how many run at once
+#   bash slurm/matrix.sh                    # print every sbatch the matrix needs
+#   bash slurm/matrix.sh submit             # actually submit them
 #
-# Any axis can be narrowed at submit time instead of edited, and setting FILTRATIONS or CURVES to
-# the empty string drops that arm entirely:
+# Axes, all overridable at submit time so nothing here has to be edited; setting FILTRATIONS,
+# CURVES or VARIANTS to the empty string drops that arm entirely:
+#
+#   TASKS        classify + one params run per family
+#   FILTRATIONS  the PH arm's filtrations (one array entry each; "a,b,c" is the multi-k arm)
+#   DIMS         homology dimensions per filtration
+#   VARIANTS     how the PH arm's diagrams become a vector: image (rasterize) or perslay (learn it)
+#   CURVES       the classical arm, one self-contained spec per entry
+#   SEEDS        seeds per run
+#   SEED_CHUNK   seeds per array task (see "Walltime" below)
+#
 #   TASKS="classify" FILTRATIONS="dtm_k10" CURVES="" SEEDS="1 2 3" bash slurm/train.sh
 #
-# PERSLAY=1 sends the PH arm's diagrams through PersLay instead of rasterizing them, and writes to
-# perslay_h<dims> rather than h<dims>, so it is a second submission over the same matrix rather
-# than a variant of this one (CURVES="" drops the classical arm, which the flag does not touch):
-#   PERSLAY=1 CURVES="" sbatch --array=0-107%20 slurm/train.sh
+# Both PH variants are one axis rather than two submissions: they write to h<dims> and
+# perslay_h<dims> respectively, so a filtration's two vectorizations sit side by side under the
+# same `features` directory and scripts/regimes.py compares them by --reference like any two runs.
 #
-# Resumable: a seed whose run.json exists is skipped, so a re-submit only fills the gaps (the
-# features are still built once for whatever seeds remain).
+# Resumable, and split-aware: scripts/train.py skips a seed whose run.json records the CURRENT
+# cloudforger.simulation.split and RETRAINS one that records an older split, printing "[stale]".
+# That matters here -- the results/ layout does not mention the split, so widening the test block
+# leaves every path identical and only changes what predictions.npz means. A re-submit after a
+# split change therefore refills the matrix on its own; no --force and no manual clean-out.
 #
-# Sizing: images are held in memory, ~1.6 GB per 2-D (filtration, homology dim) channel over the
-# 100k classification patterns and a fifth of that per family, plus ~1 min each to rasterize.
-# Rips/alpha H0 are 1-D and negligible. PersLay holds padded diagrams instead, ~1.2 GB per
-# (filtration, homology dim) channel at the default --max-points 1024. GPU: scripts/train.py uses
-# CUDA when it sees it.
+# Memory, at the 50k-theta bank (100k patterns per family, so 500k for classification). Every
+# pattern is held, not just the split being trained on, and build() peaks at ~3x one channel while
+# it stacks and sqrt-transforms:
+#
+#              per (filtration, dim) channel      classify peak, 1 filtration x H0+H1
+#   image      7.6 GB classify / 1.5 GB params    ~31 GB
+#   perslay    5.7 GB classify / 1.1 GB params    ~17 GB   (no sqrt copy)
+#   classical  1.0 GB per curve                   ~4 GB
+#
+# so --mem=64G covers every classification run above and is 4x what a params run needs; matrix.sh
+# drops it to 16G for the params arrays. The multi-k arm multiplies the image figures by the number
+# of filtrations (~92 GB for three at H0+H1) and needs its own --mem if you add it to FILTRATIONS.
+#
+# Walltime: the bank is 5x its previous size, so an epoch is ~5x longer (370k training patterns for
+# classification against 70k before). scripts/train.py has no mid-run checkpoint, so a timeout
+# loses the whole array task -- which is why SEED_CHUNK defaults to 2 rather than putting all ten
+# seeds in one process. The features are rebuilt once per chunk, a few minutes against hours of
+# training, so the old reason to keep the seeds together no longer pays for the risk.
 
 set -euo pipefail
 
@@ -52,6 +74,7 @@ set -euo pipefail
 TASKS="${TASKS:-classify params:poisson params:thomas params:nested params:matern2 params:lgcp}"
 FILTRATIONS="${FILTRATIONS-rips alpha_diameter dtm_k5 dtm_k10 dtm_k15 dtm_k20}"   # PH arm
 DIMS="${DIMS:-0 1 0,1}"
+VARIANTS="${VARIANTS-image perslay}"           # PH arm: rasterized, learned
 # Classical arm: one self-contained spec per entry, NAME@grid per function (unqualified names take
 # scripts/train.py's --grid default, sqrtn_u2). Per-function grids exist because F and G are distance
 # CDFs: on the fixed r axis they sit saturated at 1.0 over 62%/66% of their 512 samples, against
@@ -59,8 +82,20 @@ DIMS="${DIMS:-0 1 0,1}"
 # L alone is the VIHRS feature set.
 CURVES="${CURVES-L@fixed,F,G,J L,F,G,J L@fixed,F@fixed,G@fixed,J@fixed L@fixed}"
 SEEDS="${SEEDS:-1 2 3 4 5 6 7 8 9 10}"
-PERSLAY="${PERSLAY:-0}"                                                           # PH arm: 1 -> PersLay
-[ "$PERSLAY" = "1" ] && perslay="--perslay" || perslay=""
+SEED_CHUNK="${SEED_CHUNK:-2}"
+
+# Seeds split into chunks of SEED_CHUNK, each its own array task.
+chunks=()
+chunk=""
+count=0
+for seed in $SEEDS; do
+  chunk="${chunk:+$chunk,}$seed"
+  count=$(( count + 1 ))
+  if [ "$count" -eq "$SEED_CHUNK" ]; then chunks+=("$chunk"); chunk=""; count=0; fi
+done
+# `[ -n "$chunk" ] && chunks+=(...)` would return 1 on an exact division and set -e would kill the
+# script there -- which the default SEEDS/SEED_CHUNK do.
+if [ -n "$chunk" ]; then chunks+=("$chunk"); fi
 
 runs=()
 for entry in $TASKS; do
@@ -70,17 +105,25 @@ for entry in $TASKS; do
   head="--task $task ${family:+--family $family}"
   for filtration in $FILTRATIONS; do
     for dims in $DIMS; do
-      runs+=("$head --filtration $filtration --dims $dims $perslay")
+      for variant in $VARIANTS; do
+        [ "$variant" = "perslay" ] && flag="--perslay" || flag=""
+        for c in "${chunks[@]}"; do
+          runs+=("$head --filtration $filtration --dims $dims $flag --seed $c")
+        done
+      done
     done
   done
   for curves in $CURVES; do
-    runs+=("$head --curves $curves")
+    for c in "${chunks[@]}"; do
+      runs+=("$head --curves $curves --seed $c")
+    done
   done
 done
 
 if [ -z "${SLURM_ARRAY_TASK_ID:-}" ]; then
   printf '%s\n' "${runs[@]}"
-  echo "${#runs[@]} array tasks x $(echo $SEEDS | wc -w) seeds -> sbatch --array=0-$(( ${#runs[@]} - 1 ))%20 slurm/train.sh"
+  echo "${#runs[@]} array tasks (${#chunks[@]} seed chunk(s) of up to $SEED_CHUNK)" \
+       "-> sbatch --array=0-$(( ${#runs[@]} - 1 ))%20 slurm/train.sh"
   exit 0
 fi
 
@@ -95,9 +138,7 @@ mamba activate /gpfs/scratch/qp252676/globus/envs/cloud-env
 set -u
 
 run="${runs[$SLURM_ARRAY_TASK_ID]}"
-echo "Host: $(hostname)  Job ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}  ${run}  seeds: $SEEDS"
+echo "Host: $(hostname)  Job ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}  ${run}"
 
-# One process for all the seeds, not one per seed: scripts/train.py --seed accepts a list and builds
-# the features once, so an array task rasterizes its images once instead of ten times.
 # shellcheck disable=SC2086
-python -u scripts/train.py $run --seed "$(echo $SEEDS | tr ' ' ',')"
+python -u scripts/train.py $run
