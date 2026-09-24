@@ -31,7 +31,8 @@
 #   TASKS        classify + one params run per family
 #   FILTRATIONS  the PH arm's filtrations (one array entry each; "a,b,c" is the multi-k arm)
 #   DIMS         homology dimensions per filtration
-#   VARIANTS     how the PH arm's diagrams become a vector: image (rasterize) or perslay (learn it)
+#   VARIANTS     how the PH arm's diagrams become a vector: image (rasterize) or perslay (learn it);
+#                perslay_z is PersLay with its pooled vector z-scored (slurm/perslay_z.sh)
 #   CURVES       the classical arm, one self-contained spec per entry
 #   SEEDS        seeds per run
 #   SEED_CHUNK   seeds per array task (see "Walltime" below)
@@ -106,7 +107,11 @@ for entry in $TASKS; do
   for filtration in $FILTRATIONS; do
     for dims in $DIMS; do
       for variant in $VARIANTS; do
-        [ "$variant" = "perslay" ] && flag="--perslay" || flag=""
+        case "$variant" in
+          perslay)   flag="--perslay" ;;
+          perslay_z) flag="--perslay --perslay-norm zscore" ;;   # writes perslay_z_h<dims>
+          *)         flag="" ;;
+        esac
         for c in "${chunks[@]}"; do
           runs+=("$head --filtration $filtration --dims $dims $flag --seed $c")
         done

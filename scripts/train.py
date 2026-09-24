@@ -19,8 +19,12 @@
     # the PersLay arm: the same diagrams, vectorized by the network instead of rasterized
     python scripts/train.py --task classify --filtration dtm_k10 --dims 0,1 --perslay --seed 1
 
+    # ... with the pooled vector z-scored by statistics fixed on training diagrams at init
+    python scripts/train.py --task classify --filtration dtm_k10 --dims 0,1 --perslay --perslay-norm zscore --seed 1
+
 Writes results/<task>/<group>/<filtrations>/h<dims>/seed_<seed>/ (perslay_h<dims> for that arm,
-so the two vectorizations of one filtration sit side by side):
+perslay_z_h<dims> with --perslay-norm zscore, so the vectorizations of one filtration sit side by
+side):
 
     predictions.npz  case_id, y_true, y_pred (+ posterior when classifying) for every TEST pattern
     run.json         the arguments, the fitted vectorizer's parameters, target transform, losses,
@@ -52,7 +56,7 @@ from cloudforger.simulation.split import TEST_END, TRAIN_END, VAL_END    # noqa:
 from cloudforger.training import data as D, train as T                   # noqa: E402
 from cloudforger.training.model import PHNet                             # noqa: E402
 from cloudforger.vectorization.persistence_images import Scaling         # noqa: E402
-from cloudforger.vectorization.perslay import OPS, PersLay               # noqa: E402
+from cloudforger.vectorization.perslay import NORMS, OPS, PersLay, calibrate   # noqa: E402
 
 RESULTS = ROOT / "results"
 
@@ -80,6 +84,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="PersLay: number of learned point transformations (the vectorization's width)")
     p.add_argument("--perslay-op", choices=list(OPS), default="sum",
                    help="PersLay: permutation-invariant pooling over a diagram's points")
+    p.add_argument("--perslay-norm", choices=list(NORMS), default="none",
+                   help="PersLay: 'zscore' standardizes the pooled vector with statistics fixed once "
+                        "on training diagrams at initialization (writes perslay_z_h<dims>)")
+    p.add_argument("--calibration-rows", type=int, default=8192,
+                   help="PersLay zscore: training rows, evenly spaced, used to fix the statistics")
     p.add_argument("--max-points", type=int, default=1024,
                    help="PersLay: hard cap on a padded diagram's length, whatever --coverage asks for")
     p.add_argument("--resolution", type=int, default=64)
@@ -109,6 +118,8 @@ def parse_args(argv=None) -> argparse.Namespace:
         p.error("pass exactly one of --filtration (PH arm) or --curves (classical arm)")
     if args.perslay and not args.filtration:
         p.error("--perslay vectorizes diagrams; it needs --filtration, not --curves")
+    if args.perslay_norm != "none" and not args.perslay:
+        p.error("--perslay-norm only applies with --perslay")
     return args
 
 
@@ -123,7 +134,12 @@ def run_id(args) -> tuple[str, str, str]:
         return (group, "+".join(name for name, _ in curves),
                 grids[0] if len(set(grids)) == 1 else "+".join(grids))
     dims = "h" + "".join(args.dims.split(","))
-    return group, args.filtration.replace(",", "+"), f"perslay_{dims}" if args.perslay else dims
+    if not args.perslay:
+        return group, args.filtration.replace(",", "+"), dims
+    # a normalized PersLay is its own variant, so it sits beside perslay_h<dims> instead of
+    # overwriting it, and scripts/regimes.py compares the two like any other pair of runs
+    prefix = "perslay_z" if args.perslay_norm == "zscore" else "perslay"
+    return group, args.filtration.replace(",", "+"), f"{prefix}_{dims}"
 
 
 SPLIT = {"train_end": TRAIN_END, "val_end": VAL_END, "test_end": TEST_END}
@@ -210,7 +226,13 @@ def main(argv=None) -> None:
 
     def perslay_encoder(rank, channels):
         return PersLay(embedding_dim=args.embedding_dim, n_transforms=args.perslay_points,
-                       op=args.perslay_op, dropout=args.dropout, in_channels=channels)
+                       op=args.perslay_op, dropout=args.dropout, in_channels=channels,
+                       norm=args.perslay_norm)
+
+    # Evenly spaced rather than sampled: the rows are grouped by family, so the first N would be one
+    # family, and a random draw would consume the RNG and shift every seed's data order.
+    n_cal = min(args.calibration_rows, len(train_idx))
+    calibration_idx = train_idx[np.linspace(0, len(train_idx) - 1, n_cal).round().astype(int)]
 
     # Features are seed-independent (the split is fixed by theta, and every fit -- imager box, pixel
     # z-score, target transform -- uses train rows only), so they are built once above and each seed
@@ -229,6 +251,10 @@ def main(argv=None) -> None:
             dropout=args.dropout,
             encoder=perslay_encoder if args.perslay else None,
         ).to(args.device)
+        if args.perslay and args.perslay_norm == "zscore":
+            n_layers = calibrate(model, lambda: T.predict(model, loader(calibration_idx, False), args.device))
+            print(f"[{tag}] fixed the pooled z-score of {n_layers} PersLay layer(s) on {n_cal} "
+                  f"training rows", flush=True)
 
         fit = T.fit(model, loader(train_idx, True), loader(val_idx, False), loss_fn, args.device,
                     lr=args.lr, weight_decay=args.weight_decay, epochs=args.epochs,

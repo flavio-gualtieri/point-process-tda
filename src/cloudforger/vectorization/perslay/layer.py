@@ -18,16 +18,26 @@ carries over unchanged (see pad.py). op defaults to the sum, the image's own poo
 
 The input is what DiagramPadder produces, (B, 1, capacity, 3) once PHNet has split the filtrations
 out into the batch: (birth, persistence) standardized, and a mass that is 0 exactly on padded rows.
+
+`norm="zscore"` standardizes the pooled vector before `fc`, the counterpart of the image arm's
+pixel z-score: without it the pooled scale is whatever the softplus weight, the bandwidths and the
+data's position relative to the centres make it. The statistics are FIXED -- estimated once on
+training diagrams at initialization (`calibrate`) and stored as buffers, never updated by the
+optimizer or by later batches -- so the map is the same at train and test time and the run is
+reproducible from model.pt alone. They describe the initial centres, and go stale as the centres
+move; a BatchNorm would track them, at the cost of batch-dependent training behaviour.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
 
 OPS = ("sum", "max", "mean")
+NORMS = ("none", "zscore")
 
 
 class PersLay(nn.Module):
@@ -47,10 +57,13 @@ class PersLay(nn.Module):
         weight_hidden: int = 16,
         dropout: float = 0.2,
         in_channels: int = 1,
+        norm: str = "none",
     ):
         super().__init__()
         if op not in OPS:
             raise ValueError(f"op must be one of {OPS}, got {op!r}")
+        if norm not in NORMS:
+            raise ValueError(f"norm must be one of {NORMS}, got {norm!r}")
         if in_channels != 1:
             raise ValueError("PersLay takes one diagram at a time; stack filtrations as n_tags")
         self.op = op
@@ -65,8 +78,14 @@ class PersLay(nn.Module):
         # bottleneck and nothing more.
         self.fc = nn.Sequential(nn.Dropout(dropout), nn.Linear(n_transforms, embedding_dim), nn.ReLU())
         self.embedding_dim = embedding_dim
+        self.norm = norm
+        # buffers, not parameters: saved in model.pt, moved by .to(), invisible to the optimizer.
+        # Identity until calibrate() runs, so an uncalibrated zscore layer is the plain one.
+        self.register_buffer("pool_mean", torch.zeros(n_transforms))
+        self.register_buffer("pool_std", torch.ones(n_transforms))
+        self._moments: list[torch.Tensor] | None = None
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:   # (B, 1, capacity, 3) -> (B, embedding_dim)
+    def pool(self, x: torch.Tensor) -> torch.Tensor:      # (B, 1, capacity, 3) -> (B, n_transforms)
         points, mass = x[:, 0, :, :2], x[:, 0, :, 2]
         # cdist rather than a broadcast difference: the (B, capacity, Q, 2) intermediate is the
         # largest tensor in the arm and is never needed, only its squared sum over the last axis.
@@ -82,4 +101,57 @@ class PersLay(nn.Module):
         else:
             counts = (mass != 0).sum(dim=1, keepdim=True).clamp(min=1)
             pooled = weighted.sum(dim=1) / counts
+        return pooled
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:   # (B, 1, capacity, 3) -> (B, embedding_dim)
+        pooled = self.pool(x)
+        if self._moments is not None:                     # inside calibrate(): count, sum, sum of squares
+            p = pooled.detach().double()
+            self._moments[0] += p.shape[0]
+            self._moments[1] += p.sum(dim=0)
+            self._moments[2] += (p ** 2).sum(dim=0)
+        if self.norm == "zscore":
+            pooled = (pooled - self.pool_mean) / self.pool_std
         return self.fc(pooled)
+
+
+@torch.no_grad()
+def calibrate(model: nn.Module, run: Callable[[], object], eps: float = 1e-6) -> int:
+    """Fix the pooled-vector statistics of every zscore PersLay in `model` from one pass of `run`,
+    a callable that pushes TRAINING batches through the whole model (its outputs are discarded).
+
+    Going through the model rather than the layer means each PersLay sees exactly what PHNet hands
+    it -- one diagram per row, filtrations split out into the batch -- with no reshaping duplicated
+    here. The model is put in eval mode for the pass and restored after, and the RNG state is
+    restored too: iterating a DataLoader draws a base seed from the global generator even without
+    shuffling, which would otherwise shift every later shuffle and dropout mask of the seed and
+    break the pairing with an unnormalized run of the same seed. Returns how many layers were
+    calibrated."""
+    layers = [m for m in model.modules() if isinstance(m, PersLay) and m.norm == "zscore"]
+    if not layers:
+        return 0
+    was_training = model.training
+    model.eval()
+    for layer in layers:
+        layer._moments = [torch.zeros((), dtype=torch.float64, device=layer.pool_mean.device),
+                          torch.zeros_like(layer.pool_mean, dtype=torch.float64),
+                          torch.zeros_like(layer.pool_mean, dtype=torch.float64)]
+    cuda = sorted({p.device.index for p in model.parameters() if p.device.type == "cuda"})
+    try:
+        with torch.random.fork_rng(devices=cuda):
+            run()
+        for layer in layers:
+            n, s, sq = layer._moments
+            if n == 0:
+                raise ValueError("calibrate: `run` pushed no rows through the model")
+            mean = s / n
+            std = torch.sqrt(torch.clamp(sq / n - mean ** 2, min=0.0))
+            layer.pool_mean.copy_(mean.float())
+            # eps floors a transform that no calibration diagram reaches (pooled ~0 everywhere):
+            # it stays ~0 after the shift instead of being blown up by 1/0.
+            layer.pool_std.copy_(torch.clamp(std, min=eps).float())
+    finally:
+        for layer in layers:
+            layer._moments = None
+        model.train(was_training)
+    return len(layers)
