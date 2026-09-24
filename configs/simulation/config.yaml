@@ -28,3 +28,8 @@ rules:
   lgcp_var_min: 0.05  # lgcp: field variance
   lgcp_s_min: 0.10    # lgcp: correlation range, in mean-spacing units (resolvable)
   lgcp_s_max: 0.20    # lgcp: absolute; the largest range the circulant embedding supports
+  # Pilot families (pilot/, not in the bank). Adding keys here moves no existing draw.
+  ring_mu_min: 3.0      # ring: points per ring -- fewer cannot trace a loop
+  ring_jitter: [0.05, 1.0]  # ring: sigma / rho, radial smearing; ~1 fills the ring into a Thomas blob
+  matern1_fill: 0.35    # matern1: pi R^2 nbar; Matern I cannot exceed 1/e (lam_p pi R^2 = 1)
+  cell_k: [2, 30]       # cell: the crowded count k; one point per cell with prob 1 - 1/(k-1)

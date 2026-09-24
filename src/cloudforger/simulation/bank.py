@@ -42,10 +42,12 @@ class Config:
                    pair(c["n"]), int(c["shard_size"]))
 
 
-def draw_theta(fam: Family, tables: Tables, cfg: Config, index: int, max_tries: int = 1000) -> dict:
+def draw_theta(fam: Family, tables: Tables, cfg: Config, index: int, max_tries: int = 1000,
+               set_: str = "bank") -> dict:
     """Model parameters for one theta. LGCP also needs a grid size, the one place the bank consults
-    the null tables; M is written to the manifest, so the pattern stays reproducible from it."""
-    rng = case_rng(cfg.root, "bank", fam.name, index, PARAMS)
+    the null tables; M is written to the manifest, so the pattern stays reproducible from it.
+    `set_` picks the stream set (seeding.SET_ID): the bank, or a pilot drawn beside it."""
+    rng = case_rng(cfg.root, set_, fam.name, index, PARAMS)
     for tries in range(1, max_tries + 1):
         nbar = log_uniform(rng, *cfg.nbar)
         model = fam.draw(rng, nbar)
@@ -59,13 +61,14 @@ def draw_theta(fam: Family, tables: Tables, cfg: Config, index: int, max_tries: 
     raise RuntimeError(f"{fam.name} theta {index}: no feasible draw in {max_tries} tries")
 
 
-def sample_patterns(fam_name: str, theta: dict, cfg: Config, index: int, max_tries: int = 10_000):
+def sample_patterns(fam_name: str, theta: dict, cfg: Config, index: int, max_tries: int = 10_000,
+                    set_: str = "bank"):
     model = dict(theta["model"])
     if fam_name == "lgcp":
         model["root_lam"] = lgcp_eigenvalues(model["sigma2"], model["s"], model["M"])
     lo, hi = cfg.n_range
     for rep in range(cfg.reps):
-        rng = case_rng(cfg.root, "bank", fam_name, cfg.reps * index + rep, PATTERN)
+        rng = case_rng(cfg.root, set_, fam_name, cfg.reps * index + rep, PATTERN)
         for tries in range(1, max_tries + 1):
             pts = SAMPLERS[fam_name](rng, **model)
             if lo <= len(pts) <= hi:

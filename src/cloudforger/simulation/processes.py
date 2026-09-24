@@ -66,4 +66,30 @@ def lgcp(rng, mu_log, sigma2, s, M, root_lam=None):
     return (cells + rng.random((len(cells), 2))) / M
 
 
-SAMPLERS = {"poisson": poisson, "thomas": thomas, "nested": nested, "matern2": matern2, "lgcp": lgcp}
+def ring(rng, kappa, mu, rho, sigma):
+    parents = _uniform(kappa, rho + BUFFER * sigma, rng)
+    k = rng.poisson(mu, len(parents))
+    phi = rng.uniform(0.0, 2 * math.pi, k.sum())
+    circle = rho * np.column_stack([np.cos(phi), np.sin(phi)])
+    return _crop(np.repeat(parents, k, axis=0) + circle + rng.normal(0.0, sigma, (k.sum(), 2)))
+
+
+def matern1(rng, R, lam_p):
+    x = _uniform(lam_p, R, rng)
+    i, j = cKDTree(x).query_pairs(R, output_type="ndarray").T
+    dead = np.zeros(len(x), bool)
+    dead[i] = dead[j] = True
+    return _crop(x[~dead])
+
+
+def cell(rng, nbar, k):
+    """Cells of side c = nbar^-1/2 on a uniformly shifted grid covering W, each with 0 | 1 | k points."""
+    c = 1 / math.sqrt(nbar)
+    m = math.ceil(1 / c) + 1
+    corners = np.stack(np.meshgrid(np.arange(m), np.arange(m), indexing="ij"), -1).reshape(-1, 2) * c - rng.random(2) * c
+    counts = rng.choice([0, 1, k], size=len(corners), p=[1 / k, 1 - 1 / (k - 1), 1 / (k * (k - 1))])
+    return _crop(np.repeat(corners, counts, axis=0) + rng.random((counts.sum(), 2)) * c)
+
+
+SAMPLERS = {"poisson": poisson, "thomas": thomas, "nested": nested, "matern2": matern2, "lgcp": lgcp,
+            "ring": ring, "matern1": matern1, "cell": cell}

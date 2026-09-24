@@ -32,6 +32,9 @@
 # Disk: ~3.4 MB per shard x 6000 shards, freed by the merge, and ~0.65 G per merged pair; leave
 # ~45 G free under data/featurization.
 #
+# New families only (existing pairs are already merged; the index then runs over these alone):
+#   FAMILIES="cell matern1 ring" sbatch --array=0-17 slurm/featurize_array.sh
+#
 # Merge is a separate job because it must not start until every shard of every pair exists:
 #   sbatch slurm/featurize_array.sh
 #   sbatch --dependency=afterok:<array job id> slurm/featurize_merge.sh
@@ -52,7 +55,8 @@ python -u slurm/featurize_preflight.py
 read -r FAMILY TAG < <(python -c "
 from cloudforger.featurization.filtrations import tag
 from cloudforger.featurization.sweep import Config, families
-pairs = [(f, tag(s)) for f in families() for s in Config.load().filtrations]
+only = "${FAMILIES:-}".split()                      # optional: restrict to these families
+pairs = [(f, tag(s)) for f in families() if not only or f in only for s in Config.load().filtrations]
 print(*pairs[$SLURM_ARRAY_TASK_ID])
 ")
 

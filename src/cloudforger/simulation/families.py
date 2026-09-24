@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 from scipy.optimize import brentq
+from scipy.special import chndtr, lambertw
 
 CONFIG = Path(__file__).resolve().parents[3] / "configs" / "simulation" / "config.yaml"
 _R = np.linspace(0.0, 1.0, 4001)
@@ -40,6 +41,10 @@ class Rules:
     lgcp_var_min: float
     lgcp_s_min: float
     lgcp_s_max: float
+    ring_mu_min: float
+    ring_jitter: tuple[float, float]
+    matern1_fill: float
+    cell_k: tuple[int, int]
 
     @classmethod
     def load(cls, path: Path = CONFIG) -> Rules:
@@ -193,6 +198,87 @@ class LGCP(Family):
         return 2 * np.pi * np.sum(coef * -(np.expm1(-a * r) + a * r * np.exp(-a * r)) / a**2, axis=-1)
 
 
+class Ring(Family):
+    """Neyman-Scott with offspring on a circle of radius rho around the parent, smeared radially by
+    N(0, sigma^2). The same two dials as Thomas -- richness mu, overlap omega = rho sqrt(kappa) --
+    plus the jitter ratio sigma / rho, which fills the ring towards a Thomas blob as it nears 1."""
+    name, params = "ring", ("kappa", "mu", "rho", "sigma")
+
+    def draw(self, rng, nbar):
+        c = self.rules
+        hi = nbar / c.kappa_min
+        if hi <= c.ring_mu_min:
+            return None
+        mu = log_uniform(rng, c.ring_mu_min, hi)
+        kappa = nbar / mu
+        t = log_uniform(rng, *c.ring_jitter)   # before rho: the cv inversion needs the whole model
+        return self.draw_omega(rng, kappa, lambda rho: {"kappa": kappa, "mu": mu, "rho": rho, "sigma": t * rho})
+
+    def nbar(self, p):
+        return p["kappa"] * p["mu"]
+
+    def excess(self, r, p):
+        return ring_step(r, p["rho"], p["sigma"]) / p["kappa"]
+
+
+class Matern1(Family):
+    """Matern I: Poisson(lam_p) thinned by deleting EVERY point that has a neighbour within R.
+    Its pair correlation is close to Matern II's; it cannot pack past pi R^2 nbar = 1/e."""
+    name, params = "matern1", ("R", "lam_p")
+
+    def draw(self, rng, nbar):
+        core = log_uniform(rng, self.rules.core_min, math.sqrt(self.rules.matern1_fill / math.pi))
+        R = core / math.sqrt(nbar)
+        a = math.pi * R**2
+        y = float(-lambertw(-a * nbar, 0).real)   # lam_p a on the lower branch: y e^-y = a nbar, y < 1
+        return {"R": R, "lam_p": y / a}
+
+    def nbar(self, p):
+        return p["lam_p"] * math.exp(-p["lam_p"] * math.pi * p["R"] ** 2)
+
+    def excess(self, r, p):
+        R, r = p["R"], np.asarray(r, float)
+        t = np.linspace(R, 2 * R, 2001)
+        a = math.pi * R**2
+        d = np.clip(t / (2 * R), 0.0, 1.0)
+        pcf = np.exp(p["lam_p"] * 2 * R**2 * (np.arccos(d) - d * np.sqrt(1 - d**2)))   # exp(lam_p * lens)
+        cum = np.concatenate([[0.0], np.cumsum(np.diff(t) * np.pi * (t[1:] * pcf[1:] + t[:-1] * pcf[:-1]))])
+        inner = np.interp(r, t, cum) - np.pi * r**2
+        return np.where(r < R, -np.pi * r**2, np.where(r <= 2 * R, inner, cum[-1] - 4 * a))
+
+
+class Cell(Family):
+    """Generalised Baddeley-Silverman cell process: a randomly shifted grid of cells of area 1/nbar,
+    each holding 0, 1 or k uniform points with probabilities 1/k, 1 - 1/(k-1), 1/(k(k-1)). Mean 1
+    and variance 1 per cell, so K(r) = pi r^2 exactly -- CSR to every second-order statistic --
+    while small k is clumpy and large k nearly one point per cell."""
+    name, params = "cell", ("nbar", "k")
+
+    def draw(self, rng, nbar):
+        lo, hi = self.rules.cell_k
+        return {"nbar": nbar, "k": min(int(log_uniform(rng, lo, hi + 1)), hi)}
+
+    def nbar(self, p):
+        return p["nbar"]
+
+    def excess(self, r, p):
+        return np.zeros_like(np.asarray(r, float))
+
+
+def ring_step(r, rho, sigma):
+    """CDF of the distance between two offspring of one ring: |2 rho sin(psi/2) e + Z|, psi ~ U(0, pi),
+    Z ~ N(0, 2 sigma^2 I) -- Rician given psi, averaged over psi by the midpoint rule. Nodes are
+    spaced below sigma in chord length; past 2 rho + 8 s the CDF is 1 to machine precision."""
+    r = np.asarray(r, float)
+    s = math.sqrt(2) * sigma
+    nodes = int(np.clip(math.ceil(10 * rho / sigma), 64, 512))
+    chord = 2 * rho * np.sin((np.arange(nodes) + 0.5) * np.pi / (2 * nodes))
+    out = np.ones(r.shape)
+    near = r < 2 * rho + 8 * s
+    out[near] = chndtr((r[near][:, None] / s) ** 2, 2, (chord[None, :] / s) ** 2).mean(1)
+    return out
+
+
 def _matern_pcf(r, lam_p, R):
     a = np.pi * R**2
     d = np.clip(r / (2 * R), 0.0, 1.0)
@@ -203,7 +289,8 @@ def _matern_pcf(r, lam_p, R):
     return np.where(r < R, 0.0, np.where(r >= 2 * R, 1.0, rho2 / lam**2))
 
 
-FAMILIES: dict[str, type[Family]] = {f.name: f for f in (Poisson, Thomas, Nested, Matern2, LGCP)}
+FAMILIES: dict[str, type[Family]] = {f.name: f for f in (Poisson, Thomas, Nested, Matern2, LGCP, Ring, Matern1, Cell)}
+BANK_FAMILIES = ("poisson", "thomas", "nested", "matern2", "lgcp")   # what data/bank holds; the rest are pilot-only
 
 
 def cv(fam: Family, p: dict) -> float:

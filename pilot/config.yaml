@@ -1,0 +1,40 @@
+# Family pilot: three new families beside the bank's five, at a small balanced scale, to decide
+# which families (and whether PH) earn a place in the next bank. How to run: pilot/README.md.
+
+name: main                   # outputs: data/pilot/<name>/, pilot/results/<name>/
+set: family_pilot            # seeding stream set (cloudforger.simulation.seeding): never the bank's
+new_families: [ring, matern1, cell]
+bank_families: [poisson, thomas, nested, lgcp, matern2]
+thetas: 5000                 # per new family, x 2 replicates (the bank's reps)
+shard_size: 250              # thetas per generation task; ring's cv inversion is ~0.3 s per theta
+
+# The same thetas per family and split, so no family wins on data volume. Bank rows are taken from
+# inside the bank's own train / val / test blocks (cloudforger.simulation.split), so nothing leaks.
+split:
+  new:  {train: [0, 3700], val: [3700, 4000], test: [4000, 5000]}
+  bank: {train: [0, 3700], val: [7000, 7300], test: [8000, 9000]}
+
+# Stage-1 groups. `cell` has K(r) = pi r^2 exactly, so it is held out of stage 1 and the cascade:
+# where the filter sends it is a result, not a label. It is a class in the 8-way one-shot only.
+groups: {poisson: poisson, thomas: clustered, nested: clustered, lgcp: clustered, ring: clustered,
+         matern2: repulsive, matern1: repulsive}
+
+# Diagrams for the new families, with the bank's exact specs (configs/featurization/config.yaml).
+filtrations: [alpha_diameter, dtm_k10]
+
+# Feature sets; every model is gradient-boosted trees (cascade.common's hgb), so the sets differ
+# only in what they see. classical = cascade/features.py (111 columns), ph_<tag> = pilot/vectorize.py.
+feature_sets:
+  classical: [classical]
+  ph_alpha: [ph_alpha_diameter]
+  ph_dtm: [ph_dtm_k10]
+  ph: [ph_alpha_diameter, ph_dtm_k10]
+  classical+ph: [classical, ph_alpha_diameter, ph_dtm_k10]
+
+stage1_features: classical   # the filter, and the routing the regime cutoffs are fitted on
+crossfit_folds: 5
+regime:
+  coordinates: {thomas: omega, nested: omega_inner, lgcp: zeta, matern2: zeta, ring: omega, matern1: zeta}
+  tau: 0.5                   # in-regime scores are at this tau
+bootstrap: 1000              # resamples of test thetas, within family, for every interval
+seed: 0

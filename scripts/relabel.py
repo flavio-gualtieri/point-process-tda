@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cloudforger.classical.lfunction import RADII, l_minus_r_from_excess   # noqa: E402
 from cloudforger.departure.tables import DEFAULT, Tables                   # noqa: E402
-from cloudforger.simulation.families import FAMILIES, Rules                # noqa: E402
+from cloudforger.simulation.families import BANK_FAMILIES, FAMILIES, Rules                # noqa: E402
 from cloudforger.simulation.bank import DATA as BANK                # noqa: E402
 
 CHUNK = 500
@@ -94,7 +94,7 @@ def main() -> None:
     print(f"tables: min_pairs = {tables.min_pairs:g}, reductions = {', '.join(tables.coef_c)}\n")
     print(f"{'family':<9}{'reduction':<11}{'thetas':>7}{'min':>8}{'max':>8}{'q05':>8}{'q50':>8}{'q95':>8}{'<1':>8}")
     columns = []
-    for family in FAMILIES:
+    for family in BANK_FAMILIES:
         for r in relabel(family, tables, write=not args.check):
             columns.append(column(r["reduction"]))
             print(f"{r['family']:<9}{r['reduction']:<11}{r['thetas']:>7}{r['min']:>8.3f}{r['max']:>8.2f}"

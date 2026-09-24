@@ -69,3 +69,55 @@ def test_split_by_theta():
     counts = [(s[:TEST_END] == k).sum() for k in ("train", "val", "test")]
     assert counts == [TRAIN_END, VAL_END - TRAIN_END, TEST_END - VAL_END]
     assert (s[TEST_END:] == "train").all()          # a larger sweep only ever grows train
+
+
+PILOT = ["ring", "matern1", "cell"]
+
+
+@pytest.mark.parametrize("name", PILOT)
+def test_pilot_draw_respects_the_rules(name):
+    fam = FAMILIES[name](RULES)
+    for i in range(8):
+        t = draw_theta(fam, TABLES, CFG, i, set_="family_pilot")
+        p, nbar = t["model"], t["nbar"]
+        assert fam.nbar(p) == pytest.approx(nbar, rel=1e-9)
+        assert cv(fam, p) <= RULES.cv_max
+        assert set(fam.params) <= set(p)
+        if name == "ring":
+            assert p["kappa"] >= RULES.kappa_min and p["mu"] >= RULES.ring_mu_min
+            assert RULES.omega[0] <= p["rho"] * math.sqrt(p["kappa"]) <= RULES.omega[1]
+            assert RULES.ring_jitter[0] <= p["sigma"] / p["rho"] <= RULES.ring_jitter[1]
+        if name == "matern1":
+            assert p["R"] * math.sqrt(nbar) >= RULES.core_min
+            assert math.pi * p["R"] ** 2 * nbar <= RULES.matern1_fill
+            assert p["lam_p"] * math.pi * p["R"] ** 2 < 1          # the lower branch of y e^-y
+        if name == "cell":
+            assert RULES.cell_k[0] <= p["k"] <= RULES.cell_k[1]
+
+
+def test_pilot_streams_are_not_the_banks():
+    fam = FAMILIES["ring"](RULES)
+    assert draw_theta(fam, TABLES, CFG, 0, set_="family_pilot") != draw_theta(fam, TABLES, CFG, 0)
+
+
+def test_ring_step_matches_monte_carlo():
+    from cloudforger.simulation.families import ring_step
+
+    rng = np.random.default_rng(0)
+    rho, sigma, n = 0.05, 0.005, 200_000
+    a = rng.uniform(0, 2 * np.pi, (2, n))
+    p = rho * np.stack([np.cos(a), np.sin(a)], -1) + rng.normal(0, sigma, (2, n, 2))
+    d = np.linalg.norm(p[0] - p[1], axis=1)
+    r = np.linspace(0, 2 * rho + 6 * sigma, 40)
+    assert np.abs(ring_step(r, rho, sigma) - (d[:, None] <= r).mean(0)).max() < 0.005
+
+
+def test_cell_counts_have_poisson_moments():
+    """Mean 1 and variance 1 per cell is what makes K(r) = pi r^2 exactly."""
+    from cloudforger.simulation.processes import cell
+
+    rng = np.random.default_rng(1)
+    for k in (2, 10, 30):
+        n = np.array([len(cell(rng, 400.0, k)) for _ in range(3000)])
+        assert n.mean() == pytest.approx(400, rel=0.01)
+        assert n.var() / n.mean() < 1.2                     # cropped cells only lower it
