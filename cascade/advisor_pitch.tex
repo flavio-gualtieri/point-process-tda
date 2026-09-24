@@ -171,47 +171,64 @@ $\tau$ & accuracy & Poisson rejected & own rejected & Poisson rejected & own rej
 
 \subsection*{Stage 3: parameter estimators}
 \begin{center}
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
-RMSE$(\log\theta)$ / s.d.\ (lower is better) & trees & curves network & PersLay (rips) \\
+RMSE$(\log\theta)$ / s.d.\ (lower is better) & trees & curves network & PersLay rips & PersLay DTM $k{=}10$ \\
 \midrule
-Thomas      & 0.71 & \textbf{0.70} & 0.75 \\
-nested      & 0.63 & \textbf{0.61} & 0.66 \\
-Mat\'ern II & 0.13 & \textbf{0.13} & 0.17 \\
-LGCP        & \textbf{0.44} & \textbf{0.44} & 0.47 \\
+Thomas      & 0.71 & \textbf{0.70} & 0.75 & 0.72 \\
+nested      & 0.63 & \textbf{0.61} & 0.66 & 0.64 \\
+Mat\'ern II & 0.13 & \textbf{0.13} & 0.17 & 0.18 \\
+LGCP        & \textbf{0.44} & \textbf{0.44} & 0.47 & 0.45 \\
 \bottomrule
 \end{tabular}
 \end{center}
 \begin{itemize}
   \item \textbf{Filtering the training data does not help here:} with reject in place, an estimator trained past the cutoff and one trained on everything are within $0.02$ on the patterns that reach them. Estimators are best trained on everything
-  \item Trees and the curves network are tied at every stage; PersLay (rips) is behind. \pending{DTM filtrations still training}
+  \item Trees and the curves network are tied at every stage. PersLay (z-scored) is behind on every family and filtration so far (DTM $k{=}5$, $10$ and rips; $k{=}15, 20$ and alpha still training), at stage 2 too (clustered accuracy $0.45$--$0.46$ vs $0.50$ for trees)
 \end{itemize}
 
 %==============================================================================
 \section{Overall results}
 
 \begin{center}
-\begin{tabular}{@{}rrrr@{}}
+\begin{tabular}{@{}rrrrr@{}}
 \toprule
-& \multicolumn{2}{c}{skill (1 = as good as the truth)} & structured patterns sent to Poisson \\
-$\tau$ & kernel & DSS & gain (kernel), $\approx 0$ = Poisson is enough \\
+& \multicolumn{4}{c}{skill (1 = as good as the truth, 0 = no better than CSR)} \\
+& \multicolumn{2}{c}{trees everywhere} & \multicolumn{2}{c}{mixed} \\
+$\tau$ & kernel & DSS & kernel & DSS \\
 \midrule
-0   & 1.08 & 1.01 & $-0.00000 \pm 0.00008$ \quad (68 patterns) \\
-0.3 & 1.05 & 1.01 & $-0.00007 \pm 0.00011$ \quad (71) \\
-0.5 & 1.04 & 1.00 & $-0.00013 \pm 0.00011$ \quad (80) \\
-0.7 & 1.02 & 1.00 & $-0.00011 \pm 0.00009$ \quad (96) \\
-0.9 & 1.10 & 1.00 & $-0.00001 \pm 0.00011$ \quad (113) \\
+0   & 1.08 & 1.01 & 1.04 & 1.01 \\
+0.3 & 1.05 & 1.01 & 1.02 & 1.01 \\
+0.5 & 1.04 & 1.00 & 1.04 & 1.00 \\
+0.7 & 1.02 & 1.00 & 1.02 & 1.00 \\
+0.9 & 1.10 & 1.00 & 0.98 & 1.00 \\
 \bottomrule
 \end{tabular}
 \end{center}
-{\small Trees at every stage; 300 test patterns. For scale: on strongly structured patterns ($\dt>4$) the gain is $0.011\pm0.0015$.}
+{\small 300 test patterns. Mixed: trees for stages 1--2; curves network for the clustered families' parameters, PersLay (rips) for Mat\'ern II's. Pooled s.e.\ of skill $\approx0.05$--$0.10$.}
+
+\begin{center}
+\begin{tabular}{@{}rrr@{}}
+\toprule
+$\tau$ & structured patterns sent to Poisson & their gain (kernel): $\approx0$ = Poisson is enough \\
+\midrule
+0   & 68  & $-0.00000 \pm 0.00008$ \\
+0.3 & 71  & $-0.00007 \pm 0.00011$ \\
+0.5 & 80  & $-0.00013 \pm 0.00011$ \\
+0.7 & 96  & $-0.00011 \pm 0.00009$ \\
+0.9 & 113 & $-0.00001 \pm 0.00011$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+{\small For scale: on strongly structured patterns ($\dt>4$) the gain is $0.011\pm0.0015$, so the score has power where there is structure.}
 
 \begin{itemize}
   \item \textbf{``Might as well be Poisson'' holds:} on every structured pattern the pipeline sends to Poisson, the true model scores no better than Poisson
   \item \textbf{Where it fits a family, the fit is as good as the truth} as far as either score can tell (skill $\approx1$)
   \item \textbf{$\tau$ does not matter end to end:} rejected patterns are near-CSR, so Poisson or a weak family fit are equally good
+  \item \textbf{The estimator choice does not matter end to end either:} networks at stage 3 score the same as trees, as the per-stage results predicted
+  \item Nested is the only family where the fit is slightly worse than the truth in both pipelines --- the Thomas/nested identifiability again
   \item \textbf{Caveat:} the fit is scored on the pattern it was estimated from, which flatters it (hence skill slightly $>1$). Next: fit on one replicate, score on the independent second replicate of the same $\theta$
-  \item Mixed pipeline (trees to route, networks to estimate): \pending{running}
 \end{itemize}
 
 \end{document}
