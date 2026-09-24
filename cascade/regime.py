@@ -1,87 +1,117 @@
-"""Stage 1's routing curve, and the training pools it defines (`training: regime` at stages 2, 3).
+"""Regime coordinates, and the frozen cutoffs that decide which bank clouds each component trains on.
 
-The routing curve is, per true family f and group g,
+A cutoff is fitted ONCE, by cascade/regime_analysis.py, from stage 1's out-of-fold routing on the
+train split, and written to cutoffs.json. From then on it is a fixed rule on manifest columns:
+training a component never looks at any other component's predictions.
 
-    pi_fg(c) = P(stage 1 routes a cloud of family f with regime coordinate c to group g)
+The rule, per family, with coordinate x (config regime.coordinates) and expected count nbar:
 
-estimated from HELD-OUT stage-1 predictions (config regime.source), in quantile bins of the
-coordinate and linearly interpolated between bin centres. It turns the per-cloud accident of
-routing into a property of the regime, which every train cloud can be scored on.
+    u = log x + a * log nbar              a fitted by logistic regression of
+                                          1{stage 1 routes to own group} on (log x, log nbar)
+    P(own | u)                            isotonic in u (direction fitted)
+    in regime at tau  <=>  P(own | u) >= tau, i.e. u past the boundary u*(tau)
 
-Pools (config regime.threshold = tau):
-  resolved    in-group clouds with pi_f,own(c) >= tau: the regime where stage 1 reliably sends
-              clouds like this one to its own group. Trained on with their family label, at full
-              prior weight -- ALL of them, not just the ones routed right on this draw.
-  reject      everything else: in-group clouds below the boundary, poisson, the other group.
-              Label `reject`, weight = prior x pi_fg(c) (reject_weight: routing_probability), i.e.
-              in the proportion stage 1 actually sends them to group g. A cloud stage 1 never sends
-              here gets ~0 weight; a near-CSR one it sends 30% of the time counts 0.3. This is the
-              "some near-CSR clouds" for the reject output, with the amount set by stage 1 itself.
-              reject_weight: uniform gives every reject candidate full prior weight instead.
-The boundary itself (the coordinate where pi_f,own crosses tau) is reported, per family.
-
-Coordinates (config regime.coordinate): any manifest column, one for all families or a mapping
-family -> column (e.g. delta_tilde_hi for the clustered families, delta_tilde_lo for matern2).
+A logistic model's 50% contour is a straight line in (log x, log nbar), so this is the 2-D
+(x, nbar) cutoff expressed as ONE combined coordinate x * nbar^a -- e.g. for Thomas "cluster
+overlap omega, corrected for how many points there are to see it with". When nbar does not matter
+the fit gives a ~ 0 and the rule is the 1-D cutoff on x. tau = 0 keeps everything.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-from common import CLASSES, REGIME, load_predictions
+# Physically meaningful coordinates, per family, from the manifest's parameter columns. The `zeta`s
+# are back-of-envelope pair-count signal-to-noise ratios (excess pairs at the process's own scale
+# over the square root of CSR's pairs there); cascade/regime_analysis.py tests them against the rest.
+DERIVED = {
+    "thomas": {
+        "omega": lambda r: r.sigma * np.sqrt(r.kappa),                  # cluster overlap (smearing)
+        "zeta": lambda r: np.sqrt(r.mu) / (r.sigma * np.sqrt(r.kappa)),  # sqrt(richness) / overlap
+    },
+    "nested": {
+        "omega_outer": lambda r: np.hypot(r.sigma1, r.sigma2) * np.sqrt(r.kappa),
+        "omega_inner": lambda r: r.sigma2 * np.sqrt(r.kappa * r.mu1),
+        "meta_size": lambda r: r.mu1 * r.mu2,                           # points per meta-cluster
+        "zeta_outer": lambda r: np.sqrt(r.mu1 * r.mu2) / (np.hypot(r.sigma1, r.sigma2) * np.sqrt(r.kappa)),
+        "zeta_inner": lambda r: np.sqrt(r.mu2) / (r.sigma2 * np.sqrt(r.kappa * r.mu1)),
+        "zeta": lambda r: np.hypot(np.sqrt(r.mu1 * r.mu2) / (np.hypot(r.sigma1, r.sigma2) * np.sqrt(r.kappa)),
+                                   np.sqrt(r.mu2) / (r.sigma2 * np.sqrt(r.kappa * r.mu1))),
+    },
+    "matern2": {
+        "core": lambda r: r.R * np.sqrt(r.nbar),                        # hard core, in mean spacings
+        "zeta": lambda r: r.R * r.nbar,                                  # ~ sqrt(n * packing fraction)
+    },
+    "lgcp": {
+        "s_rel": lambda r: r.s * np.sqrt(r.nbar),                       # correlation range, mean spacings
+        "zeta": lambda r: np.expm1(r.sigma2) * r.s * r.nbar,
+    },
+}
 
-EPS = 0.01          # reject candidates below this routing probability are dropped (weight ~ 0)
+
+def values(rows: pd.DataFrame, family: str, name: str) -> np.ndarray:
+    """One coordinate for rows of one family: a DERIVED name or a manifest column."""
+    fn = DERIVED.get(family, {}).get(name)
+    return np.asarray(fn(rows) if fn else rows[name], float)
 
 
-def coordinate(cfg: dict, family: str) -> str:
-    c = cfg["regime"]["coordinate"]
-    return c if isinstance(c, str) else c.get(family, c.get("default", "delta_tilde"))
+# ------------------------------------------------------------------------------ fitting (analysis)
+
+def fit_cutoff(x: np.ndarray, nbar: np.ndarray, y: np.ndarray, taus) -> dict:
+    """The combined coordinate u = log x + a log nbar and its boundary per tau. See module doc."""
+    from sklearn.isotonic import IsotonicRegression
+    from sklearn.linear_model import LogisticRegression
+    Z = np.column_stack([np.log(x), np.log(nbar)])
+    b = LogisticRegression(C=1e6, max_iter=1000).fit(Z, y).coef_[0]
+    a = float(b[1] / b[0])
+    u = Z[:, 0] + a * Z[:, 1]
+    iso = IsotonicRegression(increasing="auto", out_of_bounds="clip").fit(u, y)
+    grid = np.sort(np.unique(u))
+    p = iso.predict(grid)
+    out = {"nbar_exponent": a, "direction": "increasing" if iso.increasing_ else "decreasing",
+           "u_boundary": {}, "pool_fraction": {}}
+    for tau in taus:
+        hit = np.flatnonzero(p >= tau)
+        ub = None if not len(hit) else float(grid[hit[0]] if iso.increasing_ else grid[hit[-1]])
+        out["u_boundary"][str(tau)] = ub
+        out["pool_fraction"][str(tau)] = float((iso.predict(u) >= tau).mean())
+    return out
 
 
-class RoutingCurve:
-    def __init__(self, cfg: dict, stage1_predictions, rows: pd.DataFrame):
-        rc = cfg["regime"]
-        s1 = load_predictions(stage1_predictions)
-        sources = {"val": ["val"], "train_oof": ["train"], "both": ["val", "train"]}[rc["source"]]
-        s1 = s1[s1.split.isin(sources)]
-        if s1.empty:
-            raise SystemExit(f"stage 1 has no predictions on {sources}; regime.source must be held out")
-        self.cfg, self.curves = cfg, {}
-        for family, g in s1.join(rows[["family"]]).groupby("family"):
-            c = rows.loc[g.index, coordinate(cfg, family)].to_numpy()
-            edges = np.unique(np.quantile(c, np.linspace(0, 1, rc["bins"] + 1)))
-            b = np.clip(np.searchsorted(edges, c, side="right") - 1, 0, len(edges) - 2)
-            centres = np.array([np.median(c[b == i]) for i in range(len(edges) - 1)])
-            rates = {grp: np.array([(g.pred.to_numpy()[b == i] == grp).mean() for i in range(len(edges) - 1)])
-                     for grp in CLASSES}
-            self.curves[family] = (centres, rates)
+# ------------------------------------------------------------------------------ applying (training)
 
-    def pi(self, family: np.ndarray, coord: pd.DataFrame, group: str) -> np.ndarray:
-        """Routing probability to `group` for each cloud, from its family and coordinate."""
-        out = np.zeros(len(family))
-        for f in np.unique(family):
-            centres, rates = self.curves[f]
-            m = family == f
-            out[m] = np.interp(coord.loc[m, coordinate(self.cfg, f)].to_numpy(), centres, rates[group])
-        return out
+class Cutoffs:
+    """cutoffs.json -> which rows of a family are in regime at a given tau."""
 
-    def own(self, family: np.ndarray, coord: pd.DataFrame) -> np.ndarray:
-        """pi to each cloud's OWN group."""
-        out = np.zeros(len(family))
-        for grp in CLASSES:
-            m = np.array([REGIME[f] == grp for f in family])
-            out[m] = self.pi(family[m], coord[m], grp)
-        return out
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        if not self.path.exists():
+            raise SystemExit(f"{self.path} missing -- run cascade/regime_analysis.py first")
+        self.table = json.loads(self.path.read_text())
 
-    def boundaries(self) -> dict:
-        """Per non-poisson family: the smallest coordinate at which pi_own reaches the threshold."""
-        tau, out = self.cfg["regime"]["threshold"], {}
-        for f, (centres, rates) in self.curves.items():
-            if f == "poisson":
-                continue
-            above = np.flatnonzero(rates[REGIME[f]] >= tau)
-            out[f] = {"coordinate": coordinate(self.cfg, f),
-                      "boundary": float(centres[above[0]]) if len(above) else None,
-                      "curve": dict(zip(np.round(centres, 3).tolist(), np.round(rates[REGIME[f]], 3).tolist()))}
-        return out
+    def u(self, rows: pd.DataFrame, family: str) -> np.ndarray:
+        c = self.table[family]
+        return np.log(values(rows, family, c["coordinate"])) + c["nbar_exponent"] * np.log(rows.nbar.to_numpy(float))
+
+    def mask(self, rows: pd.DataFrame, family: str, tau: float) -> np.ndarray:
+        """Boolean over rows (all of `family`): in regime at tau. tau = 0 keeps everything."""
+        if tau == 0 or family == "poisson":
+            return np.ones(len(rows), bool)
+        c = self.table[family]
+        ub = c["u_boundary"][str(tau)]
+        if ub is None:
+            return np.zeros(len(rows), bool)
+        u = self.u(rows, family)
+        return u >= ub if c["direction"] == "increasing" else u <= ub
+
+    def describe(self, family: str, tau: float) -> str:
+        c = self.table[family]
+        ub = c["u_boundary"].get(str(tau))
+        if tau == 0 or ub is None:
+            return "all" if tau == 0 else "none"
+        op = ">=" if c["direction"] == "increasing" else "<="
+        return f"{c['coordinate']} * nbar^{c['nbar_exponent']:.2f} {op} {np.exp(ub):.4g}"

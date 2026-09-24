@@ -1,57 +1,38 @@
 #!/bin/bash
-
-#SBATCH -J cascade
-#SBATCH -p compute
-#SBATCH -N 1
-#SBATCH -n 1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
-#SBATCH -t 06:00:00
-#SBATCH --output=cascade/logs/cascade_%j.out
-#SBATCH --error=cascade/logs/cascade_%j.err
-
-# The whole cascade for one config, stage by stage. Lives in cascade/ rather than slurm/ so the
-# original project's job scripts never mention it.
+# Submit the cascade as a chain of SLURM jobs (this script only calls sbatch; run it on the login node).
 #
-#   sbatch cascade/run.sh                                           # cascade/configs/default.yaml
-#   CONFIG=cascade/configs/<name>.yaml sbatch cascade/run.sh
-#   FROM=stage3 CONFIG=... sbatch cascade/run.sh                     # re-run from a stage onward
-#   UNTIL=stage1 CONFIG=... sbatch cascade/run.sh                    # stop after a stage
+#   bash cascade/run.sh                       # regime analysis -> components (hgb + nn) -> assemble
+#   FROM=stage1 bash cascade/run.sh           # also redo features + stage 1 first
+#   FROM=components bash cascade/run.sh       # cutoffs already exist
+#   MODELS=hgb bash cascade/run.sh            # skip the GPU components
+#   CONFIG=cascade/configs/<name>.yaml bash cascade/run.sh
 #
-# A neural stage 1 (stage1.model: nn) needs a GPU, so it is its own job; chain the rest after it:
-#   jid=$(CONFIG=cascade/configs/nn.yaml sbatch --parsable cascade/stage1_nn.sh)
-#   FROM=stage2 CONFIG=cascade/configs/nn.yaml sbatch --dependency=afterok:$jid cascade/run.sh
-#
-# Features (cascade/features.py) are a prerequisite and are skipped when already on disk. The
-# gradient-boosted fits are OpenMP-parallel, so they use every CPU asked for here; the login node
-# throttles a user to about one core, which is why this is a job.
+#   stage1.sh           CPU    features + stage 1 (+ out-of-fold train predictions)
+#   regime_analysis.sh  CPU    coordinates scored, cutoffs.json written
+#   components.sh       CPU    array over regime.taus: stage 2 + stage 3, hgb
+#   components_nn.sh    GPU    array over regime.taus: stage 2 + stage 3, nn
+#   assemble.sh         CPU    components put together per tau, sweep summary
 
 set -euo pipefail
-cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
-mkdir -p cascade/logs
+cd "$(dirname "$0")/.."
+export CONFIG="${CONFIG:-cascade/configs/default.yaml}"
+FROM="${FROM:-regime}"
+MODELS="${MODELS:-hgb nn}"
 
-module load miniforge
-set +u
-mamba activate /gpfs/scratch/qp252676/globus/envs/cloud-env
-set -u
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"   # the module sets 1, which serializes HGB
+dep=""
+after() { [[ -n "$1" ]] && echo "--dependency=afterok:$1" || true; }
 
-CONFIG="${CONFIG:-cascade/configs/default.yaml}"
-FROM="${FROM:-features}"
-UNTIL="${UNTIL:-evaluate}"
-WORKERS="${SLURM_CPUS_PER_TASK:-8}"
-STAGES=(features stage1 stage2 stage3 pipeline evaluate)
-
-started=0
-for stage in "${STAGES[@]}"; do
-    [[ $stage == "$FROM" ]] && started=1
-    (( started )) || continue
-    echo "== $stage  ($(date +%T))"
-    case $stage in
-        features) python cascade/features.py --workers "$WORKERS" ;;
-        stage1)   python cascade/stage1.py train --config "$CONFIG" ;;
-        evaluate) python cascade/evaluate.py --config "$CONFIG" --workers "$WORKERS" ;;
-        *)        python "cascade/$stage.py" --config "$CONFIG" ;;
-    esac
-    [[ $stage == "$UNTIL" ]] && break
+if [[ $FROM == stage1 ]]; then
+    dep=$(sbatch --parsable cascade/stage1.sh); echo "stage1          $dep"
+fi
+if [[ $FROM == stage1 || $FROM == regime ]]; then
+    dep=$(sbatch --parsable $(after "$dep") cascade/regime_analysis.sh); echo "regime_analysis $dep"
+fi
+comp=()
+for m in $MODELS; do
+    script=cascade/components.sh; [[ $m == nn ]] && script=cascade/components_nn.sh
+    j=$(sbatch --parsable $(after "$dep") "$script"); echo "components $m   $j"
+    comp+=("$j")
 done
+all=$(IFS=:; echo "${comp[*]}")
+j=$(sbatch --parsable --dependency=afterany:"$all" cascade/assemble.sh); echo "assemble        $j"

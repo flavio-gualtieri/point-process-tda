@@ -32,7 +32,6 @@ CLASSES = ("poisson", "clustered", "repulsive")
 REGIME = {"poisson": "poisson", "thomas": "clustered", "nested": "clustered", "lgcp": "clustered",
           "matern2": "repulsive"}
 GROUPS = {c: [f for f, g in REGIME.items() if g == c] for c in CLASSES}
-REJECT = "reject"
 # The family's own parameters, as cloudforger.training.data.TARGETS (copied rather than imported,
 # which would pull in torch). nbar stands in for LGCP's mu_log; see simulate.sampler_kwargs.
 TARGETS = {

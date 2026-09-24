@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """End-to-end evaluation: Wasserstein energy score of the pipeline's fit on test clouds.
 
-    python cascade/evaluate.py [--config ...] [--workers 8]      # after pipeline.py
+    python cascade/evaluate.py --clouds cascade/results/default/assembled/tau_0.5/hgb_hgb/clouds.csv
+
+(Deferred: the energy score below has had no power so far -- see wasserstein.py.)
 
 For a sample of test clouds (config evaluation.clouds_per_family per TRUE family, replicate 0 of
 random test thetas) three models are simulated and scored against the observed pattern with
@@ -14,9 +16,9 @@ wasserstein.energy_score (read its docstring for every choice):
 When the pipeline ends at poisson, `fit` IS `csr` (same model, nbar = n), so its score is copied
 rather than re-simulated.
 
-Output  cascade/results/<run>/evaluation/clouds.csv    per cloud: es/cross/within per model,
+Output  <assembled dir>/evaluation/clouds.csv          per cloud: es/cross/within per model,
                                                        regret, gain, family, family_hat, delta
-        cascade/results/<run>/evaluation/report.json   regret and skill by true family, by
+        <assembled dir>/evaluation/report.json         regret and skill by true family, by
                                                        family x delta-tilde bin, and overall
 """
 
@@ -32,8 +34,9 @@ import pandas as pd
 
 import simulate
 import wasserstein
-from common import BANK, config_arg, load_config, manifest, run_dir, write_json
-from pipeline import stage_dir
+from pathlib import Path
+
+from common import BANK, config_arg, load_config, manifest, write_json
 
 DELTA_EDGES = [-np.inf, 0.0, 1.0, 4.0, np.inf]
 
@@ -96,15 +99,17 @@ def summarize(df: pd.DataFrame, min_z: float) -> dict:
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     config_arg(p)
+    p.add_argument("--clouds", required=True, help="an assembled clouds.csv (pipeline.py)")
     p.add_argument("--workers", type=int, default=8)
     args = p.parse_args(argv)
     cfg = load_config(args.config)
     ev = cfg["evaluation"]
     if set(ev["references"]) != {"oracle", "csr"}:
         raise SystemExit("evaluation.references: only [oracle, csr] is implemented")
-    out = run_dir(cfg, "evaluation", args.config)
+    out = Path(args.clouds).parent / "evaluation"
+    out.mkdir(parents=True, exist_ok=True)
 
-    clouds = pd.read_csv(stage_dir(cfg, "pipeline") / "clouds.csv", index_col="case_id")
+    clouds = pd.read_csv(args.clouds, index_col="case_id").assign(split="test")
     chosen = pick(clouds, ev["clouds_per_family"], ev["seed"])
     rows = manifest()
     xs = observed(chosen.index, rows)

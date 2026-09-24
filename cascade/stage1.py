@@ -82,7 +82,7 @@ def train(config: str) -> None:
     cfg = load_config(config)
     c1 = cfg["stage1"]
     if c1["model"] == "nn":
-        raise SystemExit("stage1.model = nn trains on a GPU: sbatch cascade/stage1_nn.sh (see run.sh)")
+        raise SystemExit("stage1.model = nn trains on a GPU: CONFIG=... sbatch cascade/stage1_nn.sh")
     out = run_dir(cfg, "stage1", config)
     d = Data.load()
     y, w = label(d.family), sample_weights(d.family)
