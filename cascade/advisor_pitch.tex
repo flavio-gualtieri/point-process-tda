@@ -1,6 +1,6 @@
 \documentclass[11pt]{article}
 \usepackage[margin=2.2cm]{geometry}
-\usepackage{amsmath,amssymb,booktabs,enumitem,graphicx}
+\usepackage{amsmath,amssymb,booktabs,enumitem,graphicx,xcolor}
 \usepackage[hidelinks]{hyperref}
 \setlist{nosep,leftmargin=*}
 \setlength{\parindent}{0pt}
@@ -8,162 +8,210 @@
 
 \newcommand{\dt}{\tilde\delta}
 \newcommand{\nb}{\bar n}
+\newcommand{\pending}[1]{\textcolor{red}{[#1]}}
 
-\title{From analysis to model: a cascade for point-process inference}
+\title{A cascade for point-process inference}
 \date{}
 
 \begin{document}
 \maketitle
 
 %==============================================================================
-\section{The pitch}
-
-\begin{itemize}
-  \item AISTATS is an ML venue: a \textbf{new model} that solves a problem is a stronger paper than an analysis of where existing models fail
-  \item This does not discard the previous work, it \textbf{uses} it: the regime analysis in \texttt{results/} identified the failure mode, and the new model is designed around it
-  \item One-line summary: \emph{first decide whether there is any structure to infer, and only then infer it, with every downstream model trained on data where the structure is actually visible}
-\end{itemize}
-
-%==============================================================================
 \section{What the exploration showed}
 
-The previous runs (\texttt{docs/05\_results}) compared 22 feature sets (classical summary functions, persistent homology) on 5-way classification and parameter estimation. The consistent finding:
-
 \begin{itemize}
-  \item \textbf{Everything breaks in the same place: near complete spatial randomness (CSR).}
+  \item \textbf{Everything breaks in the same place: near complete spatial randomness (CSR).} Across every feature set in \texttt{results/} (classical and topological):
   \begin{itemize}
-    \item Below $\dt\approx0.6$ every method fails on Thomas (recall $0.03$--$0.19$, below chance), calling $56$--$71\%$ of those patterns Poisson
-    \item The lowest-$\dt$ bins are below chance for every feature set; the modal prediction there is Poisson
-    \item Parameter errors are largest near CSR and shrink as the structure strengthens (Thomas log-RMSE $1.22 \to 0.46$, LGCP $0.89 \to 0.30$ across the $\dt$ range)
+    \item Below $\dt\approx0.6$ the 5-way classifiers recognise Thomas only $2$--$8\%$ of the time and call $59$--$86\%$ of those patterns Poisson (nested and LGCP alike: $51$--$82\%$ called Poisson)
+    \item Parameter errors are largest near CSR and shrink as the structure strengthens: log-RMSE (mean over parameters) Thomas $\approx0.9 \to 0.4$, LGCP $\approx0.6 \to 0.25$ from $\dt<0.5$ to $\dt\ge8$ (best feature sets)
   \end{itemize}
-  \item \textbf{No feature set fixes it.} Classical and topological inputs fail together, so the limit is information in the pattern, not the model
-  \item \textbf{Conclusion:} don't fight the near-CSR regime --- route around it
 \end{itemize}
 
 %==============================================================================
-\section{Design philosophy}
+\section{Design}
 
 \begin{center}
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}llll@{}}
 \toprule
-stage & question & trained on \\
+stage & question & model & trained on \\
 \midrule
-1. filter      & Poisson, clustered or repulsive?          & all simulated clouds \\
-2. classifier  & which clustered family? (Thomas, nested, LGCP) & clustered clouds \emph{past the cutoff} \\
-3. estimators  & the family's parameters (one model per family) & that family's clouds \emph{past the cutoff} \\
+1. filter      & Poisson, clustered or repulsive?      & trees & all simulated patterns \\
+2. classifiers & clustered: Thomas / nested / LGCP / \emph{reject} & trees & in-regime patterns of the branch \\
+               & repulsive: Mat\'ern II / \emph{reject}           &       & + reject examples \\
+3. estimators  & the family's parameters (log-MSE)     & per family & that family's in-regime patterns \\
+\midrule
+Poisson        & intensity                             & $\hat{\nb}=n$ (exact MLE) & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \begin{itemize}
-  \item A Poisson call needs no model: the intensity estimate $\hat{\nb} = n$ is the exact MLE. The repulsive group has one family (Mat\'ern II), so it needs no classifier
-  \item \textbf{Each component is trained on its own.} No component sees another's predictions during training; they are only assembled at the end
-  \item \textbf{The whole pipeline is scored end to end} (planned): simulate from the fitted model and compare with the observed pattern by a Wasserstein distance. This rewards a \emph{useful} fit, not a correct label, and does not reuse the summary functions the models were trained on (avoids a circular evaluation)
-\end{itemize}
-
-\subsection*{Why filter? (the argument to defend)}
-\begin{itemize}
-  \item \textbf{The filter will misfile weak structure as Poisson.} A barely-clustered Thomas pattern gets a Poisson fit
-  \item \textbf{That is acceptable by construction:} if the structure is too weak for any method to see, a Poisson model generates patterns that look like the observed one. The error is in the label, not in the usefulness of the fit (this is exactly what the end-to-end score is designed to check)
-  \item \textbf{In exchange, every downstream model trains on clean data}: patterns where the structure is visible, instead of spending capacity on near-CSR noise
-  \item \textbf{First evidence that it works} (clustered classifier, on the patterns the filter actually passes to it):
-  \begin{itemize}
-    \item trained on all clusters: Thomas recall $0.33$ --- it learns that ``Thomas looks weakly clustered'', but the filter only passes the clearly clustered ones
-    \item trained past the cutoff: Thomas recall $0.54$, overall $0.612 \to 0.625$
-  \end{itemize}
+  \item \textbf{Why filter:} near-CSR patterns carry no usable structure, so the filter calls them Poisson and fits $\hat{\nb}=n$. That is wrong as a label but fine as a fit, and every downstream model is trained only on patterns where its structure is visible
+  \item \textbf{Reject:} patterns the filter lets through by mistake (mostly Poisson) are re-routed to Poisson by stage 2. Reject examples are Poisson patterns, the branch's own out-of-regime patterns, and the other branch's patterns
+  \item \textbf{Each component is trained on its own}, from simulated patterns only; no component sees another's predictions. They are assembled only at test time
+  \item \textbf{The assembled pipeline is scored end to end} by a proper scoring rule on simulations from the fitted model (Section~\ref{sec:scoring}). This rewards a useful fit rather than a correct label, and does not reuse the summary functions the models were trained on
 \end{itemize}
 
 %==============================================================================
 \section{Stage 1: the filter}
 
-\begin{itemize}
-  \item Three very different models tie on the same 120k test patterns, which suggests a ceiling set by the data rather than the model:
-\end{itemize}
-
-\smallskip
 \begin{center}
 \begin{tabular}{@{}lr@{}}
 \toprule
-model & balanced accuracy \\
+model (same 120k test patterns) & balanced accuracy \\
 \midrule
-network on summary curves ($L,F,G,J$)           & 0.796 \\
+network on summary curves ($L,F,G,J$)               & 0.796 \\
 gradient-boosted trees on summary features (chosen) & 0.796 \\
-logistic regression on summary features         & 0.794 \\
-persistence-diagram network (PersLay)           & 0.774 \\
+logistic regression on summary features             & 0.794 \\
+persistence-diagram network (PersLay)               & 0.774 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \begin{itemize}
-  \item Chosen: gradient-boosted trees --- tied for best, CPU-only, deterministic
-  \item The remaining errors are almost all near-CSR patterns called Poisson, i.e.\ the regime the filter is meant to absorb
+  \item Three very different models tie: a ceiling set by the data, not the model. Trees chosen: tied for best, CPU-only, deterministic
+  \item \textbf{The remaining errors are the regime the filter is meant to absorb:} $77\%$ of its errors are structured patterns called Poisson, and $90\%$ of those have $\dt<1$ ($68\%$ have $\dt<0$, a departure from CSR smaller than CSR's own noise)
 \end{itemize}
 
 %==============================================================================
-\section{Where to cut: the regime analysis}
+\section{Regime analysis: where to cut}
 
-\subsection*{Principle: measure the cutoff, don't impose it}
 \begin{itemize}
-  \item For every simulated pattern we know its true parameters and whether the filter sent it to its own group
-  \item We ask: which \textbf{coordinate of the parameters} best explains that decision?
-  \item Candidates, per family: raw parameters, physically meaningful ones, a rough signal-to-noise estimate, and $\dt$ (the calibrated departure-from-CSR measure from the earlier work)
-  \item Scored by how much of the explainable variation each captures ($1$ = as good as knowing every parameter); fitted on held-out predictions from the training set, so the test set never chooses the cutoff
+  \item \textbf{Question:} which function of a pattern's true parameters best predicts whether the filter sends it to its own group?
+  \item \textbf{Candidates, per family:} raw parameters; physical ones (cluster overlap $\omega=\sigma\sqrt\kappa$, hard-core size, correlation range); a rough pair-count signal-to-noise ratio $\zeta$; and $\dt$
+  \item \textbf{Score:} out-of-fold log-loss of a monotone fit, as a fraction of what a model given \emph{all} parameters achieves ($1$ = the coordinate explains everything the parameters can). Fitted on the filter's held-out predictions on the \emph{training} set, so the test set never picks the cutoff
 \end{itemize}
 
 \begin{center}
 \includegraphics[width=\linewidth]{explained.png}
 \end{center}
 
-\subsection*{Result: physical coordinates explain the filter at least as well as $\dt$}
-\smallskip
 \begin{center}
 \begin{tabular}{@{}llrr@{}}
 \toprule
-family & coordinate & explained & $\dt$ explained \\
+family & chosen coordinate (corrected for $\nb$) & explained & $\dt$ explained \\
 \midrule
-Thomas    & cluster overlap $\omega=\sigma\sqrt\kappa$, corrected for $\nb$ & 0.975 & 0.861 \\
-nested    & inner-cluster overlap, corrected for $\nb$                       & 0.983 & 0.845 \\
-Mat\'ern II & hard-core size $\times\,\nb$                                  & 0.992 & 0.991 \\
-LGCP      & field strength $\times$ correlation range $\times\,\nb$         & 0.965 & 0.958 \\
+Thomas      & cluster overlap $\omega=\sigma\sqrt\kappa$ & 0.975 & 0.861 \\
+nested      & inner-cluster overlap                      & 0.983 & 0.845 \\
+Mat\'ern II & hard-core size $\times\,\nb$               & 0.992 & 0.991 \\
+LGCP        & field strength $\times$ range $\times\,\nb$ & 0.965 & 0.958 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \begin{itemize}
-  \item \textbf{Interpretable:} whether a Thomas process can be detected depends on how much the clusters \emph{overlap}, not on how many points each has
-  \item \textbf{Two-dimensional:} more points make the same overlap easier to see, so each cutoff is on (coordinate, $\nb$), fitted as one combined number coordinate$\,\times\,\nb^{a}$
-  \item \textbf{Honest:} $\dt$ is computed from the $L$-function, which the filter also sees, so it has a built-in advantage; physical coordinates that match or beat it are the cleaner choice
+  \item \textbf{Physical coordinates match or beat $\dt$.} $\dt$ is built from the $L$-function, which the filter also sees, so a physical coordinate that ties it is the cleaner choice
+  \item \textbf{Two-dimensional:} more points make the same overlap easier to see, so each cutoff is on (coordinate, $\nb$), written as one number coordinate$\,\times\,\nb^{a}$ with $a$ fitted
 \end{itemize}
 
 \begin{center}
 \includegraphics[width=\linewidth]{detection.png}
 \end{center}
-{\small Left: raw coordinate, curves split by $\nb$. Middle: the $\nb$-corrected coordinate the cutoff uses --- the curves collapse onto one. Right: $\dt$ for comparison.}
+{\small Left: raw coordinate, split by $\nb$. Middle: the $\nb$-corrected coordinate the cutoff uses --- the curves collapse onto one. Right: $\dt$.}
 
-\subsection*{The cutoff is a property of the problem, not of the filter}
 \begin{center}
-\includegraphics[width=0.85\linewidth]{stability.png}
+\includegraphics[width=0.8\linewidth]{stability.png}
 \end{center}
-\begin{itemize}
-  \item Trees, logistic regression and the network give the same detection curves
-\end{itemize}
+{\small Trees, logistic regression and the network give the same curves: the cutoff is a property of the problem, not of the filter.}
 
 \subsection*{From curve to training data}
 \begin{itemize}
-  \item A pattern is ``past the cutoff'' at threshold $\tau$ if the filter sends patterns like it to their own group with probability $\ge\tau$
-  \item $\tau$ is swept over $\{0, 0.3, 0.5, 0.7, 0.9\}$; $\tau=0$ is no filtering, the baseline the filter must beat
+  \item A pattern is \textbf{in regime} at threshold $\tau$ if the filter sends patterns like it to their own group with probability $\ge\tau$
+  \item $\tau\in\{0, 0.3, 0.5, 0.7, 0.9\}$; $\tau=0$ is no filtering, the baseline the filter must beat
   \item Higher $\tau$ = cleaner but fewer training patterns (at $\tau=0.5$: Thomas keeps $49\%$, nested $83\%$, Mat\'ern II $88\%$, LGCP $66\%$)
 \end{itemize}
 
 %==============================================================================
-\section{Status and open questions}
+\section{Scoring the whole pipeline}\label{sec:scoring}
 
 \begin{itemize}
-  \item \textbf{Running:} every stage-2 and stage-3 model at every $\tau$, with trees (done) and the network (in progress), then the assembled pipeline
-  \item \textbf{Early result:} a low cutoff ($\tau=0.3$) helps the clustered classifier most; stricter cutoffs lose too much data
-  \item \textbf{Thomas vs nested:} their main confusion is identifiability, not features --- a nested process whose outer level is smeared out \emph{is} a Thomas process. Candidate fix: call a pattern nested only when its outer level is visible (the same filter idea, one level down)
-  \item \textbf{Impostors:} about $5\%$ of patterns reaching the clustered classifier are not clustered (mostly Poisson). There is no reject option yet; whether that matters is for the end-to-end score to decide
-  \item \textbf{End-to-end score:} the first Wasserstein version could not separate the true model from CSR; it is being reworked before it is used to rank pipelines
+  \item \textbf{Per test pattern $x$}, simulate three models and score each against $x$ (lower is better):
+  \begin{itemize}
+    \item \textbf{fit}: the pipeline's $(\widehat{\text{family}}, \hat\theta)$
+    \item \textbf{truth}: the true family at the true $\theta$ --- the floor
+    \item \textbf{CSR}: Poisson with $\nb=n$ --- no structure
+  \end{itemize}
+  \item \textbf{Primary score: kernel score on local configurations.} Around each point, take its neighbours within $1.5$ mean spacings; compare the distribution of these local configurations in $x$ with that in the model's simulations, through a kernel. Strictly proper: the true model minimises it in expectation
+  \item \textbf{Secondary score: Dawid--Sebastiani} on 14 geometric statistics (Voronoi cells, nearest neighbours, Delaunay edges), no persistent homology
+  \item \textbf{Why not the obvious Wasserstein distance?} Two draws of the same clustered process do not line up point by point, so $W(x,\text{simulation})$ is large even for the true model. Tested: it could not tell the truth from CSR
+  \item \textbf{Summaries}, pooled over $\sim$300 test patterns stratified by $\dt$ (never read single patterns):
+  \[
+    \text{regret} = S(\text{fit}) - S(\text{truth}), \quad
+    \text{gain} = S(\text{CSR}) - S(\text{truth}), \quad
+    \text{skill} = 1 - \frac{\sum \text{regret}}{\sum \text{gain}}
+  \]
+  skill $=1$: as good as the truth; $0$: no better than CSR
+  \item \textbf{Power check (truth vs CSR):} at $\dt>4$ the kernel score prefers the truth on $93$--$100\%$ of patterns. Most of that power comes from higher-order structure, not the pair correlation the models were trained on
+  \item \textbf{``Might as well be Poisson'' becomes testable:} on structured patterns the pipeline sends to Poisson, the fit \emph{is} CSR, so the claim is simply gain $\approx0$
+\end{itemize}
+
+%==============================================================================
+\section{Results at each stage}
+
+\subsection*{Stage 2: classifiers, on the patterns the filter actually sends them}
+\begin{center}
+\begin{tabular}{@{}rrrr|rr@{}}
+\toprule
+& \multicolumn{3}{c|}{clustered branch} & \multicolumn{2}{c}{repulsive branch} \\
+$\tau$ & accuracy & Poisson rejected & own rejected & Poisson rejected & own rejected \\
+\midrule
+0   & 0.610 & 3\%  & 0\%  & 4\%  & 0\% \\
+0.3 & 0.614 & 18\% & 2\%  & 13\% & 1\% \\
+0.5 & 0.597 & 42\% & 5\%  & 27\% & 3\% \\
+0.7 & 0.566 & 66\% & 11\% & 45\% & 5\% \\
+0.9 & 0.505 & 90\% & 22\% & 68\% & 10\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{itemize}
+  \item $\tau$ is a dial between catching Poisson impostors and losing weak real patterns (accuracy counts a rejected real pattern as wrong)
+  \item Training past the cutoff fixes Thomas: recall $0.33\to0.54$ --- trained on all Thomas patterns it learns ``Thomas is weakly clustered'', but the filter only passes clearly clustered ones
+  \item Main remaining confusion is Thomas vs nested, and it is identifiability: a nested process whose outer level is smeared out \emph{is} a Thomas process (nested called nested: $96\%$ when the outer level is crisp, $37$--$46\%$ when smeared)
+\end{itemize}
+
+\subsection*{Stage 3: parameter estimators}
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+RMSE$(\log\theta)$ / s.d.\ (lower is better) & trees & curves network & PersLay (rips) \\
+\midrule
+Thomas      & 0.71 & \textbf{0.70} & 0.75 \\
+nested      & 0.63 & \textbf{0.61} & 0.66 \\
+Mat\'ern II & 0.13 & \textbf{0.13} & 0.17 \\
+LGCP        & \textbf{0.44} & \textbf{0.44} & 0.47 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{itemize}
+  \item \textbf{Filtering the training data does not help here:} with reject in place, an estimator trained past the cutoff and one trained on everything are within $0.02$ on the patterns that reach them. Estimators are best trained on everything
+  \item Trees and the curves network are tied at every stage; PersLay (rips) is behind. \pending{DTM filtrations still training}
+\end{itemize}
+
+%==============================================================================
+\section{Overall results}
+
+\begin{center}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+& \multicolumn{2}{c}{skill (1 = as good as the truth)} & structured patterns sent to Poisson \\
+$\tau$ & kernel & DSS & gain (kernel), $\approx 0$ = Poisson is enough \\
+\midrule
+0   & 1.08 & 1.01 & $-0.00000 \pm 0.00008$ \quad (68 patterns) \\
+0.3 & 1.05 & 1.01 & $-0.00007 \pm 0.00011$ \quad (71) \\
+0.5 & 1.04 & 1.00 & $-0.00013 \pm 0.00011$ \quad (80) \\
+0.7 & 1.02 & 1.00 & $-0.00011 \pm 0.00009$ \quad (96) \\
+0.9 & 1.10 & 1.00 & $-0.00001 \pm 0.00011$ \quad (113) \\
+\bottomrule
+\end{tabular}
+\end{center}
+{\small Trees at every stage; 300 test patterns. For scale: on strongly structured patterns ($\dt>4$) the gain is $0.011\pm0.0015$.}
+
+\begin{itemize}
+  \item \textbf{``Might as well be Poisson'' holds:} on every structured pattern the pipeline sends to Poisson, the true model scores no better than Poisson
+  \item \textbf{Where it fits a family, the fit is as good as the truth} as far as either score can tell (skill $\approx1$)
+  \item \textbf{$\tau$ does not matter end to end:} rejected patterns are near-CSR, so Poisson or a weak family fit are equally good
+  \item \textbf{Caveat:} the fit is scored on the pattern it was estimated from, which flatters it (hence skill slightly $>1$). Next: fit on one replicate, score on the independent second replicate of the same $\theta$
+  \item Mixed pipeline (trees to route, networks to estimate): \pending{running}
 \end{itemize}
 
 \end{document}
