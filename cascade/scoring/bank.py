@@ -52,7 +52,9 @@ def observed(chosen: pd.DataFrame) -> dict[str, np.ndarray]:
         index = pd.read_csv(BANK / family / "manifest.csv", usecols=["case_id"]).case_id
         pos = pd.Series(np.arange(len(index)), index=index).loc[rows.index]
         z = np.load(BANK / family / "points.npz")
-        out |= {c: z["points"][z["offsets"][i]:z["offsets"][i + 1]] for c, i in pos.items()}
+        points, offsets = z["points"], z["offsets"]
+        out |= {c: points[offsets[i]:offsets[i + 1]].copy() for c, i in pos.items()}   # copies: let
+        del points                                                                    # the arrays go
     return out
 
 

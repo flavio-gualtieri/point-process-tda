@@ -5,7 +5,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH -t 01:00:00
 #SBATCH --output=cascade/logs/cascade_assemble_%j.out
 #SBATCH --error=cascade/logs/cascade_assemble_%j.err

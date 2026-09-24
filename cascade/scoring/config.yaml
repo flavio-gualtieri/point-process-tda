@@ -1,0 +1,40 @@
+# Power check for candidate end-to-end scores (cascade/scoring/power.py). Every choice is here.
+#
+# The check scores only two models per cloud, the TRUE model (oracle) and CSR (poisson at
+# nbar = n), and asks whether gain = S(csr) - S(oracle) is clearly positive where the structure is
+# strong and ~0 on Poisson clouds (where the two models coincide up to nbar). A score without power
+# here cannot rank pipelines, so this comes before wiring any score into the cascade.
+
+name: power
+
+clouds:
+  # Test split, replicate 0. per_bin clouds per (family, delta-tilde bin) for the structured
+  # families; per_bin x (number of bins) Poisson clouds, the noise floor.
+  per_bin: 15
+  delta_edges: [-.inf, 0.0, 1.0, 4.0, .inf]
+  seed: 0
+
+sims:                   # simulated patterns per model per cloud; each score takes the first k
+  dss: 150              # mean + covariance of 14 statistics needs O(100)
+  kernel: 16            # configurations are replicated within a pattern, so few patterns suffice
+  energy_w: 8           # as in the original evaluation
+
+dss:
+  # Scored on all 14 statistics, on the subset with no persistent-homology content (no_ph), and
+  # leaving out each group in turn (the variants are automatic; see dss.GROUPS).
+  enabled: true
+
+kernel:
+  enabled: true
+  radii: [1.5, 4.0]     # mean spacings: hard-core scale and cluster scale
+  kinds: [point, grid]
+  h: 0.1                # smoothing, in units of R (>= grid spacing 2/(grid-1) = 0.1)
+  grid: 21              # embedding grid over [-1, 1]^2
+  centres: 300          # max configurations taken from the observed pattern, per component
+  pool: 1000            # max configurations pooled over a model's simulations, per component
+
+energy_w:
+  enabled: true
+  max_points: 400
+
+seed: 0

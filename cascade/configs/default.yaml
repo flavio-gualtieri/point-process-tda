@@ -92,13 +92,44 @@ nn:                             # defaults for every `kind: nn` model -- scripts
   batch_size: 128
   lr: 0.001
 
-evaluation:                     # end-to-end Wasserstein score -- deferred; see cascade/wasserstein.py
-  clouds_per_family: 40
-  sims: 8
-  ground: exact
-  p: 1
-  max_points: 400
-  condition_n: true
-  references: [oracle, csr]
+evaluation:                     # end-to-end score: cascade/evaluate.py with cascade/scoring's scores
+  clouds:                       # scoring.bank.pick: test split, replicate 0, stratified by delta-tilde
+    per_bin: 15                 # per (family, bin) for structured families; x n_bins Poisson clouds
+    delta_edges: [-.inf, 0.0, 1.0, 4.0, .inf]
+    seed: 0
+  # Named sets of pipelines, each scored on the SAME clouds (evaluate.py --set NAME, output in
+  # evaluation/NAME/). Stage 1 is always the run's; stage2 is one model; stage3 is one model or a
+  # mapping family -> model; crossed with taus (`all` = regime.taus) and stage3_taus (`same` = the
+  # stage-2 tau, or numbers, e.g. 0).
+  variants:
+    hgb:                        # trees everywhere
+      stage2: hgb
+      stage3: hgb
+      taus: all
+      stage3_taus: [same]
+    mixed:                      # trees to route; curves network for the clustered families' parameters,
+      stage2: hgb               # PersLay-z for matern2's (rips: the only filtration done at every tau
+      stage3:                   # when this was set up -- swap in a DTM one when its runs finish)
+        thomas: nn
+        nested: nn
+        lgcp: nn
+        matern2: perslay_z_rips
+      taus: all
+      stage3_taus: [same]
+  kernel:                       # primary: local_kernel.Component, the power check's recommended setting
+    R: 1.5                      # configuration radius, in mean spacings
+    kind: point                 # centres at the pattern's own points
+    h: 0.1
+    grid: 21
+    centres: 300
+    pool: 1000
+    sims: 16                    # simulated patterns per model
+    tau_mult: "1.0"             # kernel width = 1 x the median distance between x's configurations
+  dss:                          # secondary: Dawid-Sebastiani on the non-PH geometric statistics
+    enabled: true
+    groups: no_ph               # dss.NO_PH: no overlap with the PersLay features being scored
+    sims: 150                   # mean + covariance of the statistics need O(100) patterns
+  # skill = 1 - sum(regret)/sum(gain) only where the gain is resolved (> this many s.e.); per-cloud
+  # d' is ~1, so read pooled cells, never single clouds.
   skill_min_z: 2
   seed: 0

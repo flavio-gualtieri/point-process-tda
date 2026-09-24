@@ -10,7 +10,7 @@
 #   stage1.sh           CPU    features + stage 1 (+ out-of-fold train predictions)
 #   regime_analysis.sh  CPU    coordinates scored, cutoffs.json written
 #   components.sh       CPU    array over regime.taus: stage 2 + stage 3, hgb
-#   components_nn.sh    GPU    array over regime.taus: stage 2 + stage 3, nn
+#   components_nn.sh    GPU    array over (nn model, tau): stage 2 + stage 3
 #   assemble.sh         CPU    components put together per tau, sweep summary
 
 set -euo pipefail
@@ -30,8 +30,14 @@ if [[ $FROM == stage1 || $FROM == regime ]]; then
 fi
 comp=()
 for m in $MODELS; do
-    script=cascade/components.sh; [[ $m == nn ]] && script=cascade/components_nn.sh
-    j=$(sbatch --parsable $(after "$dep") "$script"); echo "components $m   $j"
+    if [[ $m == nn ]]; then
+        # one GPU task per (nn model, tau) pair; reading the config is all this does
+        n=$(python3 -c "import yaml,sys; c=yaml.safe_load(open('$CONFIG')); ms=dict.fromkeys(c['stage2']['models']+c['stage3']['models']); print(sum(c['models'][m]['kind']=='nn' for m in ms)*len(c['regime']['taus']))")
+        j=$(sbatch --parsable --array=0-$((n - 1)) $(after "$dep") cascade/components_nn.sh)
+    else
+        j=$(sbatch --parsable $(after "$dep") cascade/components.sh)
+    fi
+    echo "components $m   $j"
     comp+=("$j")
 done
 all=$(IFS=:; echo "${comp[*]}")

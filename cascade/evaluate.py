@@ -1,25 +1,43 @@
 #!/usr/bin/env python3
-"""End-to-end evaluation: Wasserstein energy score of the pipeline's fit on test clouds.
+"""End-to-end score of the assembled cascade: does its fitted model reproduce each test pattern?
 
-    python cascade/evaluate.py --clouds cascade/results/default/assembled/tau_0.5/hgb_hgb/clouds.csv
+    python cascade/evaluate.py [--config ...] [--workers 16] [--limit N]      # sbatch cascade/evaluate.sh
 
-(Deferred: the energy score below has had no power so far -- see wasserstein.py.)
+The scores are cascade/scoring's (self-contained; see its README and module docstrings). Both are
+proper scoring rules, lower is better, and compare MODELS ON THE SAME PATTERN:
+    kernel  primary. local_kernel.Component(x, R, kind, h, grid, centres), built ONCE per cloud and
+            reused for every model (its kernel width is fixed from x, which is what makes the models'
+            scores comparable), then .scores(sims)[tau_mult]. Strictly proper for the law of
+            radius-R local configurations.
+    dss     secondary. Dawid-Sebastiani on dss.statistics, restricted to the NO_PH groups so no
+            persistent-homology statistic overlaps with the PersLay models being scored.
 
-For a sample of test clouds (config evaluation.clouds_per_family per TRUE family, replicate 0 of
-random test thetas) three models are simulated and scored against the observed pattern with
-wasserstein.energy_score (read its docstring for every choice):
+Clouds: scoring.bank.pick -- test split, replicate 0, config evaluation.clouds.per_bin per
+(family, delta-tilde bin), plus a Poisson noise floor. Every pipeline variant is scored on the SAME
+clouds with the SAME oracle and CSR simulations; only the fit differs.
 
-    fit      the pipeline's (family_hat, theta_hat)
-    oracle   the true family at the true theta          -- the floor
-    csr      poisson at nbar = n                        -- the no-structure baseline
+Per cloud, models simulated with scoring.bank.simulate (bank samplers, n in [20, 2000], never the
+bank's seeds):
+    oracle   the true family at the true theta (scoring.bank.true_model)       -- the floor
+    csr      poisson at nbar = n                                                -- no structure
+    fit      each variant's (family_hat, theta_hat), from pipeline.assemble + pipeline.clouds.
+             Identical fits share one simulation set; a fit that ends at poisson IS csr.
+Variants: config evaluation.variants is a set of NAMED variant sets, each
+    {stage2: <model>, stage3: <model> | {family: <model>}, taus: all | [...], stage3_taus: [same | t]}
+i.e. one stage-2 model and, per family, one stage-3 model (stage 1 is always the run's), crossed
+with the taus. `--set NAME` scores one set, written to evaluation/NAME/; sets are independent runs.
 
-When the pipeline ends at poisson, `fit` IS `csr` (same model, nbar = n), so its score is copied
-rather than re-simulated.
+Per variant and score:
+    regret = S(fit) - S(oracle)          >= 0 in expectation; 0 = as good as the truth
+    gain   = S(csr) - S(oracle)          how much structure there is to find (same for every variant)
+    skill  = 1 - sum(regret) / sum(gain) pooled over clouds, only where gain is resolved
+             (mean > skill_min_z standard errors): 1 = as good as the truth, 0 = no better than CSR
+reported overall, by true family, by family x delta-tilde bin, and split by where the pipeline
+ended: `poisson` (stage 1 or a reject sent it there) vs `family`. On structured clouds sent to
+poisson, regret = gain, so "might as well be poisson" is the claim that their gain is ~0.
 
-Output  <assembled dir>/evaluation/clouds.csv          per cloud: es/cross/within per model,
-                                                       regret, gain, family, family_hat, delta
-        <assembled dir>/evaluation/report.json         regret and skill by true family, by
-                                                       family x delta-tilde bin, and overall
+Output  cascade/results/<run>/evaluation/<set>/clouds.csv    one row per (cloud, variant)
+        cascade/results/<run>/evaluation/<set>/report.json   the summaries above
 """
 
 from __future__ import annotations
@@ -27,118 +45,183 @@ from __future__ import annotations
 import argparse
 import json
 import multiprocessing as mp
+import os
+import sys
 import time
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
 
-import simulate
-import wasserstein
-from pathlib import Path
+from common import DEFAULT_CONFIG, RESULTS, load_config, load_predictions, manifest, write_json
+import pipeline
 
-from common import BANK, config_arg, load_config, manifest, write_json
+sys.path.insert(0, str(RESULTS.parent / "scoring"))
+import bank as sbank                                         # noqa: E402  (cascade/scoring)
+import dss                                                   # noqa: E402
+from local_kernel import Component                           # noqa: E402
 
-DELTA_EDGES = [-np.inf, 0.0, 1.0, 4.0, np.inf]
-
-
-def pick(clouds: pd.DataFrame, per_family: int, seed: int) -> pd.DataFrame:
-    test0 = clouds[(clouds.split == "test") & clouds.index.str.endswith("-0")]
-    return pd.concat([g.sample(min(per_family, len(g)), random_state=seed)
-                      for _, g in test0.groupby("family")])
+M_FALLBACK = 1024          # LGCP grid when an estimate has no admissible one (bank rule, lgcp_grid)
 
 
-def observed(case_ids: pd.Index, rows: pd.DataFrame) -> dict[str, np.ndarray]:
-    out = {}
-    for family, ids in pd.Series(case_ids, index=case_ids).groupby(rows.loc[case_ids, "family"]):
-        index = pd.read_csv(BANK / family / "manifest.csv", usecols=["case_id"]).case_id
-        pos = pd.Series(np.arange(len(index)), index=index).loc[ids.index]
-        z = np.load(BANK / family / "points.npz")
-        points, offsets = z["points"], z["offsets"]
-        out |= {c: points[offsets[i]:offsets[i + 1]] for c, i in pos.items()}
-    return out
+# ------------------------------------------------------------------------------ fitted -> sampler
+
+@lru_cache(maxsize=1)
+def _tables():
+    from cloudforger.departure.tables import Tables
+    return Tables()
 
 
-def score_cloud(job: dict) -> dict:
-    ev = job["ev"]
-    kw = {"ground": ev["ground"], "p": ev["p"], "max_points": ev["max_points"]}
-    x, cid = job["x"], job["case_id"]
-    models = {"fit": (job["family_hat"], simulate.from_estimate(job["family_hat"], job["theta_hat"])),
-              "oracle": (job["family"], job["oracle"]),
-              "csr": ("poisson", {"nbar": float(len(x))})}
-    out = {"case_id": cid}
-    for name in ["oracle", "csr", "fit"]:
-        if name == "fit" and job["family_hat"] == "poisson":
-            out |= {k.replace("csr_", "fit_"): v for k, v in out.items() if k.startswith("csr_")}
-            continue
-        family, kwargs = models[name]
-        rng = simulate.rng_for(ev["seed"], cid, name)
-        sims = simulate.patterns(family, kwargs, ev["sims"], rng, ev["condition_n"])
-        out |= {f"{name}_{k}": v for k, v in wasserstein.energy_score(x, sims, rng, **kw).items()}
-    return out
+def sampler_kwargs(family: str, theta: dict) -> dict:
+    """theta_hat (keyed by the TARGETS) -> the bank sampler's arguments. LGCP is estimated as
+    (nbar, sigma2, s); the sampler wants mu_log = log nbar - sigma2 / 2 and a grid M, picked as the
+    bank picks it."""
+    if family != "lgcp":
+        return dict(theta)
+    from cloudforger.simulation.lgcp_grid import grid_size
+    nbar, sigma2, s = theta["nbar"], theta["sigma2"], theta["s"]
+    M = grid_size(sigma2, s, nbar, _tables()) or M_FALLBACK
+    return {"mu_log": float(np.log(nbar) - sigma2 / 2), "sigma2": sigma2, "s": s, "M": int(M)}
 
 
-def summarize(df: pd.DataFrame, min_z: float) -> dict:
-    """skill = 1 - sum(regret) / sum(gain) is a ratio, and wild when the denominator is noise (near
-    CSR the truth and CSR are the same model, so gain ~ 0 +- Monte Carlo error). It is reported only
-    where the cell's mean gain exceeds min_z standard errors (config evaluation.skill_min_z)."""
+def fit_key(family: str, theta: dict) -> str:
+    return f"{family}:" + json.dumps({k: round(v, 10) for k, v in sorted(theta.items())})
+
+
+# ------------------------------------------------------------------------------------- scoring
+
+def score_cloud(job: dict) -> list[dict]:
+    ev, cid, x = job["ev"], job["case_id"], job["x"]
+    kc, dc = ev["kernel"], ev["dss"]
+    rng = sbank.rng_for(ev["seed"], cid, "component")
+    comp = Component(x, kc["R"], kc["kind"], kc["h"], kc["grid"], kc["centres"], rng)
+    cols = dss.columns(getattr(dss, dc["groups"].upper()) if isinstance(dc["groups"], str) else tuple(dc["groups"]))
+    t_x = dss.statistics(x)[cols] if dc["enabled"] else None
+    k = max(kc["sims"], dc["sims"] if dc["enabled"] else 0)
+
+    def score(key, family, kwargs):
+        sims = sbank.simulate(family, kwargs, k, sbank.rng_for(ev["seed"], cid, key))
+        out = {"kernel": comp.scores(sims[:kc["sims"]], rng, kc["pool"])[kc["tau_mult"]]}
+        if dc["enabled"]:
+            T = np.stack([dss.statistics(s) for s in sims[:dc["sims"]]])[:, cols]
+            out["dss"] = dss.score(t_x, T)
+        return out
+
+    csr_key = fit_key("poisson", {"nbar": float(len(x))})
+    S = {"oracle": score("oracle", *job["oracle"]), csr_key: score("csr", "poisson", {"nbar": float(len(x))})}
+    rows = []
+    for v in job["variants"]:
+        key = csr_key if v["family_hat"] == "poisson" else fit_key(v["family_hat"], v["theta_hat"])
+        if key not in S:
+            S[key] = score(key, v["family_hat"], sampler_kwargs(v["family_hat"], v["theta_hat"]))
+        row = {"case_id": cid, "variant": v["variant"], "family_hat": v["family_hat"],
+               "ended": "poisson" if v["family_hat"] == "poisson" else "family"}
+        for s in S["oracle"]:
+            row |= {f"{s}_fit": S[key][s], f"{s}_oracle": S["oracle"][s], f"{s}_csr": S[csr_key][s],
+                    f"{s}_regret": S[key][s] - S["oracle"][s], f"{s}_gain": S[csr_key][s] - S["oracle"][s]}
+        rows.append(row)
+    return rows
+
+
+def summarize(df: pd.DataFrame, scores: list[str], min_z: float) -> dict:
     def se(v):
-        return float(v.std(ddof=1) / np.sqrt(len(v))) if len(v) > 1 else np.inf
+        return float(v.std(ddof=1) / np.sqrt(len(v))) if len(v) > 1 else float("inf")
 
     def cell(g):
-        resolved = g.gain.mean() > min_z * se(g.gain)
-        return {"n": int(len(g)), "regret_mean": float(g.regret.mean()), "regret_se": se(g.regret),
-                "gain_mean": float(g.gain.mean()), "gain_se": se(g.gain),
-                "skill": float(1 - g.regret.sum() / g.gain.sum()) if resolved else None,
-                "routed_right": float((g.family_hat == g.family).mean())}
-    bins = pd.cut(df.delta_tilde, DELTA_EDGES, right=False).astype(str)
-    return {"overall": cell(df),
-            "by_family": {f: cell(g) for f, g in df.groupby("family")},
-            "by_family_delta": {f"{f} {b}": cell(g) for (f, b), g in df.groupby([df.family, bins])}}
+        out = {"n": int(len(g))}
+        for s in scores:
+            reg, gain = g[f"{s}_regret"], g[f"{s}_gain"]
+            resolved = gain.mean() > min_z * se(gain)
+            out[s] = {"regret": float(reg.mean()), "regret_se": se(reg), "gain": float(gain.mean()),
+                      "gain_se": se(gain), "skill": float(1 - reg.sum() / gain.sum()) if resolved else None,
+                      "fit_beats_csr": float((g[f"{s}_fit"] < g[f"{s}_csr"]).mean())}
+        return out
+
+    bins = pd.cut(df.delta_tilde, [-np.inf, 0, 1, 4, np.inf], right=False).astype(str)
+    out = {}
+    for variant, g in df.groupby("variant"):
+        b = bins[g.index]
+        structured = g[g.family != "poisson"]
+        out[variant] = {
+            "overall": cell(g),
+            "by_family": {f: cell(h) for f, h in g.groupby("family")},
+            "by_family_delta": {f"{f} {d}": cell(h) for (f, d), h in g.groupby([g.family, b])},
+            # the test of "might as well be poisson": structured clouds the pipeline sent to poisson
+            "structured_by_end": {e: cell(h) for e, h in structured.groupby("ended")},
+            "structured_by_end_delta": {f"{e} {d}": cell(h) for (e, d), h in structured.groupby([structured.ended, b[structured.index]])},
+        }
+    return out
+
+
+# ----------------------------------------------------------------------------------------- main
+
+def variants(cfg: dict, name: str) -> list[tuple[str, str, object, float, float]]:
+    """(label, stage-2 model, stage-3 model or {family: model}, stage-2 tau, stage-3 tau)."""
+    v = cfg["evaluation"]["variants"][name]
+    taus = cfg["regime"]["taus"] if v["taus"] == "all" else v["taus"]
+    return [(f"{name}|tau{t:g}|s3tau{(t if s3 == 'same' else float(s3)):g}", v["stage2"], v["stage3"], t,
+             t if s3 == "same" else float(s3)) for t in taus for s3 in v["stage3_taus"]]
 
 
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    config_arg(p)
-    p.add_argument("--clouds", required=True, help="an assembled clouds.csv (pipeline.py)")
-    p.add_argument("--workers", type=int, default=8)
+    p.add_argument("--config", default=str(DEFAULT_CONFIG))
+    p.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
+    p.add_argument("--set", required=True, help="a name under evaluation.variants")
+    p.add_argument("--limit", type=int, help="score only the first N clouds (smoke test)")
     args = p.parse_args(argv)
     cfg = load_config(args.config)
     ev = cfg["evaluation"]
-    if set(ev["references"]) != {"oracle", "csr"}:
-        raise SystemExit("evaluation.references: only [oracle, csr] is implemented")
-    out = Path(args.clouds).parent / "evaluation"
+    out = RESULTS / cfg["name"] / "evaluation" / args.set
     out.mkdir(parents=True, exist_ok=True)
 
-    clouds = pd.read_csv(args.clouds, index_col="case_id").assign(split="test")
-    chosen = pick(clouds, ev["clouds_per_family"], ev["seed"])
-    rows = manifest()
-    xs = observed(chosen.index, rows)
-    jobs = [{"case_id": c, "x": xs[c], "family": r.family, "family_hat": r.family_hat,
-             "theta_hat": json.loads(r.theta_hat), "oracle": simulate.from_manifest(rows.loc[c]),
-             "ev": ev} for c, r in chosen.iterrows()]
-
     t0 = time.time()
+    c = ev["clouds"]
+    chosen = sbank.pick(c["per_bin"], c["delta_edges"], c["seed"])
+    if args.limit:
+        chosen = chosen.sample(args.limit, random_state=0)
+    rows = manifest()
+    s1 = load_predictions(RESULTS / cfg["name"] / "stage1" / "predictions.npz").loc[chosen.index]
+
+    per_cloud = {cid: [] for cid in chosen.index}
+    for name, m2, m3, t2, t3 in variants(cfg, args.set):
+        r = pipeline.assemble(cfg, t2, m2, s1, rows)
+        missing = [f for f in ("thomas", "nested", "matern2", "lgcp")
+                   if pipeline.load(cfg, t3, f, pipeline.stage3_model(m3, f)) is None]
+        if r is None or missing:
+            print(f"skip {name}: components missing ({'stage 2' if r is None else ', '.join(missing)})", flush=True)
+            continue
+        th = pipeline.clouds(cfg, r, t3, m3)
+        for cid, row in th.iterrows():
+            per_cloud[cid].append({"variant": name, "family_hat": row.family_hat, "theta_hat": json.loads(row.theta_hat)})
+    xs = sbank.observed(chosen)
+    jobs = [{"case_id": cid, "x": xs[cid], "oracle": sbank.true_model(chosen.loc[cid]), "variants": per_cloud[cid],
+             "ev": ev} for cid in chosen.index if per_cloud[cid]]
+    n_fits = np.mean([len({(v["family_hat"], json.dumps(v["theta_hat"])) for v in j["variants"]}) for j in jobs])
+    print(f"{len(jobs)} clouds, {len(jobs[0]['variants'])} variants, {n_fits:.1f} distinct fits per cloud on "
+          f"average, {args.workers} workers ({time.time() - t0:.0f}s)", flush=True)
+
+    recs = []
     with mp.get_context("fork").Pool(args.workers) as pool:
-        scores = []
-        for i, s in enumerate(pool.imap_unordered(score_cloud, jobs), 1):
-            scores.append(s)
-            if i % 20 == 0 or i == len(jobs):
+        for i, r in enumerate(pool.imap_unordered(score_cloud, jobs), 1):
+            recs += r
+            if i % 25 == 0 or i == len(jobs):
                 print(f"  {i}/{len(jobs)} clouds, {time.time() - t0:.0f}s", flush=True)
 
-    df = chosen[["family", "family_hat", "n", "delta_tilde"]].join(pd.DataFrame(scores).set_index("case_id"))
-    df["regret"] = df.fit_es - df.oracle_es
-    df["gain"] = df.csr_es - df.oracle_es
-    df.to_csv(out / "clouds.csv")
-    rep = summarize(df, ev["skill_min_z"]) | {"evaluation": ev}
-    write_json(out / "report.json", rep)
+    df = pd.DataFrame(recs).join(chosen[["family", "delta_tilde", "n"]], on="case_id")
+    df.to_csv(out / "clouds.csv", index=False)
+    scores = ["kernel"] + (["dss"] if ev["dss"]["enabled"] else [])
+    rep = summarize(df, scores, ev["skill_min_z"])
+    write_json(out / "report.json", {"evaluation": ev | {"variants": ev["variants"][args.set]}, "variants": rep})
 
-    o = rep["overall"]
-    print(f"\n{cfg['name']}: {o['n']} clouds   regret {o['regret_mean']:.4g} ± {o['regret_se']:.2g}   "
-          f"gain {o['gain_mean']:.4g}   skill {o['skill']}")
-    for f, c in rep["by_family"].items():
-        print(f"   {f:8s} n={c['n']:3d}  regret {c['regret_mean']:+.4g}  gain {c['gain_mean']:+.4g}  "
-              f"skill {c['skill'] if c['skill'] is None else round(c['skill'], 3)}  "
-              f"routed right {c['routed_right']:.2f}")
+    for variant, v in rep.items():
+        o, e = v["overall"], v["structured_by_end"]
+        line = f"{variant:34s} n={o['n']}"
+        for s in scores:
+            line += (f" | {s}: regret {o[s]['regret']:+.4g} skill {o[s]['skill'] if o[s]['skill'] is None else round(o[s]['skill'], 3)}"
+                     + (f", sent-to-poisson gain {e['poisson'][s]['gain']:+.3g}±{e['poisson'][s]['gain_se']:.2g}" if "poisson" in e else ""))
+        print(line)
+    print(f"-> {out}  ({time.time() - t0:.0f}s)")
 
 
 if __name__ == "__main__":
