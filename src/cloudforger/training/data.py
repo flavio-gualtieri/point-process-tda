@@ -285,6 +285,9 @@ TARGETS = {
     "nested": ["kappa", "mu1", "mu2", "sigma1", "sigma2"],
     "matern2": ["R", "lam_p"],
     "lgcp": ["nbar", "sigma2", "s"],
+    "ring": ["kappa", "mu", "rho", "sigma"],
+    "matern1": ["R", "lam_p"],
+    "cell": ["nbar", "k"],
 }
 
 

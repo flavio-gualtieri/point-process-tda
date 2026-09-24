@@ -7,15 +7,8 @@
 `new` computes what the bank already has for its own families: cascade/features.py's 111 classical
 columns, and diagrams with the bank's exact filtration specs (configs/featurization/config.yaml).
 `assemble` takes the bank families' pilot rows from data/cascade/features and data/featurization,
-the new families' from `new`, and vectorises every diagram the same way:
-
-    per homology dimension, on the sqrt(n)-rescaled axis (mean-spacing units, as the classical sqrtn axis)
-      Betti curve / n at 32 points      grid = pooled 0.5-99.5% quantiles of train births and deaths
-      count / n, total persistence / n, lifetime mean, s.d., max and quantiles (.1 .25 .5 .75 .9 .99)
-      birth and death quantiles (.1 .5 .9)
-    H1 also: death / birth ratio quantiles (.5 .9 .99) and max, the three longest lifetimes
-
-Undefined statistics (an empty diagram) are NaN, which the trees handle natively.
+the new families' from `new`, and vectorises every diagram with cloudforger.vectorization.summaries
+(Betti-curve grid fitted on a sample of train rows pooled over families).
 
 Output  data/pilot/computed/<family>/{classical,<tag>}.npz     (new families; diagrams in data/featurization's format)
         data/pilot/features/<set>/<family>.npz                 case_id, X, names; set = classical | ph_<tag>
@@ -39,10 +32,7 @@ from shared import DATA, ROOT, families, load_config, rows, source
 import features as classical                                            # cascade/features.py
 from cloudforger.featurization.filtrations import FILTRATIONS           # noqa: E402
 from cloudforger.featurization.sweep import Config as FeatConfig        # noqa: E402
-
-GRID = 32
-QS = (0.1, 0.25, 0.5, 0.75, 0.9, 0.99)
-Q3 = (0.1, 0.5, 0.9)
+from cloudforger.vectorization.summaries import fit_grid, vector, vector_names   # noqa: E402
 
 _POINTS = _OFFSETS = _SPEC = None
 
@@ -102,40 +92,6 @@ def diagrams(cfg: dict, family: str, tag: str, case_id: np.ndarray) -> list[tupl
     return [tuple(h[d][o[d][i]:o[d][i + 1]].copy() for d in (0, 1)) for i in at]   # copies: frees the file
 
 
-def _q(x, qs):
-    return np.quantile(x, qs) if len(x) else np.full(len(qs), np.nan)
-
-
-def vector(h0: np.ndarray, h1: np.ndarray, n: int, grids) -> np.ndarray:
-    s, out = np.sqrt(n), []
-    for d, pairs in ((0, h0), (1, h1)):
-        b, e = pairs[:, 0] * s, pairs[:, 1] * s
-        life = e - b
-        g = grids[d]
-        out.append(((b[None, :] <= g[:, None]) & (e[None, :] > g[:, None])).sum(1) / n)
-        stats = [len(life) / n, life.sum() / n] + ([life.mean(), life.std(), life.max()] if len(life) else [np.nan] * 3)
-        out += [stats, _q(life, QS), _q(b, Q3), _q(e, Q3)]
-        if d == 1:
-            ratio = e / np.maximum(b, 1e-12)
-            top = np.full(3, np.nan)
-            top[:min(3, len(life))] = np.sort(life)[::-1][:3]
-            out += [_q(ratio, (0.5, 0.9, 0.99)), [ratio.max() if len(ratio) else np.nan], top]
-    return np.concatenate([np.asarray(x, float) for x in out])
-
-
-def vector_names(tag: str) -> list[str]:
-    names = []
-    for d in (0, 1):
-        names += [f"{tag}_h{d}_betti@{j}" for j in range(GRID)]
-        names += [f"{tag}_h{d}_{k}" for k in ("count", "total", "life_mean", "life_sd", "life_max")]
-        names += [f"{tag}_h{d}_life_q{q}" for q in QS] + [f"{tag}_h{d}_birth_q{q}" for q in Q3]
-        names += [f"{tag}_h{d}_death_q{q}" for q in Q3]
-        if d == 1:
-            names += [f"{tag}_h1_ratio_q{q}" for q in (0.5, 0.9, 0.99)] + [f"{tag}_h1_ratio_max"]
-            names += [f"{tag}_h1_top{j}" for j in (1, 2, 3)]
-    return names
-
-
 def cmd_assemble(cfg: dict) -> None:
     table = rows(cfg)
     rng = np.random.default_rng(cfg["seed"])
@@ -161,8 +117,7 @@ def cmd_assemble(cfg: dict) -> None:
                 train = np.flatnonzero(g.split.to_numpy() == "train")
                 for i in rng.choice(train, min(1000, len(train)), replace=False):
                     vals.append(lst[i][d].ravel() * np.sqrt(g.n.iloc[i]))
-            v = np.concatenate(vals)
-            grids.append(np.linspace(*np.quantile(v, [0.005, 0.995]), GRID))
+            grids.append(fit_grid(np.concatenate(vals)))
         for f, lst in dg.items():
             n = table.n[table.family == f].to_numpy()
             X = np.stack([vector(h0, h1, k, grids) for (h0, h1), k in zip(lst, n)]).astype(np.float32)

@@ -55,7 +55,8 @@ python -u slurm/featurize_preflight.py
 read -r FAMILY TAG < <(python -c "
 from cloudforger.featurization.filtrations import tag
 from cloudforger.featurization.sweep import Config, families
-only = "${FAMILIES:-}".split()                      # optional: restrict to these families
+import os
+only = os.environ.get('FAMILIES', '').split()        # optional: restrict to these families
 pairs = [(f, tag(s)) for f in families() if not only or f in only for s in Config.load().filtrations]
 print(*pairs[$SLURM_ARRAY_TASK_ID])
 ")

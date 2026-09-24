@@ -37,9 +37,9 @@ def spec(cfg: dict, name: str) -> dict:
     return {**cfg["nn"], **cfg["models"][name]}
 
 
-def build(s: dict):
-    """(dataset over all five families in cloudforger's manifest order, n_tags, input description)."""
-    families = list(D.FAMILIES)
+def build(s: dict, families: list[str] | None = None):
+    """(dataset over `families` -- default cloudforger's five -- in manifest order, n_tags, input description)."""
+    families = list(families or D.FAMILIES)
     if s.get("curves"):
         return D.build_curves(families, D.parse_curves(s["curves"], "sqrtn_u2")), 1, s["curves"]
     tags = s["filtration"].split(",")
