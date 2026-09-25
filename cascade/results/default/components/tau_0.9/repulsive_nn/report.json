@@ -1,0 +1,39 @@
+{
+ "component": "repulsive",
+ "kind": "classify",
+ "families": [
+  "matern2"
+ ],
+ "model": "nn",
+ "tau": 0.9,
+ "rule": {
+  "matern2": "zeta * nbar^-0.15 >= 0.6001"
+ },
+ "n_train": 370000,
+ "seconds": 219,
+ "in_regime": {
+  "n": 18646,
+  "balanced_accuracy": 0.9752761986485037,
+  "recall": {
+   "matern2": 0.9752761986485037
+  }
+ },
+ "all": {
+  "n": 24000,
+  "balanced_accuracy": 0.797875,
+  "recall": {
+   "matern2": 0.797875
+  }
+ },
+ "reject_rate": {
+  "poisson": 0.974875,
+  "other_group": 0.9902222222222222,
+  "in_regime": 0.0247238013514963,
+  "out_of_regime": 0.8199477026522226
+ },
+ "fit": {
+  "best_epoch": 18,
+  "epochs_run": 48,
+  "best_val_loss": 0.04550723199550994
+ }
+}

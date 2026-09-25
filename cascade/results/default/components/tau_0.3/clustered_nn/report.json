@@ -1,0 +1,47 @@
+{
+ "component": "clustered",
+ "kind": "classify",
+ "families": [
+  "thomas",
+  "nested",
+  "lgcp"
+ ],
+ "model": "nn",
+ "tau": 0.3,
+ "rule": {
+  "thomas": "omega * nbar^-0.18 <= 0.6243",
+  "nested": "omega_inner * nbar^-0.32 <= 0.3097",
+  "lgcp": "zeta * nbar^-0.23 >= 0.3667"
+ },
+ "n_train": 370000,
+ "seconds": 536,
+ "in_regime": {
+  "n": 54802,
+  "balanced_accuracy": 0.542143832511143,
+  "recall": {
+   "thomas": 0.4791812211820595,
+   "nested": 0.45713374635568516,
+   "lgcp": 0.6901165299956841
+  }
+ },
+ "all": {
+  "n": 72000,
+  "balanced_accuracy": 0.4379722222222222,
+  "recall": {
+   "thomas": 0.31983333333333336,
+   "nested": 0.419125,
+   "lgcp": 0.5749583333333333
+  }
+ },
+ "reject_rate": {
+  "poisson": 0.864125,
+  "other_group": 0.9826666666666667,
+  "in_regime": 0.14014087077113974,
+  "out_of_regime": 0.7911385044772647
+ },
+ "fit": {
+  "best_epoch": 42,
+  "epochs_run": 72,
+  "best_val_loss": 0.7204433069229126
+ }
+}

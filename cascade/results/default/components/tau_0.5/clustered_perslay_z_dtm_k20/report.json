@@ -1,0 +1,47 @@
+{
+ "component": "clustered",
+ "kind": "classify",
+ "families": [
+  "thomas",
+  "nested",
+  "lgcp"
+ ],
+ "model": "perslay_z_dtm_k20",
+ "tau": 0.5,
+ "rule": {
+  "thomas": "omega * nbar^-0.18 <= 0.4278",
+  "nested": "omega_inner * nbar^-0.32 <= 0.2187",
+  "lgcp": "zeta * nbar^-0.23 >= 0.6997"
+ },
+ "n_train": 370000,
+ "seconds": 1396,
+ "in_regime": {
+  "n": 47606,
+  "balanced_accuracy": 0.551527460887928,
+  "recall": {
+   "thomas": 0.6357889413351315,
+   "nested": 0.37287287287287285,
+   "lgcp": 0.6459205684557797
+  }
+ },
+ "all": {
+  "n": 72000,
+  "balanced_accuracy": 0.37529166666666663,
+  "recall": {
+   "thomas": 0.3501666666666667,
+   "nested": 0.31275,
+   "lgcp": 0.46295833333333336
+  }
+ },
+ "reject_rate": {
+  "poisson": 0.940875,
+  "other_group": 0.98775,
+  "in_regime": 0.12937444859891611,
+  "out_of_regime": 0.8459457243584488
+ },
+ "fit": {
+  "best_epoch": 64,
+  "epochs_run": 94,
+  "best_val_loss": 0.6421316853523255
+ }
+}

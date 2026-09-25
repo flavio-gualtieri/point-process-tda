@@ -1,0 +1,41 @@
+{
+ "component": "matern2",
+ "kind": "regress",
+ "families": [
+  "matern2"
+ ],
+ "model": "nn",
+ "tau": 0.3,
+ "rule": {
+  "matern2": "zeta * nbar^-0.15 >= 0.3838"
+ },
+ "n_train": 69250,
+ "seconds": 171,
+ "in_regime": {
+  "n": 22404,
+  "rmse_log": {
+   "R": 0.091,
+   "lam_p": 0.075
+  },
+  "rmse_over_sd": {
+   "R": 0.1159,
+   "lam_p": 0.1012
+  }
+ },
+ "all": {
+  "n": 24000,
+  "rmse_log": {
+   "R": 0.1327,
+   "lam_p": 0.0795
+  },
+  "rmse_over_sd": {
+   "R": 0.1699,
+   "lam_p": 0.1047
+  }
+ },
+ "fit": {
+  "best_epoch": 93,
+  "epochs_run": 123,
+  "best_val_loss": 0.01258071161582358
+ }
+}

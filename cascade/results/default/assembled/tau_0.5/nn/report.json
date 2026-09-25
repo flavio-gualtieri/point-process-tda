@@ -1,0 +1,124 @@
+{
+ "model": "nn",
+ "tau": 0.5,
+ "end_to_end": {
+  "family_balanced_accuracy": 0.7125925925925927,
+  "calls": {
+   "lgcp": {
+    "lgcp": 0.5043,
+    "poisson": 0.3448,
+    "thomas": 0.1133,
+    "nested": 0.0233,
+    "matern2": 0.0143
+   },
+   "matern2": {
+    "matern2": 0.8444,
+    "poisson": 0.1483,
+    "thomas": 0.005,
+    "lgcp": 0.0022,
+    "nested": 0.0001
+   },
+   "nested": {
+    "thomas": 0.3572,
+    "nested": 0.3482,
+    "poisson": 0.2001,
+    "lgcp": 0.0842,
+    "matern2": 0.0102
+   },
+   "poisson": {
+    "poisson": 0.8976,
+    "matern2": 0.0472,
+    "lgcp": 0.0298,
+    "thomas": 0.0253,
+    "nested": 0.0001
+   },
+   "thomas": {
+    "poisson": 0.4798,
+    "thomas": 0.3349,
+    "lgcp": 0.0956,
+    "nested": 0.0658,
+    "matern2": 0.0239
+   }
+  }
+ },
+ "stage2": {
+  "clustered": {
+   "n_routed": 51250,
+   "balanced_accuracy": 0.599765745783576,
+   "impostors_rejected": 0.398093508851566,
+   "own_rejected": 0.05019923591997699,
+   "impostor_share": 0.05002926829268293
+  },
+  "repulsive": {
+   "n_routed": 25506,
+   "balanced_accuracy": 0.9537838855421686,
+   "impostors_rejected": 0.42828282828282827,
+   "own_rejected": 0.046216114457831324,
+   "impostor_share": 0.16694111189524033
+  }
+ },
+ "stage3": {
+  "thomas": {
+   "n": 8037,
+   "filtered": 0.6085968730735747,
+   "filtered_per_target": {
+    "kappa": 0.6315,
+    "mu": 0.6639,
+    "sigma": 0.5303
+   },
+   "unfiltered": 0.5839808292010288,
+   "unfiltered_per_target": {
+    "kappa": 0.6159,
+    "mu": 0.6499,
+    "sigma": 0.4861
+   }
+  },
+  "nested": {
+   "n": 8356,
+   "filtered": 0.47982555786094405,
+   "filtered_per_target": {
+    "kappa": 0.5704,
+    "mu1": 0.7218,
+    "mu2": 0.4608,
+    "sigma1": 0.4167,
+    "sigma2": 0.2293
+   },
+   "unfiltered": 0.48244164400366457,
+   "unfiltered_per_target": {
+    "kappa": 0.5738,
+    "mu1": 0.7197,
+    "mu2": 0.4686,
+    "sigma1": 0.4184,
+    "sigma2": 0.2317
+   }
+  },
+  "matern2": {
+   "n": 20266,
+   "filtered": 0.12866049611620964,
+   "filtered_per_target": {
+    "R": 0.1522,
+    "lam_p": 0.1051
+   },
+   "unfiltered": 0.11950554021084625,
+   "unfiltered_per_target": {
+    "R": 0.1386,
+    "lam_p": 0.1004
+   }
+  },
+  "lgcp": {
+   "n": 12103,
+   "filtered": 0.3931892959987602,
+   "filtered_per_target": {
+    "nbar": 0.1923,
+    "sigma2": 0.4561,
+    "s": 0.5312
+   },
+   "unfiltered": 0.37857970164985666,
+   "unfiltered_per_target": {
+    "nbar": 0.1924,
+    "sigma2": 0.4293,
+    "s": 0.5141
+   }
+  }
+ }
+}

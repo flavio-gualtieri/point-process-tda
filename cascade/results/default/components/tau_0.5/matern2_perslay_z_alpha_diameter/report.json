@@ -1,0 +1,41 @@
+{
+ "component": "matern2",
+ "kind": "regress",
+ "families": [
+  "matern2"
+ ],
+ "model": "perslay_z_alpha_diameter",
+ "tau": 0.5,
+ "rule": {
+  "matern2": "zeta * nbar^-0.15 >= 0.462"
+ },
+ "n_train": 65242,
+ "seconds": 127,
+ "in_regime": {
+  "n": 21118,
+  "rmse_log": {
+   "R": 0.1496,
+   "lam_p": 0.0785
+  },
+  "rmse_over_sd": {
+   "R": 0.1921,
+   "lam_p": 0.1061
+  }
+ },
+ "all": {
+  "n": 24000,
+  "rmse_log": {
+   "R": 0.2253,
+   "lam_p": 0.0813
+  },
+  "rmse_over_sd": {
+   "R": 0.2885,
+   "lam_p": 0.107
+  }
+ },
+ "fit": {
+  "best_epoch": 9,
+  "epochs_run": 39,
+  "best_val_loss": 0.025131832999350522
+ }
+}

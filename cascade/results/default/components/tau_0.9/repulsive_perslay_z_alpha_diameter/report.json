@@ -1,0 +1,39 @@
+{
+ "component": "repulsive",
+ "kind": "classify",
+ "families": [
+  "matern2"
+ ],
+ "model": "perslay_z_alpha_diameter",
+ "tau": 0.9,
+ "rule": {
+  "matern2": "zeta * nbar^-0.15 >= 0.6001"
+ },
+ "n_train": 370000,
+ "seconds": 810,
+ "in_regime": {
+  "n": 18646,
+  "balanced_accuracy": 0.9149951732275019,
+  "recall": {
+   "matern2": 0.9149951732275019
+  }
+ },
+ "all": {
+  "n": 24000,
+  "balanced_accuracy": 0.734375,
+  "recall": {
+   "matern2": 0.734375
+  }
+ },
+ "reject_rate": {
+  "poisson": 0.9860833333333333,
+  "other_group": 0.9945277777777778,
+  "in_regime": 0.08500482677249813,
+  "out_of_regime": 0.8946581994770265
+ },
+ "fit": {
+  "best_epoch": 31,
+  "epochs_run": 61,
+  "best_val_loss": 0.0610978360311361
+ }
+}
