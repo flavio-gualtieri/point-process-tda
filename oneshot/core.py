@@ -124,7 +124,8 @@ def sample_weights(family: pd.Series | np.ndarray, cfg: dict) -> np.ndarray:
 def save_predictions(path: Path, **arrays) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp.npz")
-    np.savez(tmp, **{k: np.asarray(v) for k, v in arrays.items()})
+    arrays = {k: np.asarray(v) for k, v in arrays.items()}
+    np.savez(tmp, **{k: v.astype(str) if v.dtype == object else v for k, v in arrays.items()})   # loadable without pickle
     tmp.replace(path)
 
 

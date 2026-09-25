@@ -79,7 +79,7 @@ compare:
   seed: 0
   # Pipelines = every classifier x every estimator assignment below. An assignment is a model name
   # (every family), `best` (per family, the estimator with the lowest val error), or a mapping
-  # family -> model.
+  # family -> model with an optional `name`, e.g. {name: nets, thomas: nn_curves, ...}.
   classifiers: all              # or a list of names from `classify`
   estimators: [best, hgb_classical]
   poisson_threshold: null       # null = argmax; t = call poisson whenever P(poisson | x) >= t

@@ -110,7 +110,10 @@ def fit_cutoffs(cfg: dict, r: pd.DataFrame) -> dict:
             continue
         m = (rows.family == f).to_numpy()
         y = call[m] != "poisson" if reg["event"] == "detected" else call[m] == f
-        c = fit_cutoff(coordinate(rows[m], f, coord), rows.nbar.to_numpy(float)[m], y, reg["taus"])
+        if y.all() or not y.any():                               # one outcome: no boundary to fit
+            c = {"constant": bool(y.all()), "nbar_exponent": 0.0, "direction": None, "u_boundary": {}}
+        else:
+            c = fit_cutoff(coordinate(rows[m], f, coord), rows.nbar.to_numpy(float)[m], y, reg["taus"])
         out[f] = {**c, "coordinate": coord, "event_rate": float(y.mean()), "fitted_on": fit_split,
                   "n": int(m.sum())}
     return out
@@ -120,6 +123,9 @@ def in_regime(cuts: dict, test: pd.DataFrame, tau: float) -> np.ndarray:
     keep = np.ones(len(test), bool)
     for f, c in cuts.items():
         m = (test.family == f).to_numpy()
+        if "constant" in c:                                      # always (or never) detected
+            keep[m] = c["constant"]
+            continue
         ub = c["u_boundary"][str(tau)]
         if ub is None:
             keep[m] = False
@@ -213,7 +219,7 @@ def main(argv=None) -> None:
         if spec == "best":
             a = dict(best)
         elif isinstance(spec, dict):
-            a = dict(spec)
+            a = {k: v for k, v in spec.items() if k != "name"}
         else:
             a = {f: spec for f in estimated_families(cfg)}
         return a if all((f, m) in e2s for f, m in a.items()) and len(a) == len(estimated_families(cfg)) else None
@@ -224,7 +230,7 @@ def main(argv=None) -> None:
     pois_sd = np.log(test.nbar.to_numpy(float))[tfam == "poisson"].std()
     for c, spec in itertools.product(chosen, cc["estimators"]):
         a = assignment(spec)
-        label = spec if isinstance(spec, str) else json.dumps(spec, sort_keys=True)
+        label = spec if isinstance(spec, str) else spec.get("name") or json.dumps(spec, sort_keys=True)
         if a is None:
             missing.append(f"pipeline {c} x {label}: an estimator is not trained")
             continue
