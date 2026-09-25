@@ -1,0 +1,28 @@
+# Smoke test of the whole chain on every 250th theta, table learners on classical features only.
+name: smoke
+thin: 250
+families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]
+prior: equal
+inputs:
+  classical: {source: classical}
+models:
+  hgb_classical: {learner: hgb, inputs: [classical]}
+  hgb_small: {learner: hgb, inputs: [classical], params: {max_iter: 50}}
+  linear_classical: {learner: linear, inputs: [classical]}
+nn: {seed: 1, epochs: 2, patience: 1, batch_size: 128, lr: 0.001}
+classify: [hgb_classical, hgb_small, linear_classical]
+estimate: [hgb_classical, linear_classical]
+crossfit_folds: 3
+clip_to_train_range: true
+regime:
+  classifier: hgb_classical
+  event: detected
+  coordinates: {thomas: omega, nested: omega_inner, lgcp: zeta, matern2: zeta, ring: omega, matern1: zeta, cell: null}
+  taus: [0.5, 0.9]
+compare:
+  baseline: hgb_classical
+  bootstrap: 50
+  seed: 0
+  classifiers: all
+  estimators: [best, hgb_classical, {name: mixed, thomas: linear_classical, nested: hgb_classical, lgcp: hgb_classical, matern2: hgb_classical, ring: linear_classical, matern1: hgb_classical, cell: hgb_classical}]
+  poisson_threshold: null

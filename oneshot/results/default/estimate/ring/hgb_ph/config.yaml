@@ -1,0 +1,85 @@
+# One-shot classification + per-family inference. Every modelling choice is a key here; outputs land
+# in oneshot/results/<name>/. How to run and how to plug things in: oneshot/README.md.
+#
+#   classify    one N-way classifier over every family. Its P(poisson | x) IS the CSR filter: a cloud
+#               called poisson gets nbar_hat = n (the exact MLE) and no further model.
+#   estimate    one regressor per (family, model), on log(target), trained on ALL the family's train clouds
+#   compare     every classifier, every estimator and every classifier x estimator pipeline, scored on
+#               the same test clouds, overall and in regime (cutoffs from a reference classifier)
+
+name: default
+
+families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]
+
+# Class weights for training and scoring: `equal` (every family the same total weight) or a mapping
+# family -> weight (renormalised), e.g. to reproduce a group prior.
+prior: equal
+
+# ---------------------------------------------------------------------------------------- inputs
+# Named feature tables for table learners (hgb, linear). `source` is a loader in oneshot/inputs.py:
+#   classical   cascade/features.py: L(r)-r on the fixed axis, L,F,G,J on u = r sqrt(n), log n (111)
+#   ph          cloudforger.vectorization.summaries of one filtration's diagrams (105); built by
+#               `oneshot/prepare.py ph` for every `ph` input listed here
+inputs:
+  classical: {source: classical}
+  ph_alpha: {source: ph, filtration: alpha_diameter}
+  ph_dtm10: {source: ph, filtration: dtm_k10}
+
+# ---------------------------------------------------------------------------------------- models
+# A model = a learner + its input. Any model can serve as classifier and as estimator.
+#   learner: hgb | linear      table learners (CPU); `inputs` = list of names above, concatenated
+#   learner: nn                cloudforger's PHNet (GPU); its input is in the entry itself, as in
+#                              cascade/configs/default.yaml (curves, or filtration + dims [+ perslay])
+# Learner options go in `params` (overriding the learner's defaults in oneshot/learners.py).
+models:
+  hgb_classical: {learner: hgb, inputs: [classical]}
+  hgb_ph: {learner: hgb, inputs: [ph_alpha, ph_dtm10]}
+  hgb_classical_ph: {learner: hgb, inputs: [classical, ph_alpha, ph_dtm10]}
+  linear_classical: {learner: linear, inputs: [classical]}
+  nn_curves: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed"}
+  perslay_dtm10: {learner: nn, filtration: dtm_k10, dims: "0,1", perslay: true, perslay_norm: zscore}
+  perslay_alpha: {learner: nn, filtration: alpha_diameter, dims: "0,1", perslay: true, perslay_norm: zscore}
+
+nn:                             # defaults for every `learner: nn` model (scripts/train.py's)
+  seed: 1
+  epochs: 200
+  patience: 30
+  batch_size: 128
+  lr: 0.001
+
+# ------------------------------------------------------------------------------------ what to train
+# Each name trains once per task (and per family for estimators); existing outputs are skipped, so
+# adding a name here and resubmitting trains only what is new.
+classify: [hgb_classical, hgb_ph, hgb_classical_ph, linear_classical, nn_curves, perslay_dtm10, perslay_alpha]
+estimate: [hgb_classical, hgb_ph, hgb_classical_ph, nn_curves, perslay_dtm10, perslay_alpha]
+
+# Out-of-fold predictions on the train split (folds grouped by theta), for classifiers whose learner
+# supports cheap refits (table learners). The regime cutoffs are fitted on these when present.
+crossfit_folds: 5
+clip_to_train_range: true       # estimates clipped to the train targets' range (log scale)
+
+# ---------------------------------------------------------------------------------------- regime
+# "In regime" = the reference classifier detects the family (does not call it poisson) with
+# probability >= tau, as a monotone function of u = log(coordinate) + a log(nbar) (cascade/regime.py).
+# The cutoff is a frozen rule on theta, so every model is scored on the SAME in-regime clouds.
+regime:
+  classifier: hgb_classical     # fitted on its out-of-fold train predictions, else on val
+  event: detected               # detected = not called poisson | identified = called its own family
+  # One coordinate per family (oneshot/core.py COORDINATES, or any manifest column); null = no
+  # monotone coordinate, the whole family counts as in regime. Cell's detection is U-shaped in k
+  # (k = 2 is clumpy, large k near-lattice), so it has none by default.
+  coordinates: {thomas: omega, nested: omega_inner, lgcp: zeta, matern2: zeta, ring: omega,
+                matern1: zeta, cell: null}
+  taus: [0.5, 0.9]
+
+# ------------------------------------------------------------------------------------- compare
+compare:
+  baseline: hgb_classical       # paired differences are against this model
+  bootstrap: 200                # resamples of test thetas, within family
+  seed: 0
+  # Pipelines = every classifier x every estimator assignment below. An assignment is a model name
+  # (every family), `best` (per family, the estimator with the lowest val error), or a mapping
+  # family -> model with an optional `name`, e.g. {name: nets, thomas: nn_curves, ...}.
+  classifiers: all              # or a list of names from `classify`
+  estimators: [best, hgb_classical]
+  poisson_threshold: null       # null = argmax; t = call poisson whenever P(poisson | x) >= t

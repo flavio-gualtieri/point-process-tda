@@ -1,0 +1,21 @@
+# Smoke test of the network learner: every 250th theta, 2 epochs. The input is still built over the
+# whole bank (that is the memory and I/O the full run needs), then indexed down to these rows.
+name: smoke_nn
+thin: 250
+families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]
+prior: equal
+inputs: {}
+models:
+  nn_curves: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed"}
+  perslay_dtm10: {learner: nn, filtration: dtm_k10, dims: "0,1", perslay: true, perslay_norm: zscore}
+nn: {seed: 1, epochs: 2, patience: 1, batch_size: 128, lr: 0.001}
+classify: [nn_curves, perslay_dtm10]
+estimate: [nn_curves]
+crossfit_folds: 3
+clip_to_train_range: true
+regime:
+  classifier: nn_curves
+  event: detected
+  coordinates: {thomas: omega, nested: omega_inner, lgcp: zeta, matern2: zeta, ring: omega, matern1: zeta, cell: null}
+  taus: [0.5]
+compare: {baseline: nn_curves, bootstrap: 50, seed: 0, classifiers: all, estimators: [nn_curves], poisson_threshold: null}

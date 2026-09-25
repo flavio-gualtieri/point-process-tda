@@ -1,0 +1,452 @@
+{
+ "cutoffs": {
+  "thomas": {
+   "constant": true,
+   "nbar_exponent": 0.0,
+   "direction": null,
+   "u_boundary": {},
+   "coordinate": "omega",
+   "event_rate": 1.0,
+   "fitted_on": "val",
+   "n": 8
+  },
+  "nested": {
+   "constant": true,
+   "nbar_exponent": 0.0,
+   "direction": null,
+   "u_boundary": {},
+   "coordinate": "omega_inner",
+   "event_rate": 1.0,
+   "fitted_on": "val",
+   "n": 8
+  },
+  "lgcp": {
+   "constant": true,
+   "nbar_exponent": 0.0,
+   "direction": null,
+   "u_boundary": {},
+   "coordinate": "zeta",
+   "event_rate": 1.0,
+   "fitted_on": "val",
+   "n": 8
+  },
+  "matern2": {
+   "constant": true,
+   "nbar_exponent": 0.0,
+   "direction": null,
+   "u_boundary": {},
+   "coordinate": "zeta",
+   "event_rate": 1.0,
+   "fitted_on": "val",
+   "n": 8
+  },
+  "ring": {
+   "constant": true,
+   "nbar_exponent": 0.0,
+   "direction": null,
+   "u_boundary": {},
+   "coordinate": "omega",
+   "event_rate": 1.0,
+   "fitted_on": "val",
+   "n": 8
+  },
+  "matern1": {
+   "constant": true,
+   "nbar_exponent": 0.0,
+   "direction": null,
+   "u_boundary": {},
+   "coordinate": "zeta",
+   "event_rate": 1.0,
+   "fitted_on": "val",
+   "n": 8
+  }
+ },
+ "in_regime": {
+  "0.5": {
+   "poisson": 1.0,
+   "thomas": 1.0,
+   "nested": 1.0,
+   "lgcp": 1.0,
+   "matern2": 1.0,
+   "ring": 1.0,
+   "matern1": 1.0,
+   "cell": 1.0
+  }
+ },
+ "classifiers": {
+  "nn_curves": {
+   "accuracy all": {
+    "est": 0.3033854365348816,
+    "lo": 0.28212890625,
+    "hi": 0.3268229067325592
+   },
+   "accuracy regime 0.5": {
+    "est": 0.3033854365348816,
+    "lo": 0.28212890625,
+    "hi": 0.3268229067325592
+   },
+   "nll": 1.717795968055725,
+   "recall": {
+    "poisson": 0.0,
+    "thomas": 0.0625,
+    "nested": 0.7708333333333334,
+    "lgcp": 0.0,
+    "matern2": 0.10416666666666667,
+    "ring": 0.0,
+    "matern1": 0.8229166666666666,
+    "cell": 0.6666666666666666
+   },
+   "detected": {
+    "poisson": 1.0,
+    "thomas": 1.0,
+    "nested": 1.0,
+    "lgcp": 1.0,
+    "matern2": 1.0,
+    "ring": 1.0,
+    "matern1": 1.0,
+    "cell": 1.0
+   }
+  },
+  "perslay_dtm10": {
+   "accuracy all": {
+    "est": 0.2825520932674408,
+    "lo": 0.25029297098517417,
+    "hi": 0.31321615129709246
+   },
+   "accuracy regime 0.5": {
+    "est": 0.2825520932674408,
+    "lo": 0.25029297098517417,
+    "hi": 0.31321615129709246
+   },
+   "nll": 1.7251667976379395,
+   "recall": {
+    "poisson": 0.09375,
+    "thomas": 0.03125,
+    "nested": 0.71875,
+    "lgcp": 0.041666666666666664,
+    "matern2": 0.375,
+    "ring": 0.10416666666666667,
+    "matern1": 0.1875,
+    "cell": 0.7083333333333334
+   },
+   "detected": {
+    "poisson": 0.90625,
+    "thomas": 0.9791666666666666,
+    "nested": 1.0,
+    "lgcp": 0.9375,
+    "matern2": 0.9583333333333334,
+    "ring": 0.9479166666666666,
+    "matern1": 0.9583333333333334,
+    "cell": 0.9479166666666666
+   },
+   "accuracy minus baseline": {
+    "all": {
+     "est": -0.020833343267440796,
+     "lo": -0.04772134423255921,
+     "hi": 0.004036472737789147
+    },
+    "regime 0.5": {
+     "est": -0.020833343267440796,
+     "lo": -0.04772134423255921,
+     "hi": 0.004036472737789147
+    }
+   }
+  }
+ },
+ "estimators": {
+  "thomas": {
+   "nn_curves": {
+    "val": 2.1894880334837525,
+    "all": {
+     "est": 0.9926275840632243,
+     "lo": 0.8859590881301053,
+     "hi": 1.0645570552546861
+    },
+    "regime 0.5": {
+     "est": 0.9926275840632243,
+     "lo": 0.8859590881301053,
+     "hi": 1.0645570552546861
+    },
+    "per_target": {
+     "kappa": 1.0005,
+     "mu": 0.9968,
+     "sigma": 0.9806
+    }
+   }
+  },
+  "nested": {
+   "nn_curves": {
+    "val": 1.0168430953655812,
+    "all": {
+     "est": 1.0283960279603817,
+     "lo": 0.96795423781684,
+     "hi": 1.1007515320325816
+    },
+    "regime 0.5": {
+     "est": 1.0283960279603817,
+     "lo": 0.96795423781684,
+     "hi": 1.1007515320325816
+    },
+    "per_target": {
+     "kappa": 1.0341,
+     "mu1": 1.0394,
+     "mu2": 1.0067,
+     "sigma1": 1.0286,
+     "sigma2": 1.0332
+    }
+   }
+  },
+  "lgcp": {
+   "nn_curves": {
+    "val": 1.0306417363039935,
+    "all": {
+     "est": 1.0030769597423923,
+     "lo": 0.92354495373037,
+     "hi": 1.0857824376631704
+    },
+    "regime 0.5": {
+     "est": 1.0030769597423923,
+     "lo": 0.92354495373037,
+     "hi": 1.0857824376631704
+    },
+    "per_target": {
+     "nbar": 0.9935,
+     "sigma2": 1.0196,
+     "s": 0.9961
+    }
+   }
+  },
+  "matern2": {
+   "nn_curves": {
+    "val": 1.21897511982884,
+    "all": {
+     "est": 0.9838514902931661,
+     "lo": 0.86404401424235,
+     "hi": 1.0962383030080232
+    },
+    "regime 0.5": {
+     "est": 0.9838514902931661,
+     "lo": 0.86404401424235,
+     "hi": 1.0962383030080232
+    },
+    "per_target": {
+     "R": 0.996,
+     "lam_p": 0.9717
+    }
+   }
+  },
+  "ring": {
+   "nn_curves": {
+    "val": 1.4628129846941427,
+    "all": {
+     "est": 0.9906661162559744,
+     "lo": 0.8916765909521527,
+     "hi": 1.0752209703307831
+    },
+    "regime 0.5": {
+     "est": 0.9906661162559744,
+     "lo": 0.8916765909521527,
+     "hi": 1.0752209703307831
+    },
+    "per_target": {
+     "kappa": 1.0108,
+     "mu": 0.9879,
+     "rho": 0.986,
+     "sigma": 0.9779
+    }
+   }
+  },
+  "matern1": {
+   "nn_curves": {
+    "val": 2.430286790728994,
+    "all": {
+     "est": 1.047654862744766,
+     "lo": 0.9353928170580251,
+     "hi": 1.137655054406054
+    },
+    "regime 0.5": {
+     "est": 1.047654862744766,
+     "lo": 0.9353928170580251,
+     "hi": 1.137655054406054
+    },
+    "per_target": {
+     "R": 1.0656,
+     "lam_p": 1.0297
+    }
+   }
+  },
+  "cell": {
+   "nn_curves": {
+    "val": 0.9983063032261658,
+    "all": {
+     "est": 0.9822118180596784,
+     "lo": 0.9212690950940938,
+     "hi": 1.0402418145061396
+    },
+    "regime 0.5": {
+     "est": 0.9822118180596784,
+     "lo": 0.9212690950940938,
+     "hi": 1.0402418145061396
+    },
+    "per_target": {
+     "nbar": 0.9808,
+     "k": 0.9836
+    }
+   }
+  }
+ },
+ "best": {
+  "thomas": "nn_curves",
+  "nested": "nn_curves",
+  "lgcp": "nn_curves",
+  "matern2": "nn_curves",
+  "ring": "nn_curves",
+  "matern1": "nn_curves",
+  "cell": "nn_curves"
+ },
+ "pipelines": {
+  "nn_curves x nn_curves": {
+   "classifier": "nn_curves",
+   "estimators": "nn_curves",
+   "assignment": {
+    "thomas": "nn_curves",
+    "nested": "nn_curves",
+    "lgcp": "nn_curves",
+    "matern2": "nn_curves",
+    "ring": "nn_curves",
+    "matern1": "nn_curves",
+    "cell": "nn_curves"
+   },
+   "accuracy all": {
+    "est": 0.3033854365348816,
+    "lo": 0.28212890625,
+    "hi": 0.3268229067325592
+   },
+   "accuracy regime 0.5": {
+    "est": 0.3033854365348816,
+    "lo": 0.28212890625,
+    "hi": 0.3268229067325592
+   },
+   "poisson identified": 0.0,
+   "poisson rmse/sd": {
+    "est": 0.0,
+    "lo": 0.0,
+    "hi": 0.0
+   },
+   "thomas identified": 0.0625,
+   "thomas rmse/sd": {
+    "est": 1.015096505888,
+    "lo": 0.43352223593503747,
+    "hi": 1.5063805956659795
+   },
+   "nested identified": 0.7708333333333334,
+   "nested rmse/sd": {
+    "est": 0.993390700601452,
+    "lo": 0.9352402923692303,
+    "hi": 1.0677301194862727
+   },
+   "lgcp identified": 0.0,
+   "lgcp rmse/sd": {
+    "est": 0.0,
+    "lo": 0.0,
+    "hi": 0.0
+   },
+   "matern2 identified": 0.10416666666666667,
+   "matern2 rmse/sd": {
+    "est": 1.0791020852521531,
+    "lo": 0.895610740090612,
+    "hi": 1.2583827050874719
+   },
+   "ring identified": 0.0,
+   "ring rmse/sd": {
+    "est": 0.0,
+    "lo": 0.0,
+    "hi": 0.0
+   },
+   "matern1 identified": 0.8229166666666666,
+   "matern1 rmse/sd": {
+    "est": 1.0357433282544726,
+    "lo": 0.9267258254061226,
+    "hi": 1.136212948676631
+   },
+   "cell identified": 0.6666666666666666,
+   "cell rmse/sd": {
+    "est": 0.8815982008839782,
+    "lo": 0.8010806457029696,
+    "hi": 0.9576334964679422
+   }
+  },
+  "perslay_dtm10 x nn_curves": {
+   "classifier": "perslay_dtm10",
+   "estimators": "nn_curves",
+   "assignment": {
+    "thomas": "nn_curves",
+    "nested": "nn_curves",
+    "lgcp": "nn_curves",
+    "matern2": "nn_curves",
+    "ring": "nn_curves",
+    "matern1": "nn_curves",
+    "cell": "nn_curves"
+   },
+   "accuracy all": {
+    "est": 0.2825520932674408,
+    "lo": 0.25029297098517417,
+    "hi": 0.31321615129709246
+   },
+   "accuracy regime 0.5": {
+    "est": 0.2825520932674408,
+    "lo": 0.25029297098517417,
+    "hi": 0.31321615129709246
+   },
+   "poisson identified": 0.09375,
+   "poisson rmse/sd": {
+    "est": 0.20855475061687592,
+    "lo": 0.11919657472051542,
+    "hi": 0.25034474775300636
+   },
+   "thomas identified": 0.03125,
+   "thomas rmse/sd": {
+    "est": 1.0071771627073753,
+    "lo": 0.0,
+    "hi": 1.2246848198677294
+   },
+   "nested identified": 0.71875,
+   "nested rmse/sd": {
+    "est": 0.9908352296049296,
+    "lo": 0.9324767631627491,
+    "hi": 1.0668530770878455
+   },
+   "lgcp identified": 0.041666666666666664,
+   "lgcp rmse/sd": {
+    "est": 0.8761263860993064,
+    "lo": 0.5570065831054768,
+    "hi": 1.0945893918653844
+   },
+   "matern2 identified": 0.375,
+   "matern2 rmse/sd": {
+    "est": 0.9138076949091214,
+    "lo": 0.8300727477508895,
+    "hi": 1.0058909753237266
+   },
+   "ring identified": 0.10416666666666667,
+   "ring rmse/sd": {
+    "est": 0.8624178237482406,
+    "lo": 0.7337324563726676,
+    "hi": 1.0070119871737035
+   },
+   "matern1 identified": 0.1875,
+   "matern1 rmse/sd": {
+    "est": 1.0305678915256618,
+    "lo": 0.8401729179325845,
+    "hi": 1.2209517763003026
+   },
+   "cell identified": 0.7083333333333334,
+   "cell rmse/sd": {
+    "est": 0.8767375184889524,
+    "lo": 0.8062504771509696,
+    "hi": 0.9536519204809452
+   }
+  }
+ },
+ "missing": []
+}
