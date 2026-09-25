@@ -84,6 +84,7 @@ def matern1(rng, R, lam_p):
 
 def cell(rng, nbar, k):
     """Cells of side c = nbar^-1/2 on a uniformly shifted grid covering W, each with 0 | 1 | k points."""
+    k = int(k)                                                   # a count, even when read from a float column
     c = 1 / math.sqrt(nbar)
     m = math.ceil(1 / c) + 1
     corners = np.stack(np.meshgrid(np.arange(m), np.arange(m), indexing="ij"), -1).reshape(-1, 2) * c - rng.random(2) * c

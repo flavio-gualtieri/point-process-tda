@@ -76,6 +76,8 @@ def sampler_kwargs(family: str, theta: dict) -> dict:
     """theta_hat (keyed by the TARGETS) -> the bank sampler's arguments. LGCP is estimated as
     (nbar, sigma2, s); the sampler wants mu_log = log nbar - sigma2 / 2 and a grid M, picked as the
     bank picks it."""
+    if family == "cell":                                         # k is a count; estimates are real
+        return {"nbar": theta["nbar"], "k": int(np.clip(round(theta["k"]), 2, 30))}
     if family != "lgcp":
         return dict(theta)
     from cloudforger.simulation.lgcp_grid import grid_size
@@ -111,7 +113,9 @@ def score_cloud(job: dict) -> list[dict]:
     S = {"oracle": score("oracle", *job["oracle"]), csr_key: score("csr", "poisson", {"nbar": float(len(x))})}
     rows = []
     for v in job["variants"]:
-        key = csr_key if v["family_hat"] == "poisson" else fit_key(v["family_hat"], v["theta_hat"])
+        # a poisson fit at nbar = len(x) IS csr and shares its simulations; a poisson fit estimated
+        # from another replicate (nbar_hat = its n) is a model of its own
+        key = fit_key(v["family_hat"], v["theta_hat"])
         if key not in S:
             S[key] = score(key, v["family_hat"], sampler_kwargs(v["family_hat"], v["theta_hat"]))
         row = {"case_id": cid, "variant": v["variant"], "family_hat": v["family_hat"],

@@ -83,3 +83,25 @@ compare:
   classifiers: all              # or a list of names from `classify`
   estimators: [best, hgb_classical]
   poisson_threshold: null       # null = argmax; t = call poisson whenever P(poisson | x) >= t
+
+# ------------------------------------------------------------------------------------ evaluation
+# End-to-end kernel / Dawid-Sebastiani score of whole pipelines (oneshot/endtoend.py, scoring code
+# from cascade/evaluate.py and cascade/scoring). Kernel and DSS settings are the cascade's, verbatim.
+evaluation:
+  pipelines:                    # each = a classifier + an estimator assignment, as compare.estimators
+    best: {classifier: hgb_classical_ph, estimators: best}
+    classical: {classifier: hgb_classical, estimators: hgb_classical}
+  clouds:
+    # Test clouds, stratified WITHOUT delta-tilde: by the regime (P(detected | u) from the frozen
+    # cutoffs: below 0.5, 0.5-0.9, above 0.9) for families with a coordinate, by k for cell, and
+    # per_bin x 3 poisson clouds as the noise floor.
+    per_bin: 20
+    cell_k_edges: [2, 3, 5, 31]
+    seed: 0
+  # heldout = fit on replicate 0, score against the independent replicate 1 of the same theta (the
+  # honest version); same = score against the pattern the fit came from (the cascade's old setting).
+  score_on: heldout
+  kernel: {R: 1.5, kind: point, h: 0.1, grid: 21, centres: 300, pool: 1000, sims: 16, tau_mult: "1.0"}
+  dss: {enabled: true, groups: no_ph, sims: 150}
+  skill_min_z: 2
+  seed: 0

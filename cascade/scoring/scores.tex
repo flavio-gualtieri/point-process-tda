@@ -1,0 +1,84 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymbol,booktabs}
+\title{End-to-end scores for the cascade: definition and testing}
+\date{}
+\begin{document}
+\maketitle
+
+\section*{Goal}
+Given an observed cloud $x$ and the cascade's fit $(\hat f,\hat\theta)$, we ask whether the fitted model
+reproduces $x$. We simulate patterns from the fit and compare them with $x$ using a proper scoring rule
+(lower is better). All models are scored on the same cloud, so only the fit differs.
+
+\section*{Scores}
+\paragraph{Kernel score (primary).}
+Let $\phi_i$ be the local configurations of $x$: the points within $R=1.5$ mean spacings of a centre (one of
+$x$'s own points), translated to the origin and divided by $R$. Let $\Phi,\Phi'$ be configurations from
+\emph{different} simulated patterns of model $P$. With a kernel $k$,
+\[
+  S(P,x) \;=\; \tfrac12\,\mathbb{E}\,k(\Phi,\Phi') \;-\; \frac1m\sum_{i=1}^{m}\mathbb{E}\,k(\phi_i,\Phi).
+\]
+For a characteristic $k$ this is strictly proper for the law of radius-$R$ configurations:
+$\mathbb{E}_Q S(P,\cdot)=\tfrac12\|\mu_P-\mu_Q\|^2+\text{const}$. Each configuration is embedded as a
+smoothed $21\times21$ grid ($h=0.1$), so $k$ is a Gaussian kernel of Euclidean distances between embeddings.
+Its width is set once per cloud, to the median distance between $x$'s own configurations, and reused for
+every model, which is what makes scores comparable. We use $m\le300$ centres and 16 simulations per model.
+
+\paragraph{Dawid--Sebastiani score (secondary).}
+With $T$ a vector of scale-free geometric statistics (Voronoi cell areas, Delaunay neighbour counts and angles;
+the persistent-homology statistics are dropped to avoid overlap with the PersLay models being scored), and
+$\mu_P,\Sigma_P$ the mean and shrunk covariance of $T$ over 150 simulations,
+\[
+  S(P,x)=\log\det\Sigma_P+(T(x)-\mu_P)^\top\Sigma_P^{-1}(T(x)-\mu_P).
+\]
+It is proper but not strictly (models agreeing on two moments tie).
+
+\paragraph{Reference models and derived quantities.}
+Two reference models are simulated per cloud: the \emph{oracle} (true family, true $\theta$) and \emph{CSR}
+(Poisson with $\bar n=n$). Then
+\[
+  \text{regret}=S(\text{fit})-S(\text{oracle}),\qquad
+  \text{gain}=S(\text{CSR})-S(\text{oracle}),\qquad
+  \text{skill}=1-\frac{\sum\text{regret}}{\sum\text{gain}},
+\]
+pooled over clouds, and reported only where the mean gain exceeds 2 standard errors. Skill 1 means as good as
+the truth; skill 0 means no better than CSR.
+
+\section*{How the scores were tested}
+\paragraph{Power check.}
+On 300 test clouds (15 per family and $\tilde\delta$ bin, plus 60 Poisson clouds), only the oracle and CSR
+were scored. A usable score should have gain $>0$ where structure is strong, and gain $\approx0$ on Poisson.
+We report $d'=\overline{\text{gain}}/\text{sd}$ per cloud. The first score tried, a Wasserstein-1 energy score
+between whole patterns, had no power; the two scores above are its replacements.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccccc}
+\toprule
+$d'$ & Thomas & nested & LGCP & Mat\'ern II & Poisson (floor) \\
+\midrule
+Kernel, $R{=}1.5$, point centres & 1.19 & 1.20 & 1.30 & 1.06 & 0.12 \\
+DS, non-PH statistics            & 0.74 & 0.64 & 1.00 & 0.91 & 0.01 \\
+Wasserstein-1 energy (failed)    & 0.64 & 0.00 & 0.86 & 0.04 & $-0.13$ \\
+\bottomrule
+\end{tabular}
+\caption{Power check, $\tilde\delta\ge4$ bin (strongest structure); 15 clouds per family cell.}
+\end{table}
+
+\paragraph{Findings.}
+(i) At $\tilde\delta\ge4$ the kernel score separates the truth from CSR for every family ($z=4.1$--$5.0$).
+(ii) For $\tilde\delta<1$ it is mostly noise, and nested at $\tilde\delta<0$ goes the wrong way ($z=-2.1$);
+DS is no better there. (iii) Other kernel settings were biased on Poisson clouds (e.g.\ $R=4$ with grid
+centres, $z\approx-2.6$); the chosen setting was picked after seeing these results, on the same clouds.
+
+\paragraph{End-to-end run.}
+Scoring the assembled cascade on 300 clouds gave regret near zero and skill between 0.94 and 1.22. Skill above
+1 means the fit scored better than the truth, so this is noise: regret standard errors are as large as the
+regrets. The score cannot yet distinguish a good fit from the truth at this sample size.
+
+\paragraph{Missing.}
+There is no negative control, i.e.\ no test that a deliberately wrong fit (perturbed $\theta$, wrong family)
+scores worse than the oracle. The power check only compares the truth with CSR, a large difference.
+
+\end{document}
