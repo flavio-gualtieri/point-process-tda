@@ -106,7 +106,7 @@ class PersLay(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:   # (B, 1, capacity, 3) -> (B, embedding_dim)
         pooled = self.pool(x)
         if self._moments is not None:                     # inside calibrate(): count, sum, sum of squares
-            p = pooled.detach().double()
+            p = pooled.detach().cpu().double()  # CPU first: MPS has no float64
             self._moments[0] += p.shape[0]
             self._moments[1] += p.sum(dim=0)
             self._moments[2] += (p ** 2).sum(dim=0)
@@ -133,9 +133,9 @@ def calibrate(model: nn.Module, run: Callable[[], object], eps: float = 1e-6) ->
     was_training = model.training
     model.eval()
     for layer in layers:
-        layer._moments = [torch.zeros((), dtype=torch.float64, device=layer.pool_mean.device),
-                          torch.zeros_like(layer.pool_mean, dtype=torch.float64),
-                          torch.zeros_like(layer.pool_mean, dtype=torch.float64)]
+        layer._moments = [torch.zeros((), dtype=torch.float64),
+                          torch.zeros(layer.pool_mean.shape, dtype=torch.float64),
+                          torch.zeros(layer.pool_mean.shape, dtype=torch.float64)]
     cuda = sorted({p.device.index for p in model.parameters() if p.device.type == "cuda"})
     try:
         with torch.random.fork_rng(devices=cuda):
@@ -146,7 +146,7 @@ def calibrate(model: nn.Module, run: Callable[[], object], eps: float = 1e-6) ->
                 raise ValueError("calibrate: `run` pushed no rows through the model")
             mean = s / n
             std = torch.sqrt(torch.clamp(sq / n - mean ** 2, min=0.0))
-            layer.pool_mean.copy_(mean.float())
+            layer.pool_mean.copy_(mean.float())   # copy_ moves it back to the layer's device
             # eps floors a transform that no calibration diagram reaches (pooled ~0 everywhere):
             # it stays ~0 after the shift instead of being blown up by 1/0.
             layer.pool_std.copy_(torch.clamp(std, min=eps).float())

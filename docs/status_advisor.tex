@@ -1,0 +1,148 @@
+\documentclass[10pt]{article}
+\usepackage[margin=2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+
+\newcommand{\dt}{\tilde\delta}
+\newcommand{\nb}{\bar n}
+
+\title{Status --- main arm (PH vs classical)}
+\date{24 September 2026}
+
+\begin{document}
+\maketitle
+\vspace{-2em}
+
+%==============================================================================
+\section*{1. What changed}
+
+\textbf{Cloud bank} (replaces the $\dt$-sweep)
+\begin{itemize}
+  \item $50\,000$ $\theta$ $\times$ 2 patterns $\times$ 5 families $=500$k clouds (was $10$k $\theta$); $\nb\sim$ log-U$[75,950]$
+  \item Drawn on \emph{physical} parameters, two independent dials: richness (points/cluster) and smearing $\omega=\sigma\sqrt\kappa\in[0.2,8]$
+  \item $\dt$ is now a post-hoc \emph{label}: refitting the null tables relabels, never re-simulates
+  \item Bounds inverted into the draw's support, not rejected: 0 rejections (LGCP $1.7\%$, numerical grid limit). Old design: nested rejected $18\%$ and tilted the prior
+  \item $\mathrm{cv}(n)\le0.30$ (was $0.45$): the label is evaluated at $\nb$ but describes realised $n$; drift $\approx$ linear in cv
+  \item Test set: $12\,000$ $\theta$/family (was $2\,000$), so near-CSR cells are populated
+\end{itemize}
+
+\textbf{Regime analysis}
+\begin{itemize}
+  \item $\dt$ reduction \texttt{sup}$\to$\texttt{ext}: extremum of $\hat L-r$ \emph{before} studentising. No radius window, exact size ($0.0501$). Fixes Mat\'ern hard cores below $r_{\min}$ (power $19\%\to81\%$ at $\nb=200$)
+  \item Unclamped: $\dt=0$ is CSR's noise floor, Poisson sits at $-0.97$; $\dt=1$ is the $5\%$ rejection boundary
+  \item Signed arms $\dt_{\text{lo}}$ (repulsion), $\dt_{\text{hi}}$ (clustering) stored as alternative coordinates
+  \item 10 geometric $\dt$ bins on $[0.05,32]$ $\times$ 3 $\nb$ bins; bootstrap over test $\theta$; paired differences
+  \item Undetectable share ($\dt<1$): Thomas $55\%$, LGCP $52\%$, Mat\'ern $29\%$, nested $20\%$
+  \item Below the first bin (unbinned, marginal only): Thomas $42\%$, LGCP $39\%$, nested $13\%$, Mat\'ern $10\%$
+\end{itemize}
+
+\textbf{PersLay} (third arm)
+\begin{itemize}
+  \item Same diagrams, learned vectorisation $V(D)=\mathrm{op}\{w(p)\varphi(p)\}$, $Q=64$, sum pooling, $\approx4.4$k parameters per dim
+  \item Variants: plain, and \texttt{z} (pooled vector z-scored)
+  \item Run: classification only (plain 10 seeds, \texttt{z} 2 seeds so far). \textbf{Not yet run for parameters}
+\end{itemize}
+
+%==============================================================================
+\section*{2. Classification (5-way, chance 0.2)}
+
+{\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+ & overall & Pois. & Thomas & nested & Mat\'ern & LGCP \\
+\midrule
+$L,F,G,J$ \texttt{fixed}            & \textbf{0.604} & 0.812 & \textbf{0.160} & \textbf{0.611} & 0.882 & 0.552 \\
+$L$ \texttt{fixed} (VIHRS)          & 0.583 & 0.817 & 0.150 & 0.571 & \textbf{0.890} & 0.487 \\
+PersLay-z DTM$_{10}$ $H_{0+1}$      & 0.585 & 0.799 & 0.147 & 0.596 & 0.845 & 0.536 \\
+PersLay DTM$_{10}$ $H_{0+1}$        & 0.577 & 0.830 & 0.130 & 0.600 & 0.853 & 0.470 \\
+image alpha $H_{0+1}$ (best image)  & 0.563 & 0.828 & 0.119 & 0.562 & 0.771 & 0.533 \\
+image DTM$_{10}$ $H_{0+1}$          & 0.549 & 0.802 & 0.144 & 0.585 & 0.674 & 0.539 \\
+\bottomrule
+\end{tabular}
+}
+
+\smallskip
+Accuracy by $\dt$ (4 families; chance 0.25):
+
+\smallskip
+{\small
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
+\toprule
+$\dt$ bin & 0.05 & 0.10 & 0.18 & 0.35 & 0.66 & 1.26 & 2.41 & 4.61 & 8.79 & 16.8 \\
+\midrule
+$L,F,G,J$ \texttt{fixed}        & \textbf{.279} & \textbf{.338} & \textbf{.379} & \textbf{.485} & \textbf{.595} & \textbf{.626} & \textbf{.684} & \textbf{.773} & \textbf{.819} & \textbf{.831} \\
+PersLay-z DTM$_{10}$ $H_{0+1}$  & .256 & .309 & .332 & .404 & .517 & .605 & .672 & .755 & .806 & .823 \\
+image alpha $H_{0+1}$           & .195 & .227 & .249 & .304 & .418 & .563 & .651 & .739 & .794 & .817 \\
+image DTM$_{10}$ $H_{0+1}$      & .201 & .225 & .234 & .270 & .335 & .491 & .652 & .758 & .809 & .828 \\
+\bottomrule
+\end{tabular}
+}
+
+\begin{itemize}
+  \item Classical still best overall; PersLay is now the best PH vectorisation
+  \item PersLay-z halves the PH--classical gap: paired vs $L,F,G,J$ \texttt{sqrtn}, image PH $-0.033$ to $-0.050$ $\to$ PersLay-z $-0.012$ $[-0.013,-0.010]$
+  \item The gain is near CSR ($\dt<1$): image PH is at/below chance there, PersLay-z recovers half or more of the gap. Above $\dt\approx2$ all arms converge
+  \item Main source: Mat\'ern recall, DTM$_{10}$ $0.674\to0.845$ (image$\to$PersLay)
+  \item Thomas is unsolved by every arm (recall $\le0.17$), and its recall is non-monotone in $\dt$: peaks at $\approx0.34$ (classical) at $\dt\approx5$, drops to $0.12$ at the top bin
+  \item $H_1$ alone is the weakest input everywhere ($\le0.50$)
+  \item Accuracy now \emph{rises} with $\nb$ ($0.53\to0.68$): in the bank, more points means more information. The old sweep held $\dt$ fixed across $\nb$ and showed the opposite
+\end{itemize}
+
+%==============================================================================
+\section*{3. Parameter estimation (image PH vs classical)}
+
+Log-RMSE pooled over targets:
+
+\smallskip
+{\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+ & Poisson & Thomas & nested & Mat\'ern & LGCP \\
+\midrule
+$L,F,G,J$ \texttt{fixed}           & \textbf{0.067} & \textbf{0.754} & \textbf{0.571} & 0.111 & \textbf{0.535} \\
+$L$ \texttt{fixed} (VIHRS)         & \textbf{0.066} & 0.757 & 0.576 & 0.122 & \textbf{0.535} \\
+DTM$_5$ $H_{0+1}$                  & 0.067 & 0.777 & 0.595 & 0.151 & 0.563 \\
+alpha $H_{0+1}$                    & 0.067 & 0.795 & 0.611 & \textbf{0.104} & 0.569 \\
+Rips $H_0$                         & 0.067 & 0.846 & 0.648 & \textbf{0.103} & 0.595 \\
+\bottomrule
+\end{tabular}
+}
+
+\smallskip
+Paired PH $-$ classical ($L,F,G,J$ \texttt{fixed}) by $\dt$; positive = PH worse, $^\ast$ = 95\% interval excludes 0:
+
+\smallskip
+{\small
+\begin{tabular}{@{}llrrrrrrrrrr@{}}
+\toprule
+ & & 0.05 & 0.10 & 0.18 & 0.35 & 0.66 & 1.26 & 2.41 & 4.61 & 8.79 & 16.8 \\
+\midrule
+Mat\'ern & alpha $H_{0+1}$ & $+.004$ & $+.002$ & $+.004^\ast$ & $+.003^\ast$ & $.000$ & $-.002^\ast$ & $-.010^\ast$ & $-.030^\ast$ & $-.029^\ast$ & $-.039^\ast$ \\
+Thomas   & DTM$_5$ $H_{0+1}$ & $-.004$ & $+.013$ & $+.009$ & $+.015^\ast$ & $+.041^\ast$ & $+.049^\ast$ & $+.052^\ast$ & $+.030^\ast$ & $+.054^\ast$ & $+.005$ \\
+nested   & DTM$_5$ $H_{0+1}$ & $+.005$ & $+.010$ & $+.003$ & $+.004$ & $+.007^\ast$ & $+.023^\ast$ & $+.037^\ast$ & $+.027^\ast$ & $+.037^\ast$ & $+.026^\ast$ \\
+LGCP     & DTM$_5$ $H_{0+1}$ & $+.049^\ast$ & $+.050^\ast$ & $+.033^\ast$ & $+.050^\ast$ & $+.062^\ast$ & $+.054^\ast$ & $+.040^\ast$ & $+.016^\ast$ & $+.008^\ast$ & $-.017^\ast$ \\
+\bottomrule
+\end{tabular}
+}
+
+\begin{itemize}
+  \item Classical leads on Thomas, nested, LGCP; Poisson is a tie for every input ($\log n$ solves it)
+  \item \textbf{Mat\'ern is the PH win}, now sharper: PH ahead from $\dt\approx1.3$, by $0.03$--$0.04$ above $\dt\approx5$, where the classical error stops falling (and $L$ alone rises, $0.081\to0.171$)
+  \item LGCP: PH worse near CSR, gap closes with $\dt$ and flips in the top bin
+  \item Thomas/nested: tie near CSR, PH gap opens once the structure is detectable ($\dt\gtrsim0.7$)
+  \item By $\nb$: Mat\'ern and LGCP improve with $\nb$; Thomas and nested get \emph{harder} ($0.66\to0.85$ Thomas, classical)
+\end{itemize}
+
+%==============================================================================
+\section*{4. Next}
+\begin{itemize}
+  \item PersLay for parameter estimation (does it extend the Mat\'ern win, close the LGCP gap?)
+  \item Finish PersLay-z seeds (2/10)
+  \item Decide how to present the sub-noise-floor region ($\dt<0.05$ is $\approx40\%$ of Thomas and LGCP)
+  \item Diagnose Thomas: where its patterns go, and why recall falls at high $\dt$
+  \item Predictive checks (distance to true process, envelope test) are implemented but not yet run on the new bank
+\end{itemize}
+
+\end{document}
