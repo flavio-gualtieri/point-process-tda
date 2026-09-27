@@ -24,6 +24,10 @@ inputs:
   classical: {source: classical}
   ph_alpha: {source: ph, filtration: alpha_diameter}
   ph_dtm10: {source: ph, filtration: dtm_k10}
+  ph_rips: {source: ph, filtration: rips}
+  ph_dtm5: {source: ph, filtration: dtm_k5}
+  ph_dtm15: {source: ph, filtration: dtm_k15}
+  ph_dtm20: {source: ph, filtration: dtm_k20}
 
 # ---------------------------------------------------------------------------------------- models
 # A model = a learner + its input. Any model can serve as classifier and as estimator.
@@ -39,6 +43,12 @@ models:
   nn_curves: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed"}
   perslay_dtm10: {learner: nn, filtration: dtm_k10, dims: "0,1", perslay: true, perslay_norm: zscore}
   perslay_alpha: {learner: nn, filtration: alpha_diameter, dims: "0,1", perslay: true, perslay_norm: zscore}
+  # Feature-coverage round: every filtration in one table; persistence-image CNNs (the vectorization
+  # that beat classical on Matern in docs/05_results); curves + PH images fused in one network.
+  hgb_classical_ph6: {learner: hgb, inputs: [classical, ph_alpha, ph_dtm10, ph_rips, ph_dtm5, ph_dtm15, ph_dtm20]}
+  pi_alpha: {learner: nn, filtration: alpha_diameter, dims: "0,1"}
+  pi_rips: {learner: nn, filtration: rips, dims: "0,1"}
+  fusion_curves_alpha: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed", filtration: alpha_diameter, dims: "0,1"}
 
 nn:                             # defaults for every `learner: nn` model (scripts/train.py's)
   seed: 1
@@ -50,8 +60,10 @@ nn:                             # defaults for every `learner: nn` model (script
 # ------------------------------------------------------------------------------------ what to train
 # Each name trains once per task (and per family for estimators); existing outputs are skipped, so
 # adding a name here and resubmitting trains only what is new.
-classify: [hgb_classical, hgb_ph, hgb_classical_ph, linear_classical, nn_curves, perslay_dtm10, perslay_alpha]
-estimate: [hgb_classical, hgb_ph, hgb_classical_ph, nn_curves, perslay_dtm10, perslay_alpha]
+classify: [hgb_classical, hgb_ph, hgb_classical_ph, linear_classical, nn_curves, perslay_dtm10, perslay_alpha,
+           hgb_classical_ph6, pi_alpha, pi_rips, fusion_curves_alpha]
+estimate: [hgb_classical, hgb_ph, hgb_classical_ph, nn_curves, perslay_dtm10, perslay_alpha,
+           hgb_classical_ph6, pi_alpha, pi_rips, fusion_curves_alpha]
 
 # Out-of-fold predictions on the train split (folds grouped by theta), for classifiers whose learner
 # supports cheap refits (table learners). The regime cutoffs are fitted on these when present.
@@ -83,3 +95,38 @@ compare:
   classifiers: all              # or a list of names from `classify`
   estimators: [best, hgb_classical]
   poisson_threshold: null       # null = argmax; t = call poisson whenever P(poisson | x) >= t
+
+# ------------------------------------------------------------------------------------ evaluation
+# End-to-end kernel / Dawid-Sebastiani score of whole pipelines (oneshot/endtoend.py, scoring code
+# from cascade/evaluate.py and cascade/scoring). Kernel and DSS settings are the cascade's, verbatim.
+evaluation:
+  pipelines:                    # each = a classifier + an estimator assignment, as compare.estimators
+    best: {classifier: hgb_classical_ph, estimators: best}
+    classical: {classifier: hgb_classical, estimators: hgb_classical}
+  clouds:
+    # Test clouds, stratified WITHOUT delta-tilde: by the regime (P(detected | u) from the frozen
+    # cutoffs: below 0.5, 0.5-0.9, above 0.9) for families with a coordinate, by k for cell, and
+    # per_bin x 3 poisson clouds as the noise floor.
+    per_bin: 20
+    cell_k_edges: [2, 3, 5, 31]
+    seed: 0
+  # heldout = fit on replicate 0, score against the independent replicate 1 of the same theta (the
+  # honest version); same = score against the pattern the fit came from (the cascade's old setting).
+  score_on: heldout
+  kernel: {R: 1.5, kind: point, h: 0.1, grid: 21, centres: 300, pool: 1000, sims: 16, tau_mult: "1.0"}
+  dss: {enabled: true, groups: no_ph, sims: 150}
+  skill_min_z: 2
+  seed: 0
+  # Named evaluation sets (endtoend.py --set NAME -> evaluation/<score_on>_<NAME>/): each overrides
+  # `pipelines` and any `clouds` keys above; everything else is shared.
+  sets:
+    # Does PH change the realizations? Same learner everywhere, with and without the PH columns, and
+    # the classifier held fixed in `ph_estimators` to separate routing from parameters. Clouds only
+    # where the score has power (the 480-cloud run resolved gain only above 0.9 and in cell), sized
+    # from its per-cloud noise: ~1100 clouds to see the `best` - `classical` difference at 2 s.e.
+    ph_ablation:
+      pipelines:
+        classical: {classifier: hgb_classical, estimators: hgb_classical}
+        ph: {classifier: hgb_classical_ph, estimators: hgb_classical_ph}
+        ph_estimators: {classifier: hgb_classical, estimators: hgb_classical_ph}
+      clouds: {per_bin: 120, strata: [above 0.9, k 2-2, k 3-4, k 5-30], poisson: 0, seed: 1}

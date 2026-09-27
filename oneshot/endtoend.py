@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end score of whole one-shot pipelines: does the fitted model reproduce the pattern?
 
-    python oneshot/endtoend.py [--config ...] [--score-on heldout|same] [--limit N]    # sbatch oneshot/endtoend.sh
+    python oneshot/endtoend.py [--config ...] [--score-on heldout|same] [--limit N] [--set NAME]
+                                                                  # sbatch oneshot/endtoend.sh
 
 A pipeline (config evaluation.pipelines) is a classifier plus an estimator assignment, exactly as in
 compare.py (`best` = compare's validation choice per family, read from compare/report.json). Per
@@ -23,9 +24,13 @@ score_on (config evaluation.score_on, or --score-on):
 Clouds: test split, stratified without delta-tilde (config evaluation.clouds): per family with a
 regime coordinate, per_bin clouds in each of P(detected | u) < 0.5, 0.5-0.9, >= 0.9 (compare's frozen
 cutoffs); cell by k bins; per_bin x 3 poisson clouds. Every pipeline is scored on the same clouds
-with the same oracle and CSR simulations.
+with the same oracle and CSR simulations. `clouds.strata` keeps only the named strata, and
+`clouds.poisson` sets the number of poisson clouds.
 
-Output  oneshot/results/<run>/evaluation/<score_on>/{clouds.csv, report.json, summary.md}
+--set NAME takes evaluation.sets.NAME: its `pipelines` replace the default ones and its `clouds` keys
+override the default ones, so one config can hold several evaluations of the same trained units.
+
+Output  oneshot/results/<run>/evaluation/<score_on>[_<set>]/{clouds.csv, report.json, summary.md}
 """
 
 from __future__ import annotations
@@ -70,14 +75,25 @@ def pick(cfg: dict, r: pd.DataFrame, cuts: dict) -> pd.DataFrame:
     e = c["cell_k_edges"]
     test.loc[m, "stratum"] = pd.cut(test.k[m], e, right=False,
                                     labels=[f"k {a}-{b - 1}" for a, b in zip(e[:-1], e[1:])]).astype(str)
+    if c.get("strata"):
+        test = test[(test.family == "poisson") | test.stratum.isin(c["strata"])]
     frames = []
     for f in cfg["families"]:
         g = test[test.family == f]
         if f == "poisson":
-            frames.append(g.sample(3 * c["per_bin"], random_state=c["seed"]))
+            frames.append(g.sample(c.get("poisson", 3 * c["per_bin"]), random_state=c["seed"]))
             continue
         frames += [h.sample(min(c["per_bin"], len(h)), random_state=c["seed"]) for _, h in g.groupby("stratum")]
     return pd.concat(frames)
+
+
+def with_set(cfg: dict, name: str | None) -> dict:
+    """cfg["evaluation"] with evaluation.sets[name] applied (pipelines replaced, clouds keys overridden)."""
+    ev = cfg["evaluation"]
+    if not name:
+        return ev
+    s = ev["sets"][name]
+    return {**ev, "pipelines": s.get("pipelines", ev["pipelines"]), "clouds": {**ev["clouds"], **s.get("clouds", {})}}
 
 
 def partner(case_id: str) -> str:
@@ -193,11 +209,13 @@ def main(argv=None) -> None:
     p.add_argument("--score-on", choices=["heldout", "same"])
     p.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     p.add_argument("--limit", type=int, help="score only N clouds (smoke test)")
+    p.add_argument("--set", dest="set_name", help="an evaluation.sets entry of the config")
     args = p.parse_args(argv)
     cfg = load_config(args.config)
-    ev = cfg["evaluation"]
+    ev = cfg["evaluation"] = with_set(cfg, args.set_name)
     score_on = args.score_on or ev["score_on"]
-    out = run_dir(cfg, "evaluation", score_on + (f"_limit{args.limit}" if args.limit else ""))
+    out = run_dir(cfg, "evaluation", score_on + (f"_{args.set_name}" if args.set_name else "")
+                  + (f"_limit{args.limit}" if args.limit else ""))
     save_config(args.config, out)
     t0 = time.time()
 

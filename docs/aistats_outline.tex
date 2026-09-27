@@ -1,0 +1,184 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,enumitem,xcolor,tabularx}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+
+\newcommand{\nb}{\bar n}
+\newcommand{\pending}[1]{\textcolor{red}{[#1]}}
+\newcommand{\src}[1]{{\footnotesize\texttt{#1}}}
+
+\title{Wrong Family, Right Pattern:\\[2pt]
+\large Fidelity-Based Model Fitting for Spatial Point Processes Near Complete Spatial Randomness}
+\author{Draft for co-authors --- AISTATS submission plan}
+\date{}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+%==============================================================================
+\section*{Abstract (draft)}
+
+Fitting a spatial point-process model to a single observed pattern is usually judged by whether the
+fitted family and parameters match the truth. Near complete spatial randomness (CSR), where distinct
+models generate patterns that cannot be told apart, this is the wrong target. We propose instead to
+judge a fit by whether it \emph{reproduces the pattern}: patterns simulated from the fit are compared
+with an independent replicate by a strictly proper kernel score on local configurations, normalised
+between the true model and CSR. Under this criterion we study amortized model selection and parameter
+inference over eight families (cluster, Cox, hard-core and lattice-like processes). A single
+classifier whose Poisson probability serves as the CSR filter is followed by one parameter estimator
+per family, which is exactly how the joint posterior over family and parameters factorises. We find
+three things.
+(i)~Near CSR, identifiability is a property of the data rather than the model. Eleven classifiers,
+spanning gradient-boosted trees, linear models and neural networks on summary functions and
+persistent-homology features, reach the same accuracy (the best four within $0.002$) and lose detection
+as one physical coordinate approaches its CSR limit. At that limit the proper score cannot distinguish
+the true model from CSR either.
+(ii)~Family accuracy understates fidelity. The pipeline names the generating family for $53\%$ of
+patterns, yet reproduces held-out replicates with a skill of $0.93$. Among strongly structured
+patterns, the third assigned to the wrong family are reproduced as faithfully (skill $0.95$) as the
+rest ($0.94$).
+(iii)~Topological features never make parameter estimates worse, and help where second-order
+statistics are blind by construction: they cut parameter error by $15$--$18\%$ for a process whose
+$K$-function equals Poisson's.
+We also report two negative results. An optimal-transport score between whole patterns lacks the
+power to tell the true model from CSR. Restricting training to the identifiable regime lowers error
+within that regime, but the gain is lost once a pattern's regime has to be inferred from the pattern
+itself.
+
+\vfill
+{\footnotesize
+\textbf{Numbers of record} (all on the fixed test split, $\theta$-bootstrap intervals). Accuracy:
+\src{oneshot/results/default/compare/summary.md}. Skill $0.93$: \src{evaluation/heldout} (480 clouds,
+stratified by regime). Wrong-family skill: \src{evaluation/heldout\_ph\_ablation} (1080 clouds in the
+strong-signal strata; 357 misassigned). Cell error $0.142\to0.120$ (classical$+$PH) and $0.117$ (all six filtrations).}
+
+\newpage
+%==============================================================================
+\section*{The one-line pitch}
+
+Judged by label accuracy, amortized point-process fitting looks weak ($0.53$ on 8 families). Judged by
+whether the fit reproduces the pattern, it is strong ($0.93$). The gap is not a failure of the method. It is
+a measurable identifiability limit near CSR, and the paper's job is to show it is a property of the data.
+
+\textbf{What we do not lead with.} ``A realization engine'' (reads as a tool paper), and persistent homology
+(its gains are real but small; it is a supporting result, not the headline).
+
+%==============================================================================
+\section*{Contributions}
+
+\begin{enumerate}
+  \item \textbf{Task and criterion.} Single-pattern model fitting cast as predictive fidelity. A strictly
+    proper kernel score on radius-$R$ local configurations is anchored at the true model (regret) and at CSR
+    (gain), giving skill $=1-\sum\text{regret}/\sum\text{gain}$. Fits are scored on an \emph{independent}
+    replicate, so a fit cannot be flattered by the pattern it was estimated from. A power check shows the obvious
+    alternative (a Wasserstein-1 energy score) fails.
+  \item \textbf{The CSR wall.} Across 8 families and 11 classifiers / 10 estimators, detection, classification
+    and parameter error collapse at the same boundary, described by one physical coordinate per family (cluster
+    overlap $\omega$, signal-to-noise $\zeta$) times a power of $\nb$. The proper score confirms the boundary
+    independently of any learned model: there, even the true model does not beat CSR.
+  \item \textbf{A pipeline that is the posterior's factorisation.} $p(f,\theta\mid x)=p(f\mid x)\,p(\theta\mid x,f)$:
+    one classifier (its $p(\text{poisson}\mid x)$ \emph{is} the CSR filter), then per-family estimators. The flat
+    classifier beats a hierarchical cascade (group, then family, with a reject class) by $5.4$ points.
+  \item \textbf{Where topology helps.} Adding PH to classical summaries never makes estimates significantly
+    worse and helps most where second-order statistics cannot see the structure (cell process: $K(r)=\pi r^2$
+    exactly; ring process: loops in $H_1$).
+  \item \textbf{Negative results, reported.} Wasserstein scoring has no power; training-set filtering by regime
+    helps in regime but cannot be exploited when the regime must be inferred.
+\end{enumerate}
+
+%==============================================================================
+\section*{Paper outline (8 pages; check the CfP for the current limit)}
+
+\begin{tabularx}{\linewidth}{@{}p{3.6cm}p{0.9cm}X@{}}
+\toprule
+section & pages & content, key display \\
+\midrule
+1 Introduction & 1.0 & Hook: accuracy $0.53$ vs skill $0.93$. Why accuracy is the wrong target near CSR. Contributions.
+  \textbf{Fig.~1} (the CSR wall, below). \\
+2 Setting and score & 1.25 & Families table (8 families, parameters, regime coordinate). Bank: 50\,000 $\theta$ $\times$ 2
+  replicates per family, $\nb\in[75,950]$, split by $\theta$. Kernel score, anchors, skill; Dawid--Sebastiani
+  as secondary. \textbf{Tab.~1} power check ($d'$ at strongest structure: kernel $1.06$--$1.30$, Poisson floor
+  $0.12$; W$_1$ energy $0.00$--$0.86$). \\
+3 Method & 1.0 & Factorisation; classifier as filter; per-family estimators on $\log\theta$. Inputs: 111
+  classical summary-function samples ($L,F,G,J$), 105 PH summaries per filtration, PersLay, persistence images.
+  Learners: gradient-boosted trees, linear, CNNs. Poisson: $\hat{\nb}=n$, the exact MLE (all 22 network inputs
+  reach the same $1/\sqrt{\nb}$ floor, so no model is needed). \\
+4 The CSR wall & 1.5 & Regime coordinates and their fit; per-model detection curves; parameter error vs coordinate;
+  oracle-vs-CSR gain vs coordinate. Structured patterns routed to Poisson have gain $+5{\times}10^{-5}\pm5{\times}10^{-5}$:
+  calling them Poisson costs nothing. \\
+5 Fidelity & 1.5 & \textbf{Tab.~2} skill by family and stratum. Wrong family, right pattern (misassigned vs
+  identified). Ablation: flat vs hierarchical. \pending{classical baseline row} \pending{real-data demo} \\
+6 When topology helps & 0.75 & Paired estimator table; cell and ring; end-to-end ablation. \\
+7 Negative results, limitations & 0.5 & Training filter; W$_1$; point estimates rather than posteriors;
+  synthetic bank. \\
+Related work & 0.5 & Minimum contrast / Palm / composite likelihood; global envelope tests; simulation-based
+  inference and amortized model comparison; PH for point processes; neural summaries (Vihrs et al.). \\
+\bottomrule
+\end{tabularx}
+
+\textbf{Fig.~1, the money figure.} Three panels, each against the family's regime coordinate $u$, one curve per
+model: (a)~detection rate (not called Poisson) for all 11 classifiers; (b)~estimator error for all 10 estimators;
+(c)~score gain of the true model over CSR. All three collapse at the same $u$, and the model curves overlap.
+\pending{to be made; the per-model tables are consistent with it, but panels (a) and (b) have not been plotted per model}
+
+\textbf{Appendix.} Full classifier/estimator tables and paired differences; the 132-configuration network study
+(\src{docs/05\_results.tex}); regime-coordinate selection; score settings and the settings rejected; pilot of the three
+added families; training-filter study with the estimated-$\theta$ gate.
+
+%==============================================================================
+\section*{Evidence behind each claim}
+
+{\small
+\begin{tabularx}{\linewidth}{@{}Xp{5.4cm}p{2.1cm}@{}}
+\toprule
+claim & number & status \\
+\midrule
+Top classifiers tie & best four $0.533$--$0.535$; all 11 in $[0.488,0.535]$ & done \\
+Accuracy rises in regime & best $0.535$ all $\to0.652$ at $\tau=0.9$ & done \\
+Fidelity & kernel skill $0.93$ (best) / $0.91$ (classical), held-out replicate & done \\
+Wrong family, right pattern & misassigned $0.95$ vs identified $0.94$ (1080 strong-signal clouds);
+  $0.74$ vs $0.96$ over all strata & done \\
+Routing to Poisson is free & gain $+5{\times}10^{-5}\pm5{\times}10^{-5}$ on 102 misrouted structured clouds & done \\
+Flat beats hierarchical & $-0.054\ [-0.062,-0.046]$ family accuracy & done (7 families, pilot) \\
+Regime coordinate explains detection & explained $0.965$--$0.992$ (original four families) & done; \pending{refit for 8} \\
+Score has power & $d'$ table above & done; \pending{write-up in \src{cascade/scoring/scores.tex}} \\
+PH never hurts estimates & all 7 paired intervals $\le0$ or containing $0$ & done \\
+PH helps where $K$ is blind & cell $0.142\to0.120$ / $0.117$; ring $0.648\to0.642$ ($0.518\to0.498$ at $\tau=0.9$) & done \\
+PH end to end & skill $0.94$ with and without; cell $0.87\to0.96$, interval includes $0$ & done (null) \\
+Training filter & in-regime gain up to $0.055$; estimated-$\theta$ gate: no gain & done; \pending{archive script} \\
+Beats classical estimation & --- & \pending{missing} \\
+Works on real data & --- & \pending{missing} \\
+\bottomrule
+\end{tabularx}
+}
+
+%==============================================================================
+\section*{Before submission}
+
+\textbf{Must have.}
+\begin{itemize}
+  \item Classical baseline: \texttt{spatstat::kppm} (minimum contrast and Palm likelihood) for Thomas, Mat\'ern cluster and
+    LGCP, scored with the same end-to-end score. The other five families have no closed-form fit, which is itself the
+    argument for amortized inference.
+  \item One or two real patterns (candidates in the bank's $n$ range: \texttt{redwoodfull}, \texttt{finpines},
+    \texttt{spruces}), rescaled to the unit window, scored without an oracle (fit vs CSR vs \texttt{kppm}).
+  \item Fig.~1 and the per-model regime curves.
+  \item Confirm the AISTATS 2027 deadline; historically it falls in early October.
+\end{itemize}
+
+\textbf{Cheap and worth it.} Soft routing (simulate from the family mixture weighted by $p(f\mid x)$, using existing
+posteriors); a calibration check of $p(f\mid x)$.
+
+\textbf{Future work, framed as the upgrade the factorisation allows.} Posterior rather than point estimates for $\theta$
+(distributional trees or neural posterior estimation) and posterior-predictive sampling; learned permutation-invariant
+summaries of the raw points (DeepSets / GNN) as the stronger learned baseline.
+
+\textbf{Anticipated reviewer questions.} Why not a classical fit? (\S5 baseline.) Why only synthetic data? (real-data demo.)
+Why point estimates? (limitations; soft routing partly answers it.) Is PH just another feature? (\S6: it helps exactly where
+second-order summaries are blind, and never hurts.) Why is accuracy so low? (\S4: the CSR wall; lead with it, do not hide it.)
+
+\end{document}

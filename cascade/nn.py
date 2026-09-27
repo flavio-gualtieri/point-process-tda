@@ -38,15 +38,28 @@ def spec(cfg: dict, name: str) -> dict:
 
 
 def build(s: dict, families: list[str] | None = None):
-    """(dataset over `families` -- default cloudforger's five -- in manifest order, n_tags, input description)."""
+    """(dataset over `families` -- default cloudforger's five -- in manifest order, n_tags, input description).
+
+    `curves` alone is the curves arm, `filtration` alone the diagram arm; both together fuse them:
+    the persistence images and the curves each get their own encoder and meet at the head, as H0 and
+    H1 do. Fusion takes one filtration (PHNet passes every key through its encoder n_tags times) and
+    persistence images, not PersLay (train() gives every key the same kind of encoder)."""
     families = list(families or D.FAMILIES)
-    if s.get("curves"):
-        return D.build_curves(families, D.parse_curves(s["curves"], "sqrtn_u2")), 1, s["curves"]
+    curves = D.build_curves(families, D.parse_curves(s["curves"], "sqrtn_u2")) if s.get("curves") else None
+    if not s.get("filtration"):
+        return curves, 1, s["curves"]
     tags = s["filtration"].split(",")
     dims = [int(d) for d in str(s["dims"]).split(",")]
     make = D.build_diagrams if s.get("perslay") else D.build
     arm = f"{s['filtration']} h{s['dims']}" + (f" perslay({s.get('perslay_norm', 'none')})" if s.get("perslay") else "")
-    return make(families, tags, dims, scaling=Scaling(coords="sqrt_n", density=True)), len(tags), arm
+    if curves is not None and (len(tags) != 1 or s.get("perslay")):
+        raise ValueError(f"fusion needs one filtration and persistence images, got {arm}")
+    data = make(families, tags, dims, scaling=Scaling(coords="sqrt_n", density=True))
+    if curves is None:
+        return data, len(tags), arm
+    # string keys throughout: the image and curve blocks are ordered by sorted(key) in train() and Rows
+    data.images = {f"ph_h{d}": v for d, v in data.images.items()} | curves.images
+    return data, 1, f"{arm} + {s['curves']}"
 
 
 def _loader(dataset, y, index, s, shuffle):

@@ -16,6 +16,7 @@
 #   sbatch oneshot/endtoend.sh                       # score_on from the config (heldout)
 #   SCORE_ON=same sbatch oneshot/endtoend.sh         # scored on the pattern the fit came from
 #   LIMIT=16 sbatch oneshot/endtoend.sh              # smoke test
+#   SET=ph_ablation sbatch oneshot/endtoend.sh       # an evaluation.sets entry of the config
 
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
@@ -26,4 +27,4 @@ mamba activate /gpfs/scratch/qp252676/globus/envs/cloud-env
 set -u
 export OMP_NUM_THREADS=1            # one process per cloud; keep BLAS from oversubscribing
 python -u oneshot/endtoend.py --config "${CONFIG:-oneshot/configs/default.yaml}" \
-    ${SCORE_ON:+--score-on "$SCORE_ON"} ${LIMIT:+--limit "$LIMIT"}
+    ${SCORE_ON:+--score-on "$SCORE_ON"} ${LIMIT:+--limit "$LIMIT"} ${SET:+--set "$SET"}
