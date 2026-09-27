@@ -1,0 +1,600 @@
+\documentclass[twoside]{article}
+
+% Template: AISTATS 2026 starter pack (sample_paper.tex, supplied with the skeleton request).
+% aistats2026.sty and fancyhdr.sty are NOT in this repository: copy them from the starter pack into paper/.
+% docs/aistats_outline.tex targets AISTATS 2027 -- swap the style file for the 2027 one when it is released.
+\usepackage{aistats2026}
+%\usepackage[accepted]{aistats2026}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+% Skeleton markers. Every red bracket is an open item; nothing in red is a result.
+\newcommand{\TBD}[1]{\textcolor{red}{[TBD\ifx\relax#1\relax\else: #1\fi]}}
+\newcommand{\NI}[1]{\textcolor{red}{[NEEDS INPUT: #1]}}
+\newcommand{\src}[1]{{\footnotesize\texttt{#1}}}
+\newcommand{\nb}{\bar n}
+
+\begin{document}
+
+\twocolumn[
+% Working title, taken from docs/aistats_outline.tex. [NEEDS INPUT: confirm title]
+\aistatstitle{Wrong Family, Right Pattern: Fidelity-Based Model Fitting \\
+for Spatial Point Processes Near Complete Spatial Randomness}
+\aistatsauthor{Anonymous Author(s)}
+\aistatsaddress{Anonymous Institution(s)} ]
+
+\begin{abstract}
+\TBD{abstract; write last. A pre-skeleton draft exists in \src{docs/aistats\_outline.tex} and will need
+re-aligning with the section structure below.}
+\end{abstract}
+
+% SKELETON ONLY. Each subsection lists what it will say, as fragments. Tables and figures are
+% placeholders; their full inventory is paper/TABLES_AND_FIGURES.md.
+
+%==============================================================================
+\section{BACKGROUND}
+
+\subsection{Spatial Point Processes and Second-Order Summary Statistics}
+\begin{itemize}
+  \item Define a point process $X$ on the unit window $W=[0,1]^2$ (the only window in the code), with expected
+        count $\nb$. Also define stationarity and isotropy, and CSR (homogeneous Poisson) as the null.
+  \item Ripley's $K$ and $L(r)=\sqrt{K(r)/\pi}$. The code works with $\sqrt n\,(L(r)-r)$ and the isotropic
+        edge-corrected $\hat K$ (\src{src/cloudforger/classical/lfunction.py}).
+  \item Pair correlation $g(r)=K'(r)/2\pi r$: defined only. It appears in the closed forms (Mat\'ern I/II, LGCP;
+        Table~\ref{tab:families}) and as a limit of the kernel score (Section~4). It is never estimated as a feature.
+  \item Other summaries the models actually use: empty-space $F$, nearest-neighbour $G$, and $J=(1-G)/(1-F)$
+        (\src{src/cloudforger/classical/fgj.py}).
+  \item \NI{introduce the departure-from-CSR statistic $\tilde\delta$ (a studentised global envelope on $L$,
+        \src{docs/01\_departure.tex}) here? It stratifies the score power check (T8) and yields the hard-core
+        boundary in T5.}
+\end{itemize}
+
+\subsection{Persistent Homology (Optional --- To Be Decided)}
+\begin{itemize}
+  \item \textbf{Status: optional, not final.} Decide after the PH ablation (T10).
+  \item Persistence diagrams ($H_0,H_1$; essential classes dropped) of three filtrations: Vietoris--Rips, alpha
+        (diameter scale), and DTM-Rips with $k\in\{5,10,15,20\}$, $q=2$
+        (\src{src/cloudforger/featurization/filtrations.py}, \src{configs/featurization/config.yaml}).
+  \item Coordinates are rescaled by $\sqrt n$ (mean-spacing units), so diagrams are comparable across $\nb$.
+  \item Dependency: if this subsection is cut, Section~3.1 still needs a minimal diagram definition, because the
+        frozen model (\texttt{hgb\_classical\_ph}) uses PH summaries.
+\end{itemize}
+
+\subsection{Processes}
+\begin{itemize}
+  \item Eight families, as implemented in \src{src/cloudforger/simulation/\{families,processes\}.py}. Give one line
+        each and point to Table~\ref{tab:families} for $K$.
+  \item Neyman--Scott cluster processes: Thomas, nested (two-level) Thomas, and ring (offspring on a circle of
+        radius $\rho$ with radial jitter $\sigma$). Cox: LGCP with exponential covariance. Hard core:
+        Mat\'ern~I and~II. Plus Poisson.
+  \item Generalised Baddeley--Silverman cell process: $K(r)=\pi r^2$ exactly, so it is invisible to every
+        second-order statistic but is not Poisson. This motivates Sections~1.2 and~5.
+  \item Note which families approach others as a limit (ring as $\sigma/\rho\to1$, and nested with a smeared outer
+        level, both tend to Thomas). This matters for the confusions in Section~5.
+\end{itemize}
+
+\begin{table*}[t]
+% [TABLE ID: T1] — the eight families: parameters, structure, closed-form K, regime coordinate
+% Columns: Family | Parameters (model keys) | # params | Structure | Stationary / isotropic | K(r) - pi r^2 | Regime coordinate
+% Data source: src/cloudforger/simulation/families.py (Family.params, Family.excess = K(r) - pi r^2);
+%              regime coordinates from oneshot/configs/default.yaml (regime.coordinates), cascade/regime.py (DERIVED),
+%              oneshot/core.py (COORDINATES). K cells transcribed from code, not from the literature -- re-check.
+% Matern II pcf in code (_matern_pcf), a = pi R^2, U(r) = area of the union of two radius-R discs at distance r,
+%   lambda = (1 - e^{-lambda_p a}) / a:
+%   g(r) = 2 [U (1 - e^{-lambda_p a}) - a (1 - e^{-lambda_p U})] / (lambda^2 a U (U - a))  on [R, 2R); 0 below R; 1 from 2R.
+% Ring: F_D = CDF of |2 rho sin(psi/2) e + Z|, psi ~ U(0, pi), Z ~ N(0, 2 sigma^2 I) (Rician given psi; midpoint rule).
+% LGCP series is truncated at 80 terms in code.
+\caption{[PLACEHOLDER — The eight process families: parameters, second-order structure, closed-form $K$ and the
+coordinate that locates each family's near-CSR regime.]}
+\label{tab:families}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}lllll p{5.4cm} l@{}}
+\toprule
+Family & Parameters & \# & Structure & Stat./iso. & $K(r)-\pi r^2$ & Regime coord. \\
+\midrule
+Poisson      & $\nb$ & 1 & CSR & yes / yes & $0$ & --- \\
+Thomas       & $\kappa,\mu,\sigma$ & 3 & clustered & yes / yes & $\kappa^{-1}\bigl(1-e^{-r^2/4\sigma^2}\bigr)$ & $\omega=\sigma\sqrt\kappa$ \\
+Nested       & $\kappa,\mu_1,\mu_2,\sigma_1,\sigma_2$ & 5 & clustered, 2 scales & yes / yes &
+  $\kappa^{-1}\bigl[\mu_1^{-1}\bigl(1-e^{-r^2/4\sigma_2^2}\bigr)+\bigl(1-e^{-r^2/4(\sigma_1^2+\sigma_2^2)}\bigr)\bigr]$ &
+  $\omega_{\rm in}=\sigma_2\sqrt{\kappa\mu_1}$ \\
+Ring         & $\kappa,\mu,\rho,\sigma$ & 4 & clustered, annular & yes / yes &
+  $\kappa^{-1}F_D(r;\rho,\sigma)$; $F_D$ = CDF of the offspring--offspring distance (1-D integral) & $\omega=\rho\sqrt\kappa$ \\
+LGCP         & $\mu_{\log},\sigma^2,s$ & 3 & clustered (Cox) & yes / yes$^\dagger$ &
+  $2\pi\sum_{j\ge1}\frac{(\sigma^2)^j}{j!}\bigl(\frac{s}{j}\bigr)^2\bigl[1-\bigl(1+\frac{jr}{s}\bigr)e^{-jr/s}\bigr]$ &
+  $\zeta=(e^{\sigma^2}-1)\,s\,\nb$ \\
+Mat\'ern II  & $R,\lambda_p$ & 2 & regular (hard core) & yes / yes &
+  $2\pi\int_0^r t\,g(t)\,dt-\pi r^2$; $g$ closed form, piecewise on $[0,R),[R,2R),[2R,\infty)$ & $\zeta=R\,\nb$ \\
+Mat\'ern I   & $R,\lambda_p$ & 2 & regular (hard core) & yes / yes &
+  as Mat\'ern II, with $g(r)=\exp\bigl(\lambda_p\,|b(0,R)\cap b(r,R)|\bigr)$ on $[R,2R)$ & $\zeta=R\,\nb$ \\
+Cell         & $\nb,k$ & 2 & second-order CSR & yes / no$^\ddagger$ & $0$ (exactly) & none (U-shaped in $k$) \\
+\bottomrule
+\end{tabular}
+\end{center}
+{\footnotesize $^\dagger$Simulated piecewise-constant on an $M\times M$ grid (\src{src/cloudforger/simulation/lgcp\_grid.py}).
+$^\ddagger$Randomly shifted, axis-aligned grid of cells.}
+\end{table*}
+
+%==============================================================================
+\section{DATA GENERATION}
+
+\paragraph{Sweep coordinates.}
+\begin{itemize}
+  \item Random design, not a grid. Each $\theta$ is an i.i.d.\ draw from a constrained log-uniform prior on its own
+        seed stream, so the bank is reproducible and can be extended without moving existing draws
+        (\src{src/cloudforger/simulation/\{bank,seeding\}.py}).
+  \item Every family first draws a count budget $\nb\sim\text{log-uniform}[75,950]$. The last parameter then
+        follows from conservation of the mean count.
+  \item Cluster families: two independent dials, richness (points per cluster) and smearing $\omega\in[0.2,8]$.
+        Nested adds the scale ratio $\sigma_1/\sigma_2$; ring adds the jitter $\sigma/\rho$. LGCP, Mat\'ern and cell
+        have their own dials. Full ranges are in Table~\ref{tab:data}
+        (\src{configs/simulation/config.yaml}, \texttt{rules}).
+\end{itemize}
+
+\paragraph{Constraints.}
+\begin{itemize}
+  \item Count-variance bound $\mathrm{cv}(n)=\mathrm{sd}(n)/\nb\le0.30$, computed in closed form from $K$. It is
+        \emph{inverted into the support} rather than rejected, so the richness dial is not reweighted
+        (\src{docs/02\_simulation.tex}).
+  \item Degeneracy guards: at least 10 clusters in the window; minimum points per cluster, meta-cluster and ring;
+        Mat\'ern packing caps (Mat\'ern~I cannot exceed $1/e$); LGCP range resolvable and within the
+        circulant-embedding limit; a $\sigma$ cost guard.
+  \item Realised counts are conditioned on $n\in[20,2000]$. Parents are simulated on a window buffered by 5
+        displacement s.d.s, to avoid edge loss.
+\end{itemize}
+
+\paragraph{Data volume.}
+\begin{itemize}
+  \item 8 families $\times$ 50\,000 $\theta$ $\times$ 2 independent replicates $=$ 800\,000 patterns
+        (\src{data/bank/FAMILY/manifest.csv}).
+  \item Split by $\theta$ index, the same for every family, model and seed, with both replicates in the same split:
+        37\,000 / 1\,000 / 12\,000 $\theta$ per family (\src{src/cloudforger/simulation/split.py}).
+  \item The test block is large on purpose: near-CSR regime cells need enough $\theta$ for bootstrap intervals.
+        The end-to-end evaluation subsets are drawn from it (Section~4).
+\end{itemize}
+
+\begin{table*}[t]
+% [TABLE ID: T2] — the simulation design and data volume
+% Columns: Family | Drawn dials (ranges) | Derived | # theta | Replicates | Patterns | Train / val / test patterns
+% Data source: configs/simulation/config.yaml; src/cloudforger/simulation/{families,bank,split}.py;
+%              counts verified against data/bank/<family>/manifest.csv (100000 rows each) and
+%              oneshot/results/default/classify/*/report.json (n_train = 592000).
+\caption{[PLACEHOLDER — Simulation design: the dials swept per family, their ranges, and the number of parameter draws,
+replicates and patterns in each split.]}
+\label{tab:data}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}l p{4.8cm} p{2.6cm} rrrr@{}}
+\toprule
+Family & Drawn (all log-uniform; $^\ast$ = on the feasible sub-range) & Derived & $\theta$ & Reps & Patterns & Train / val / test \\
+\midrule
+Poisson     & $\nb$ & --- & 50\,000 & 2 & 100\,000 & 74\,000 / 2\,000 / 24\,000 \\
+Thomas      & $\nb$; $\mu\in[1,\nb/10]$; $\omega\in[0.2,8]^\ast$ & $\kappa=\nb/\mu$, $\sigma=\omega/\sqrt\kappa$ & 50\,000 & 2 & 100\,000 & 74\,000 / 2\,000 / 24\,000 \\
+Nested      & $\nb$; $\mu_2\in[1,\nb/10]$; $\mu_1\in[\max(1,2/\mu_2),\,\nb/10\mu_2]$; $\sigma_1/\sigma_2\in[2.49,10]$; $\omega=\sigma_1\sqrt\kappa\in[0.2,8]^\ast$ & $\kappa=\nb/\mu_1\mu_2$ & 50\,000 & 2 & 100\,000 & 74\,000 / 2\,000 / 24\,000 \\
+Ring        & $\nb$; $\mu\in[3,\nb/10]$; $\sigma/\rho\in[0.05,1]$; $\omega=\rho\sqrt\kappa\in[0.2,8]^\ast$ & $\kappa=\nb/\mu$ & 50\,000 & 2 & 100\,000 & 74\,000 / 2\,000 / 24\,000 \\
+LGCP        & $\nb$; $s\in[0.10/\sqrt{\nb},\,0.20]$; $\sigma^2\in[0.05,\,\min(10,\text{cv cap})]$ & $\mu_{\log}=\log\nb-\sigma^2/2$; grid $M$ & 50\,000 & 2 & 100\,000 & 74\,000 / 2\,000 / 24\,000 \\
+Mat\'ern II & $\nb$; $R\sqrt{\nb}\in[0.05,\sqrt{0.95/\pi}]$ & $\lambda_p$ (exact inversion) & 50\,000 & 2 & 100\,000 & 74\,000 / 2\,000 / 24\,000 \\
+Mat\'ern I  & $\nb$; $R\sqrt{\nb}\in[0.05,\sqrt{0.35/\pi}]$ & $\lambda_p$ (Lambert $W$) & 50\,000 & 2 & 100\,000 & 74\,000 / 2\,000 / 24\,000 \\
+Cell        & $\nb$; $k\in\{2,\dots,30\}$ & --- & 50\,000 & 2 & 100\,000 & 74\,000 / 2\,000 / 24\,000 \\
+\midrule
+Total       & & & 400\,000 & & 800\,000 & 592\,000 / 16\,000 / 192\,000 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table*}
+
+\begin{figure*}[t]
+% [FIGURE ID: F1] — example realizations, anchoring the Section 1.3 definitions
+% Plot type: small-multiples grid of point patterns on [0,1]^2; 8 families x 2 columns
+%            (one strongly structured, in regime at tau = 0.9; one near CSR, out of regime at tau = 0.5).
+% Data: data/bank/<family>/points.npz (points, offsets) + manifest.csv (theta, parameters); test-split thetas;
+%       in/out of regime from oneshot/results/default/compare/cutoffs.json (cell: pick k = 2 and large k).
+% Data source: NOT FOUND — new plotting script needed. (docs/figs/02_regime_patterns.pdf is from the superseded
+%              delta-swept bank and covers only five families.)
+\vspace{.3in}
+\centerline{\fbox{[F1 placeholder: example realizations, two per family]}}
+\vspace{.3in}
+\caption{[PLACEHOLDER — Example realizations of each family, one strongly structured and one near CSR.]}
+\label{fig:examples}
+\end{figure*}
+
+%==============================================================================
+\section{THE MODEL}
+
+\begin{itemize}
+  \item Pipeline = the posterior factorisation $p(f,\theta\mid x)=p(f\mid x)\,p(\theta\mid x,f)$. One 8-way
+        classifier, whose $P(\text{Poisson}\mid x)$ serves as the CSR filter. A Poisson call gets $\hat{\nb}=n$ (the exact
+        MLE); any other call goes to that family's estimator of $\log\theta$ (\src{oneshot/README.md}).
+  \item Any model can serve as classifier or estimator; every choice is a config key
+        (\src{oneshot/configs/default.yaml}).
+\end{itemize}
+
+\subsection{Vectorizations}
+\begin{itemize}
+  \item Classical vector (111 columns): $\sqrt n\,(L(r)-r)$ on a fixed radius axis, plus $L,F,G,J$ on the
+        $u=r\sqrt n$ axis, log-spaced samples, plus $\log n$ (\src{cascade/features.py}).
+  \item PH summary vector (105 columns per filtration): Betti curves and lifetime / birth / death statistics for
+        $H_0,H_1$ (\src{src/cloudforger/vectorization/summaries.py}). Alpha and DTM$_{10}$ in the frozen model; six
+        filtrations in \texttt{hgb\_classical\_ph6}.
+  \item Network inputs: $L,F,G,J$ curves stacked as channels of one 1-D signal; persistence images per homology
+        dimension (bounds fitted on train); PersLay, a learned permutation-invariant diagram layer; and curves plus
+        alpha images fused in one network. $\log n$ is a covariate everywhere.
+  \item \NI{include the raw-point DeepSets / GNN runs (\src{extensions/learned/}; untracked, smoke scale only)?}
+\end{itemize}
+
+\subsection{Architectures}
+\begin{itemize}
+  \item Gradient-boosted trees (\texttt{HistGradientBoosting}, fixed 400 iterations) on concatenated feature
+        tables: four input sets, including the frozen \texttt{hgb\_classical\_ph}.
+  \item Linear: standardised logistic regression on the classical vector (classifier only).
+  \item PHNet (\src{src/cloudforger/training/model.py}): one CNN or PersLay encoder per input, embeddings
+        concatenated with $\log n$, then an MLP head; AdamW with early stopping on validation loss.
+  \item References: minimum contrast on $K$ with penalised-contrast model selection (\src{oneshot/mincontrast.py}),
+        and oracle routing to the true family.
+  \item \NI{headline estimator assignment: \texttt{hgb\_classical\_ph} for every family (the ``ph'' pipeline,
+        frozen in \src{docs/aistats\_outline.tex}), or the per-family best on validation (``best'')?}
+\end{itemize}
+
+\begin{table*}[t]
+% [TABLE ID: T3] — every model: learner, input, tasks, size and compute
+% Columns: Model (config key) | Learner | Input (dim) | Task (C = classify, E = estimate) | # trainable params |
+%          Classifier train time (s) | Estimator train time (s, summed over 7 families) | Hardware | Epochs / iterations
+% Data source: oneshot/configs/default.yaml (models, nn defaults); oneshot/learners.py (HGB/linear defaults);
+%              src/cloudforger/training/{model,train}.py (PHNet, AdamW, patience);
+%              oneshot/results/default/classify/<model>/report.json ("seconds", "n_train");
+%              oneshot/results/default/estimate/<family>/<model>/report.json ("seconds");
+%              NN epochs: model.pt["fit"] = {best_epoch, epochs_run} (not in report.json);
+%              hardware: oneshot/train_cpu.sh (16 CPUs, 64G), oneshot/train_gpu.sh (1 GPU, 8 CPUs, 192G, partition sae).
+%              # params: NOT FOUND (not logged anywhere) — count from model.pt / model.joblib. GPU model: NOT FOUND.
+% Classifier seconds below are single-run wall clock from report.json (compute facts, not results).
+\caption{[PLACEHOLDER — Models compared: learner, input representation, tasks, parameter count and training cost.]}
+\label{tab:models}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}llllllll@{}}
+\toprule
+Model & Learner & Input (dim) & Task & \# params & Clf.\ time (s) & Est.\ time (s) & Hardware / epochs \\
+\midrule
+\texttt{hgb\_classical}       & trees  & classical (111)                & C, E & \TBD{} & 515  & \TBD{} & CPU; 400 iter. \\
+\texttt{hgb\_ph}              & trees  & PH alpha + DTM$_{10}$ (210)    & C, E & \TBD{} & 154  & \TBD{} & CPU; 400 iter. \\
+\texttt{hgb\_classical\_ph}   & trees  & classical + PH (321)           & C, E & \TBD{} & 202  & \TBD{} & CPU; 400 iter. \\
+\texttt{hgb\_classical\_ph6}  & trees  & classical + PH, 6 filtr.\ (741)& C, E & \TBD{} & 514  & \TBD{} & CPU; 400 iter. \\
+\texttt{linear\_classical}    & linear & classical (111)                & C    & \TBD{} & 126  & ---    & CPU \\
+\texttt{nn\_curves}           & PHNet  & $L,F,G,J$ curves               & C, E & \TBD{} & 1926 & \TBD{} & GPU; $\le$200 ep.\ \TBD{best} \\
+\texttt{pi\_alpha}            & PHNet  & pers.\ images, alpha           & C, E & \TBD{} & 2432 & \TBD{} & GPU; $\le$200 ep.\ \TBD{best} \\
+\texttt{pi\_rips}             & PHNet  & pers.\ images, Rips            & C, E & \TBD{} & 1708 & \TBD{} & GPU; $\le$200 ep.\ \TBD{best} \\
+\texttt{perslay\_alpha}       & PHNet  & PersLay, alpha                 & C, E & \TBD{} & 1453 & \TBD{} & GPU; $\le$200 ep.\ \TBD{best} \\
+\texttt{perslay\_dtm10}       & PHNet  & PersLay, DTM$_{10}$            & C, E & \TBD{} & 2510 & \TBD{} & GPU; $\le$200 ep.\ \TBD{best} \\
+\texttt{fusion\_curves\_alpha}& PHNet  & curves + alpha images          & C, E & \TBD{} & 2349 & \TBD{} & GPU; $\le$200 ep.\ \TBD{best} \\
+\midrule
+min.\ contrast                & ---    & $\hat K$                       & C, E & 0 (tuned on val) & \TBD{} & \TBD{} & CPU array \\
+oracle                        & ---    & true family                    & C    & ---    & ---  & ---    & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table*}
+
+\begin{figure*}[t]
+% [FIGURE ID: F2] — pipeline schematic
+% Plot type: schematic / block diagram. Point cloud -> {classical summaries | PH diagrams (Rips / alpha / DTM)
+%            -> PH summaries / persistence images / PersLay} -> learner -> 8-way classifier;
+%            P(poisson|x) -> nbar_hat = n; else family f -> estimator_f -> theta_hat ->
+%            simulate from (f_hat, theta_hat) -> kernel score against the held-out replicate (Section 4).
+% Data source: NOT FOUND — new drawing. ASCII version in oneshot/README.md. (README.md's
+%              scripts/make_vectorization_schematic.py no longer exists in the tree.)
+\vspace{.3in}
+\centerline{\fbox{[F2 placeholder: point cloud $\to$ vectorization $\to$ classifier / estimator $\to$ score]}}
+\vspace{.3in}
+\caption{[PLACEHOLDER — The pipeline, from point cloud to fitted model to end-to-end score.]}
+\label{fig:pipeline}
+\end{figure*}
+
+%==============================================================================
+\section{THE SCORE}
+
+\begin{itemize}
+  \item Training losses, per stage (\src{oneshot/learners.py}, \src{cascade/nn.py}). Classifiers: log loss,
+        equal-prior sample weights (trees) or class-weighted cross-entropy (PHNet). Estimators: squared error on
+        $\log\theta$ (trees) or MSE on z-scored $\log\theta$ (PHNet).
+  \item Component metrics (\src{oneshot/compare.py}): accuracy, NLL, per-family recall and detection (not called
+        Poisson), and estimator error $\mathrm{RMSE}(\log\theta)/\mathrm{s.d.}$ averaged over a family's targets.
+  \item End-to-end score, never optimised directly: a kernel score on local configurations of radius $R=1.5$ mean
+        spacings (Eq.~\ref{eq:kernel}). It is strictly proper for the law of radius-$R$ configurations
+        (\src{cascade/scoring/local\_kernel.py}, \src{cascade/scoring/scores.tex}).
+  \item Protocol: fit on replicate~0 and score on the independent replicate~1; the CSR reference is Poisson at
+        $\nb=n$; skill is reported only where the gain is resolved ($>2$ s.e.). Dawid--Sebastiani is a secondary
+        score (proper, not strictly). Evaluation clouds are stratified test subsets
+        (\src{oneshot/configs/default.yaml}, \texttt{evaluation}).
+  \item Why a new score: justify it with the power check (T8), including the negative result for the
+        Wasserstein-1 energy score.
+\end{itemize}
+
+% Definitions below are transcribed from cascade/scoring/scores.tex and cascade/evaluate.py.
+\begin{equation}
+  S(P,x)=\tfrac12\,\mathbb{E}\,k(\Phi,\Phi')-\frac1m\sum_{i=1}^{m}\mathbb{E}\,k(\phi_i,\Phi)
+  \label{eq:kernel}
+\end{equation}
+\begin{equation}
+  \text{[PLACEHOLDER: local configuration $\phi_i$, grid embedding, kernel width fixed per cloud]}
+  \label{eq:embedding}
+\end{equation}
+\begin{equation}
+  \mathrm{regret}=S(\hat P)-S(P_\star),\quad
+  \mathrm{gain}=S(P_{\rm CSR})-S(P_\star),\quad
+  \mathrm{skill}=1-\frac{\sum\mathrm{regret}}{\sum\mathrm{gain}}
+  \label{eq:skill}
+\end{equation}
+\begin{equation}
+  \Delta_{\rm CSR}=S(P_{\rm CSR})-S(\hat P)=\mathrm{gain}-\mathrm{regret}
+  \label{eq:gap}
+\end{equation}
+\begin{equation}
+  S_{\rm DS}(P,x)=\log\det\Sigma_P+(T(x)-\mu_P)^{\top}\Sigma_P^{-1}(T(x)-\mu_P)
+  \label{eq:dss}
+\end{equation}
+
+\begin{table}[t]
+% [TABLE ID: T8] — power check: can the score tell the true model from CSR?
+% Columns: Family | delta-tilde bin | n clouds | d' kernel (R = 1.5, point centres) | d' DSS (no_ph) | d' W1 energy | z (kernel)
+% Data source: cascade/scoring/results/power/{report.json, clouds.csv} (cascade/scoring/power.py); a compact
+%              version is tabulated in cascade/scoring/scores.tex.
+%              GAP: covers only Poisson, Thomas, nested, LGCP, Matern II — ring, Matern I and cell were never power-checked.
+\caption{[PLACEHOLDER — Power of candidate end-to-end scores to separate the true model from CSR, by family and
+departure bin.]}
+\label{tab:power}
+\end{table}
+
+%==============================================================================
+\section{RESULTS}
+
+\subsection{Classification Results}
+\begin{itemize}
+  \item 11 learned classifiers plus minimum-contrast selection, on the 192\,000 test patterns with an equal prior.
+        Report 95\% bootstrap intervals over test $\theta$, and paired differences against \texttt{hgb\_classical}.
+  \item Accuracy pooled and in regime ($\tau=0.5,0.9$), with per-family recall and detection. What to state:
+        whether the top classifiers can be told apart at all.
+  \item Confusions by type: calls to Poisson (Section~5.2) versus confusions between families that coincide over
+        part of their parameter space (Section~1.3).
+\end{itemize}
+
+\begin{table*}[t]
+% [TABLE ID: T4] — classification by model x family
+% Columns (exact, compare/classifiers.csv): model | accuracy all | accuracy regime 0.5 | accuracy regime 0.9 | nll |
+%          recall poisson | recall thomas | recall nested | recall lgcp | recall matern2 | recall ring | recall matern1 | recall cell
+%          (+ appendix: detected <family> for the 8 families; paired "− baseline (all)" interval from compare/summary.md)
+% Data source: oneshot/results/default/compare/{classifiers.csv, summary.md};
+%              min-contrast selection row: oneshot/results/default/classify/mincontrast/report.json, mincontrast/summary.md.
+\caption{[PLACEHOLDER — Eight-way classification: accuracy overall and in regime, and recall per family, for every
+classifier and the minimum-contrast baseline.]}
+\label{tab:classification}
+\end{table*}
+
+\begin{figure}[t]
+% [FIGURE ID: F3] — confusion matrix
+% Plot type: 8 x 8 row-normalised confusion matrix (true family x called family), test split.
+%            Main text: frozen classifier only. Appendix: one per classifier (11 + min-contrast selection).
+% Data: oneshot/results/default/classify/<model>/predictions.npz (posterior, classes, split, case_id; true family = case_id prefix).
+% Data source: NOT FOUND as a figure/table for oneshot — new analysis on stored posteriors (argmax, no retraining).
+%              pilot/analyze.py computes a confusion dict for the (superseded) pilot only.
+\vspace{.3in}
+\centerline{\fbox{[F3 placeholder: 8$\times$8 confusion matrix]}}
+\vspace{.3in}
+\caption{[PLACEHOLDER — Confusion matrix of the frozen classifier on the test split.]}
+\label{fig:confusion}
+\end{figure}
+
+\subsection{Misclassification-Regime Analysis}
+\begin{itemize}
+  \item For each non-Poisson family, take $P(\text{called Poisson}\mid\theta)=1-\text{detected}$ from the reference
+        classifier's out-of-fold predictions on train.
+  \item Regime rule (\src{cascade/regime.py}): $u=\log x+a\log\nb$ with $a$ fitted by logistic regression,
+        $P(\text{detected}\mid u)$ isotonic in $u$, and boundary $u^\ast(\tau)$. The result is a frozen rule
+        $x\,\nb^{a}\gtrless e^{u^\ast}$ on $\theta$ alone.
+  \item Show that Poisson calls concentrate on one side of the boundary. Compare the fitted boundary with analytic
+        candidates: the hard-core boundary from the $\tilde\delta$ derivation (\src{docs/01\_departure\_notes.md});
+        \NI{no analytic derivation exists in the repo for the cluster families or LGCP}.
+  \item \NI{reference classifier: config uses \texttt{hgb\_classical}; the frozen headline classifier is
+        \texttt{hgb\_classical\_ph}.}
+\end{itemize}
+
+\begin{figure*}[t]
+% [FIGURE ID: F4] — where each family is called Poisson
+% Plot type: 7 panels (one per non-Poisson family); hexbin/binned heatmap over (log x, log nbar), x = the family's
+%            regime coordinate (T1), colour = P(called Poisson) (binned mean of argmax == poisson, or mean posterior);
+%            overlays: fitted boundary lines log x + a log nbar = u*(tau), tau in {0.5, 0.9}; analytic curve where one exists.
+%            Cell: 1-D panel against k (no monotone coordinate). Random design => binned, not a grid heatmap.
+% Data: oneshot/results/default/classify/hgb_classical/predictions.npz (out-of-fold train + val + test) joined to
+%       data/bank/<family>/manifest.csv; oneshot/results/default/compare/cutoffs.json.
+% Data source: PARTIAL — cascade/regime_analysis.py plots detection for the old five-family cascade
+%              (reports/cascade/default/regime_analysis/); needs re-running on oneshot predictions for 8 families.
+%              Analytic curves: NOT FOUND except the hard-core delta-tilde derivation.
+\vspace{.3in}
+\centerline{\fbox{[F4 placeholder: P(called Poisson) over sweep coordinates, with boundaries]}}
+\vspace{.3in}
+\caption{[PLACEHOLDER — Probability of being classified as Poisson across each family's parameter space, with the fitted
+and analytic regime boundaries.]}
+\label{fig:regime}
+\end{figure*}
+
+\begin{table}[t]
+% [TABLE ID: T5] — the "looks like Poisson" boundary per family
+% Columns: Family | Coordinate x (definition) | nbar exponent a | Direction | u*(0.5) | u*(0.9) | Share of train in regime |
+%          Near-closed-form boundary | Explained (share of log-loss explained by the coordinate)
+% Data source: oneshot/results/default/compare/cutoffs.json (nbar_exponent, direction, u_boundary, pool_fraction);
+%              definitions: cascade/regime.py DERIVED + oneshot/core.py COORDINATES;
+%              hard-core analytic form: docs/01_departure_notes.md ("Interpretation of delta-tilde");
+%              "explained": reports/cascade/default/regime_analysis/scores.csv — OLD five-family cascade only, refit needed.
+%              Near-closed-form boundaries for Thomas / nested / ring / LGCP: NOT FOUND — new analysis.
+\caption{[PLACEHOLDER — Per-family boundary of the regime in which patterns look like Poisson, fitted and near-closed-form,
+in terms of the sweep parameters.]}
+\label{tab:boundary}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}lll l@{}}
+\toprule
+Family & $x$ & Fitted rule & Near-closed form \\
+\midrule
+Thomas      & $\sigma\sqrt\kappa$            & $x\,\nb^{a}\gtrless c_\tau$ \TBD{} & \NI{} \\
+Nested      & $\sigma_2\sqrt{\kappa\mu_1}$   & \TBD{} & \NI{} \\
+Ring        & $\rho\sqrt\kappa$              & \TBD{} & \NI{} \\
+LGCP        & $(e^{\sigma^2}-1)s\nb$         & \TBD{} & \NI{} \\
+Mat\'ern II & $R\nb$                         & \TBD{} & from $\tilde\delta_{\rm lo}$ \TBD{} \\
+Mat\'ern I  & $R\nb$                         & \TBD{} & \TBD{same argument?} \\
+Cell        & ---                            & none (U-shaped in $k$) & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+\subsection{``Poisson Is Good Enough''}
+\begin{itemize}
+  \item Trivial baseline: CSR at $\nb=n$ (the Poisson MLE), scored with Eq.~\ref{eq:kernel} on the same held-out
+        replicate as the fit.
+  \item Quantity: the score gap $\Delta_{\rm CSR}$ (Eq.~\ref{eq:gap}) and the oracle gain, per family and regime
+        stratum (below 0.5 / 0.5--0.9 / above 0.9 of $P(\text{detected}\mid u)$; cell by $k$).
+  \item Claim to test: outside the regime the gap and the gain are both indistinguishable from zero, and inside
+        they are not. For structured clouds routed to Poisson, regret $=$ gain, so their gain \emph{is} the cost of
+        the Poisson call.
+  \item Caveat: power near CSR (T8). Separate ``no gap'' from ``no detectable gap''.
+  \item \NI{include the training-filter negative result (\src{oneshot/results/default/train\_filter/gains.csv}) here
+        or in the appendix?}
+\end{itemize}
+
+\begin{table}[t]
+% [TABLE ID: T6] — model vs Poisson baseline, inside vs outside the regime
+% Columns: Family | Stratum (outside: below 0.5 / boundary: 0.5-0.9 / inside: above 0.9; cell: k bins) | n clouds |
+%          Oracle gain (± s.e.) | Delta_CSR = gain − regret (± s.e.) | Skill (where resolved) |
+%          + summary row: structured clouds routed to Poisson (n, gain ± s.e.)
+% Data source: oneshot/results/default/evaluation/heldout_mincontrast/{clouds.csv, report.json, summary.md}
+%              (clouds.csv columns: scored_case_id, variant, family_hat, ended, kernel_fit, kernel_oracle, kernel_csr,
+%              kernel_regret, kernel_gain, dss_*, family, stratum, n_fit, n_scored).
+%              PARTIAL — gain and skill per stratum exist in summary.md; Delta_CSR (= kernel_csr − kernel_fit) per
+%              stratum with s.e. needs a small new aggregation.
+\caption{[PLACEHOLDER — Score gap between the fitted model and a Poisson fit, inside versus outside each family's regime.]}
+\label{tab:poisson-gap}
+\end{table}
+
+\subsection{Final Results}
+\begin{itemize}
+  \item Reserved for the headline: T7 and F5 aggregate classification, estimation and end-to-end fidelity, against
+        minimum contrast (with inferred and with true family) and oracle routing.
+  \item Supporting tables: parameter-estimation error (T9) and the PH ablation (T10, conditional on Section~1.2).
+  \item \NI{real-data demonstration and a \texttt{spatstat} \texttt{kppm} baseline, both listed as ``must have'' in
+        \src{docs/aistats\_outline.tex}; neither exists in the repo.}
+\end{itemize}
+
+\begin{table*}[t]
+% [TABLE ID: T7] — main results (headline)
+% Columns: Row (overall, structured, per family) | Accuracy / recall (frozen classifier) | Estimator error (frozen) |
+%          Kernel skill: ours (family inferred) | ours (true family) | ours without PH | min. contrast | min. contrast (true family) |
+%          DSS skill (same columns) | paired differences with 95% intervals
+% Data source: oneshot/results/default/evaluation/heldout_mincontrast/{summary.md, report.json} (variants: classical, ph,
+%              mincontrast, oracle_ph, oracle_mincontrast); oneshot/results/default/compare/summary.md;
+%              oneshot/results/default/mincontrast/summary.md. PARTIAL — exists, but the headline pipeline must be fixed
+%              first ("ph" in heldout_mincontrast vs "best" in evaluation/heldout).
+\caption{[PLACEHOLDER — Main results: classification, parameter error and end-to-end fidelity of the pipeline against
+classical and oracle baselines.]}
+\label{tab:main}
+\end{table*}
+
+\begin{figure*}[t]
+% [FIGURE ID: F5] — main results figure ("the CSR wall")
+% Plot type: 3 panels per family against the regime coordinate u, one curve per model:
+%            (a) detection rate, all classifiers; (b) estimator error, all estimators; (c) oracle gain over CSR.
+% Data: oneshot/results/default/classify/*/predictions.npz, oneshot/results/default/estimate/*/*/predictions.npz,
+%       oneshot/results/default/evaluation/*/clouds.csv, compare/cutoffs.json.
+% Data source: NOT FOUND as a figure (docs/aistats_outline.tex: "to be made") — new plotting from stored predictions.
+\vspace{.3in}
+\centerline{\fbox{[F5 placeholder: detection, error and gain against the regime coordinate]}}
+\vspace{.3in}
+\caption{[PLACEHOLDER — Main results figure: detection, parameter error and the true model's gain over CSR,
+against each family's regime coordinate.]}
+\label{fig:main}
+\end{figure*}
+
+\begin{table*}[t]
+% [TABLE ID: T9] — parameter estimation error (true family known)
+% Columns (exact, compare/estimators.csv): family | model | val | all | regime 0.5 | regime 0.9 |
+%          per-target: kappa | mu | sigma | mu1 | mu2 | sigma1 | sigma2 | nbar | s | R | lam_p | rho | k
+%          + minimum-contrast columns (mc default, mc tuned, at bound) from mincontrast/summary.md
+% Data source: oneshot/results/default/compare/{estimators.csv, summary.md}; oneshot/results/default/mincontrast/summary.md.
+%              EXISTS. Poisson is excluded (nbar_hat = n, the MLE).
+\caption{[PLACEHOLDER — Parameter-estimation error per family and estimator, overall and in regime, with minimum
+contrast.]}
+\label{tab:estimation}
+\end{table*}
+
+\begin{table}[t]
+% [TABLE ID: T10] — what PH adds (CONDITIONAL on keeping Section 1.2)
+% Columns: Family | Estimator error diff (+PH − classical, 95% CI) | Classifier accuracy diff | End-to-end skill diff
+%          (overall; cell k >= 5)
+% Data source: oneshot/results/default/compare/summary.md ("Difference against hgb_classical" table);
+%              oneshot/results/default/evaluation/heldout_ph_ablation/, heldout_ph_cell/ (summary.md, report.json). EXISTS.
+\caption{[PLACEHOLDER — Paired effect of adding persistent-homology features on estimation, classification and
+end-to-end fidelity.]}
+\label{tab:ph}
+\end{table}
+
+%==============================================================================
+\subsubsection*{References}
+% [NEEDS INPUT: full references. Only works named in the repo's code/docs are listed; details not verified.]
+\begin{thebibliography}{}
+\setlength{\itemindent}{-\leftmargin}
+\makeatletter\renewcommand{\@biblabel}[1]{}\makeatother
+\bibitem{} Adams et al.\ (2017). Persistence images. \NI{full reference}
+\bibitem{} Anai et al.\ (2020). DTM-based filtrations. \NI{full reference}
+\bibitem{} Carri\`ere et al.\ (2020). PersLay. AISTATS. \NI{full reference}
+\bibitem{} Diggle (1983). Minimum contrast. \NI{full reference}
+\bibitem{} Myllym\"aki et al.\ (2017). Global envelope tests. \NI{full reference}
+\bibitem{} Vihrs et al.\ (2022). Neural summaries for point processes. \NI{full reference}
+\bibitem{} Waagepetersen and Guan (2009). \emph{JRSS-B} 71(3). \NI{full reference}
+\end{thebibliography}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section*{Checklist}
+
+\begin{enumerate}
+
+  \item For all models and algorithms presented, check if you include:
+  \begin{enumerate}
+    \item A clear description of the mathematical setting, assumptions, algorithm, and/or model. \TBD{}
+    \item An analysis of the properties and complexity (time, space, sample size) of any algorithm. \TBD{}
+    \item (Optional) Anonymized source code, with specification of all dependencies, including external libraries. \TBD{}
+  \end{enumerate}
+
+  \item For any theoretical claim, check if you include:
+  \begin{enumerate}
+    \item Statements of the full set of assumptions of all theoretical results. \TBD{}
+    \item Complete proofs of all theoretical results. \TBD{}
+    \item Clear explanations of any assumptions. \TBD{}
+  \end{enumerate}
+
+  \item For all figures and tables that present empirical results, check if you include:
+  \begin{enumerate}
+    \item The code, data, and instructions needed to reproduce the main experimental results (either in the supplemental material or as a URL). \TBD{}
+    \item All the training details (e.g., data splits, hyperparameters, how they were chosen). \TBD{}
+    \item A clear definition of the specific measure or statistics and error bars (e.g., with respect to the random seed after running experiments multiple times). \TBD{}
+    \item A description of the computing infrastructure used. (e.g., type of GPUs, internal cluster, or cloud provider). \TBD{GPU model not recorded}
+  \end{enumerate}
+
+  \item If you are using existing assets (e.g., code, data, models) or curating/releasing new assets, check if you include:
+  \begin{enumerate}
+    \item Citations of the creator If your work uses existing assets. \TBD{}
+    \item The license information of the assets, if applicable. \TBD{}
+    \item New assets either in the supplemental material or as a URL, if applicable. \TBD{}
+    \item Information about consent from data providers/curators. \TBD{}
+    \item Discussion of sensible content if applicable, e.g., personally identifiable information or offensive content. \TBD{}
+  \end{enumerate}
+
+  \item If you used crowdsourcing or conducted research with human subjects, check if you include:
+  \begin{enumerate}
+    \item The full text of instructions given to participants and screenshots. \TBD{}
+    \item Descriptions of potential participant risks, with links to Institutional Review Board (IRB) approvals if applicable. \TBD{}
+    \item The estimated hourly wage paid to participants and the total amount spent on participant compensation. \TBD{}
+  \end{enumerate}
+
+\end{enumerate}
+
+\end{document}

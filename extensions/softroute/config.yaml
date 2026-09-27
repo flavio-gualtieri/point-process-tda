@@ -1,0 +1,30 @@
+# Soft routing: simulate from the classifier's mixture over families instead of its argmax family.
+# Scored with the paper's kernel score, on the paper's own evaluation clouds. extensions/softroute/softroute.py.
+name: default
+
+# The pipeline behind the paper's skill 0.93 (oneshot/results/default/evaluation/heldout/report.json),
+# frozen here: compare/report.json's `best` has since moved to the newer models.
+classifier: hgb_classical_ph
+estimators: {thomas: nn_curves, nested: nn_curves, lgcp: hgb_classical_ph, matern2: hgb_classical_ph,
+             ring: hgb_classical_ph, matern1: nn_curves, cell: hgb_classical_ph}
+
+# Clouds = the fit replicates of existing paper evaluations (their clouds.csv), scored on the partner
+# replicate as there. `paper`: the headline 480 (stratified by regime); `strong`: the 1080 in the
+# strong-signal strata, where gain is resolved and 357 are misassigned.
+clouds:
+  paper: evaluation/heldout
+  strong: evaluation/heldout_ph_ablation
+
+# Mixture weights scored per cloud; every one is scored from the same simulations of each family.
+#   hard       argmax (the paper's pipeline)        soft      w = P(f | x)
+#   temp_T     w ~ P(f | x)^(1/T)                   top2      the two largest, renormalised
+#   true       one-hot on the true family, with its estimate: perfect routing, the ceiling
+#   uniform    1/8 on every family's fit: no classifier at all
+temperatures: [0.5, 2.0, 4.0]
+
+# The paper's kernel settings (oneshot/configs/default.yaml evaluation.kernel), verbatim. DSS is left
+# out: it is at 0.99 skill for every pipeline in the paper run and cannot separate them.
+kernel: {R: 1.5, kind: point, h: 0.1, grid: 21, centres: 300, pool: 1000, sims: 16, tau_mult: "1.0"}
+skill_min_z: 2
+bootstrap: 2000
+seed: 0
