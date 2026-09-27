@@ -13,9 +13,11 @@ Estimator. For family f with free parameters x (log scale, intensity fixed at n 
 K_hat is cloudforger.classical.lfunction.k_function (isotropic edge correction, the estimator the
 classical features use); K_f = pi r^2 + Family.excess, the closed forms the bank's generator is built
 on, so the baseline fits the exact model that simulated the data. The search box is the family's
-train-prior range, starts are the best `starts` of `init` train-prior draws, then bounded
-Nelder-Mead; estimates are clipped to the train targets' range. Learned estimators get the same
-information: they train on those draws and are clipped the same way. Cell has K = pi r^2, so K
+train-prior range on the FREE parameters, starts are the best `starts` of `init` train-prior draws,
+then bounded Nelder-Mead. Learned estimators get the same information: they train on those draws and
+are clipped to their range. The dependent parameters (mu = n / kappa, ...) are NOT clipped: clipping
+them independently breaks the fit's intensity = n (a nested mu2 clipped up to 1 once implied 2800
+points for a cloud of a few hundred) and leaves a theta the sampler cannot realise. Cell has K = pi r^2, so K
 carries nothing about k: its estimate is nbar = n and k = the train median of k (error ~ its s.d.).
 
 Selection (the classifier). Every cloud is fitted under every family's model; the call is
@@ -281,12 +283,8 @@ def cmd_assemble(cfg: dict) -> None:
     sd_all = {f: np.log(r[(r.split == "test") & (r.family == f)][TARGETS[f]].to_numpy(float)).std(0) for f in fams}
     vsd = {f: np.log(r[(r.split == "val") & (r.family == f)][TARGETS[f]].to_numpy(float)).std(0) for f in fams}
     Y = {f: np.log(info[TARGETS[f]].to_numpy(float)) for f in fams if f != "poisson"}
-    clip = {f: (np.log(r[(r.split == "train") & (r.family == f)][TARGETS[f]].to_numpy(float)).min(0),
-                np.log(r[(r.split == "train") & (r.family == f)][TARGETS[f]].to_numpy(float)).max(0)) for f in MODELS}
-
     def est(f, s):
-        lg = np.log(fits[f]["theta"][:, s])
-        return np.clip(lg, *clip[f]) if cfg["clip_to_train_range"] else lg
+        return np.log(fits[f]["theta"][:, s])           # free parameters box-bounded; see the module doc
 
     # ---- estimator tuning: per family, the setting with the lowest val error on its own clouds
     tune, chosen = [], {}
@@ -380,7 +378,7 @@ def cmd_assemble(cfg: dict) -> None:
         report["estimators"][f] = {"default": e_d, "tuned": e_t, **cells, "diff_ci": [lo, hi]}
 
     L += ["", "By regime (tuned mc vs hgb_classical_ph; in regime = compare's frozen cutoffs, τ = 0.5 / 0.9):", "",
-          "| family | subset | n | mc tuned | hgb_classical_ph |", "|---|---|---|---|---|"]
+          "| family | subset | n | mc tuned | mc at bound | hgb_classical_ph |", "|---|---|---|---|---|---|"]
     for f in MODELS:
         own = test & (family == f)
         sub = info[own]
@@ -392,7 +390,7 @@ def cmd_assemble(cfg: dict) -> None:
                         ("in regime 0.5", in_regime(cuts, sub, 0.5)), ("in regime 0.9", in_regime(cuts, sub, 0.9))]:
             if m.sum() >= 20:
                 L.append(f"| {f} | {name} | {m.sum()} | {err(est(f, chosen[f])[own][m], Y[f][own][m], sd_all[f]):.3f} | "
-                         f"{err(ref[m], Y[f][own][m], sd_all[f]):.3f} |")
+                         f"{fits[f]['at_bound'][own, chosen[f]][m].mean():.2f} | {err(ref[m], Y[f][own][m], sd_all[f]):.3f} |")
 
     L += ["", "## Selection (the classical pipeline's classifier)", "",
           f"Tuned on val: c {setts[s_sel][0]}, r_max {setts[s_sel][1]}, λ {lam}; default: c {setts[dflt][0]}, "

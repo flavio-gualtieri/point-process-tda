@@ -139,13 +139,19 @@ def summarize(df: pd.DataFrame, scores: list[str], min_z: float) -> dict:
         return float(v.std(ddof=1) / np.sqrt(len(v))) if len(v) > 1 else float("inf")
 
     def cell(g):
-        out = {"n": int(len(g))}
+        # a fit the sampler could not realise falls back to CSR: its regret is the cloud's gain, so every
+        # pipeline stays scored on the same clouds; skill_ok is the skill over realisable fits alone
+        failed = g["failed"].to_numpy(bool) if "failed" in g else np.zeros(len(g), bool)
+        out = {"n": int(len(g)), "failed": int(failed.sum())}
         for s in scores:
-            reg, gain = g[f"{s}_regret"], g[f"{s}_gain"]
+            gain = g[f"{s}_gain"]
+            reg = g[f"{s}_regret"].where(~failed, gain)
             resolved = gain.mean() > min_z * se(gain)
+            ok = ~failed
             out[s] = {"regret": float(reg.mean()), "regret_se": se(reg), "gain": float(gain.mean()),
                       "gain_se": se(gain), "skill": float(1 - reg.sum() / gain.sum()) if resolved else None,
-                      "fit_beats_csr": float((g[f"{s}_fit"] < g[f"{s}_csr"]).mean())}
+                      "skill_ok": float(1 - reg[ok].sum() / gain[ok].sum()) if resolved and ok.any() else None,
+                      "fit_beats_csr": float((g[f"{s}_fit"][ok] < g[f"{s}_csr"][ok]).mean()) if ok.any() else None}
         return out
 
     out = {}
@@ -165,7 +171,8 @@ def summarize(df: pd.DataFrame, scores: list[str], min_z: float) -> dict:
 def fmt(c: dict, s: str) -> str:
     v = c[s]
     skill = "—" if v["skill"] is None else f"{v['skill']:.2f}"
-    return f"{skill} (regret {v['regret']:+.2g} ± {v['regret_se']:.1g})"
+    failed = f", {c['failed']} failed" if c.get("failed") else ""
+    return f"{skill} (regret {v['regret']:+.2g} ± {v['regret_se']:.1g}{failed})"
 
 
 def render(rep: dict, cfg: dict, score_on: str, scores: list[str], families: list[str]) -> str:
@@ -174,7 +181,8 @@ def render(rep: dict, cfg: dict, score_on: str, scores: list[str], families: lis
          "Skill = 1 − Σregret / Σgain: 1 = as good as the true model, 0 = no better than CSR; shown only "
          "where the gain (true model vs CSR) is resolved. Regret = S(fit) − S(true), ≥ 0 in expectation. "
          + ("Fits come from replicate 0 and are scored on the independent replicate 1."
-            if score_on == "heldout" else "Fits are scored on the pattern they were estimated from."), ""]
+            if score_on == "heldout" else "Fits are scored on the pattern they were estimated from.")
+         + " A fit the sampler cannot realise (\"failed\") is scored as CSR, regret = gain.", ""]
     for s in scores:
         L += [f"## {s} score", "", "| | " + " | ".join(variants) + " |", "|---|" + "---|" * len(variants)]
         L.append("| overall | " + " | ".join(fmt(rep[v]["overall"], s) for v in variants) + " |")

@@ -117,12 +117,20 @@ def score_cloud(job: dict) -> list[dict]:
         # from another replicate (nbar_hat = its n) is a model of its own
         key = fit_key(v["family_hat"], v["theta_hat"])
         if key not in S:
-            S[key] = score(key, v["family_hat"], sampler_kwargs(v["family_hat"], v["theta_hat"]))
+            # a fit the sampler cannot realise (no pattern with n in the bank's range, or an LGCP
+            # covariance the embedding rejects) is a result about the estimator: recorded, not raised
+            try:
+                S[key] = score(key, v["family_hat"], sampler_kwargs(v["family_hat"], v["theta_hat"]))
+            except (RuntimeError, ValueError) as e:
+                S[key] = str(e)
+        failed = isinstance(S[key], str)
         row = {"case_id": cid, "variant": v["variant"], "family_hat": v["family_hat"],
-               "ended": "poisson" if v["family_hat"] == "poisson" else "family"}
+               "ended": "poisson" if v["family_hat"] == "poisson" else "family",
+               "failed": failed, "fail_reason": S[key] if failed else ""}
         for s in S["oracle"]:
-            row |= {f"{s}_fit": S[key][s], f"{s}_oracle": S["oracle"][s], f"{s}_csr": S[csr_key][s],
-                    f"{s}_regret": S[key][s] - S["oracle"][s], f"{s}_gain": S[csr_key][s] - S["oracle"][s]}
+            fit = np.nan if failed else S[key][s]
+            row |= {f"{s}_fit": fit, f"{s}_oracle": S["oracle"][s], f"{s}_csr": S[csr_key][s],
+                    f"{s}_regret": fit - S["oracle"][s], f"{s}_gain": S[csr_key][s] - S["oracle"][s]}
         rows.append(row)
     return rows
 

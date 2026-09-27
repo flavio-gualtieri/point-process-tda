@@ -130,36 +130,3 @@ evaluation:
         ph: {classifier: hgb_classical_ph, estimators: hgb_classical_ph}
         ph_estimators: {classifier: hgb_classical, estimators: hgb_classical_ph}
       clouds: {per_bin: 120, strata: [above 0.9, k 2-2, k 3-4, k 5-30], poisson: 0, seed: 1}
-    # ph_ablation's one suggestive cell: cell k >= 5 (skill 0.87 -> 0.96 with PH, interval across 0 at
-    # n = 120). Only that stratum resolves gain; ~1000 clouds for the difference at 2 s.e. Fresh seed.
-    ph_cell:
-      pipelines:
-        classical: {classifier: hgb_classical, estimators: hgb_classical}
-        ph: {classifier: hgb_classical_ph, estimators: hgb_classical_ph}
-        ph_estimators: {classifier: hgb_classical, estimators: hgb_classical_ph}
-      clouds: {per_bin: 1000, strata: [k 5-30], poisson: 0, seed: 2}
-    # The classical baseline end to end, on the headline evaluation's clouds. `oracle` routes every
-    # cloud to its true family, so oracle_* compare the parameter estimates alone.
-    mincontrast:
-      pipelines:
-        classical: {classifier: hgb_classical, estimators: hgb_classical}
-        ph: {classifier: hgb_classical_ph, estimators: hgb_classical_ph}
-        mincontrast: {classifier: mincontrast, estimators: mincontrast}
-        oracle_ph: {classifier: oracle, estimators: hgb_classical_ph}
-        oracle_mincontrast: {classifier: oracle, estimators: mincontrast}
-
-# ----------------------------------------------------------------------------------- mincontrast
-# Classical baseline (oneshot/mincontrast.py): minimum contrast on Ripley's K against each family's
-# closed-form K, and a selection by penalised contrast. Writes the units classify/mincontrast,
-# classify/oracle and estimate/<f>/mincontrast. Knobs are tuned on val, as the learned models' early
-# stopping and `best` are; the textbook `default` is reported beside the tuned one.
-mincontrast:
-  c: [0.25, 0.5]                  # contrast exponent (Diggle 1983: 1/4 for clustering, 1/2 for regularity)
-  r_max: [0.0625, 0.125, 0.25]    # upper radius; 0.25 = a quarter of the side, spatstat's default
-  lambdas: [0, 0.003, 0.01, 0.016, 0.03, 0.1, 0.3, 1, 3]   # selection penalty per free parameter, on log D
-  default: {c: 0.25, r_max: 0.25, lambda: 0.016}           # lambda 0.016 = AIC's 2p over 128 radii
-  radii_step: 4                   # every 4th radius of the 512-point K grid (128 radii at r_max 0.25)
-  init: 64                        # train-prior draws the contrast is evaluated at ...
-  starts: 2                       # ... the best of which start bounded Nelder-Mead
-  chunks: 16                      # fit array = 6 models x chunks
-  seed: 0
