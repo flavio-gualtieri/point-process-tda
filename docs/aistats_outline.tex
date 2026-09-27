@@ -10,9 +10,9 @@
 \newcommand{\pending}[1]{\textcolor{red}{[#1]}}
 \newcommand{\src}[1]{{\footnotesize\texttt{#1}}}
 
-\title{Wrong Family, Right Pattern:\\[2pt]
-\large Fidelity-Based Model Fitting for Spatial Point Processes Near Complete Spatial Randomness}
-\author{Draft for co-authors --- AISTATS submission plan}
+\title{Wrong Family, Right Fit\\[2pt]
+\large High-Fidelity Parameter Fitting for Spatial Point Processes Near Complete Spatial Randomness}
+\author{AISTATS submission plan}
 \date{}
 
 \begin{document}
@@ -20,56 +20,38 @@
 \thispagestyle{empty}
 
 %==============================================================================
-\section*{Abstract (draft)}
+\section*{Abstract [DRAFT]}
 
-Fitting a spatial point-process model to a single observed pattern is usually judged by whether the
-fitted family and parameters match the truth. Near complete spatial randomness (CSR), where distinct
-models generate patterns that cannot be told apart, this is the wrong target. We propose instead to
-judge a fit by whether it \emph{reproduces the pattern}: patterns simulated from the fit are compared
-with an independent replicate by a strictly proper kernel score on local configurations, normalised
-between the true model and CSR. Under this criterion we study amortized model selection and parameter
-inference over eight families (cluster, Cox, hard-core and lattice-like processes). A single
-classifier whose Poisson probability serves as the CSR filter is followed by one parameter estimator
-per family, which is exactly how the joint posterior over family and parameters factorises. We find
-three things.
-(i)~Near CSR, identifiability is a property of the data rather than the model. Eleven classifiers,
-spanning gradient-boosted trees, linear models and neural networks on summary functions and
-persistent-homology features, reach the same accuracy (the best four within $0.002$; combining all
-eleven adds $0.001$) and lose detection as one physical coordinate approaches its CSR limit. The remaining
-errors are confusions with CSR or between families that coincide over part of their parameter space. At that limit the proper score cannot distinguish
-the true model from CSR either.
-(ii)~Family accuracy understates fidelity. The pipeline names the generating family for $53\%$ of
-patterns, yet reproduces held-out replicates with a skill of $0.92$, and telling it the true family
-would raise this by only $0.01$ (interval includes $0$). Minimum-contrast fitting, the standard
-classical method, reaches $0.84$ even when it is given the true family.
-(iii)~Topological features never make parameter estimates worse, and help where second-order
-statistics are blind by construction: for a process whose $K$-function equals Poisson's they cut
-parameter error by $15\%$ and raise skill from $0.92$ to $1.00$.
-We also report two negative results. An optimal-transport score between whole patterns lacks the
-power to tell the true model from CSR. Restricting training to the identifiable regime lowers error
-within that regime, but the gain is lost once a pattern's regime has to be inferred from the pattern
-itself.
+The quality of an SPP fit is typically assessed by distance between inferred and true generating process parameters. Existing methods - such as minimum contrast - require prior knowledge of the underlying family, and their performance degrades near complete spatial randomness (CSR): despite the generating process not being Poisson, its second-order structure (e.g. $K$-function) is almost indistinguishable from Poisson's. This is an inherent property of the problem, not a failure of methodology.
+
+Instead, we evaluate a fit by generating simulations from the predicted parameters and scoring their fidelity to an independent held-out replicate, using a strictly proper scoring rule on local configurations, normalized between a Poisson (CSR) model (0) and the true model (1).
+
+We propose a two-stage pipeline: a classifier determines the family, followed by family-specific parameter estimators. The first stage acts as a filter, routing near-CSR to the Poisson estimator.
+
+Near CSR, patterns become inherently difficult to classify: a diverse set of classifiers (gradient-boosted trees, linear models, neural networks) over two feature types (summary functions, topological features) converge to similar accuracy, which degrades as a family's parameters approach the CSR limit.
+
+Reproduction fidelity is $0.92$, despite the classifier only achieving $53\%$ accuracy.  
+
+The inclusion of topological features never hurts parameter estimation, and helps substantially where second-order statistics are blind by construction: for the cell process they cut estimation error by $15\%$ and raise fidelity from $0.92$ to $1.00$.
 
 \vfill
 {\footnotesize
-\textbf{Frozen model.} Classifier and every estimator are gradient-boosted trees on classical $+$ PH
-(alpha, DTM$_{10}$) summaries (\texttt{hgb\_classical\_ph}); Poisson gets $\hat{\nb}=n$. Every headline number is this
-model. \textbf{Numbers of record} (fixed test split). Accuracy: \src{oneshot/results/default/compare/summary.md}.
-Skill $0.92$, oracle-family $0.94$ (paired $+0.013$ $[-0.006,0.037]$), minimum contrast $0.84$ / $0.84$ with true family
-(paired vs ours $+0.080$ $[0.029,0.151]$ / $[0.007,0.187]$): \src{evaluation/heldout\_mincontrast} (480 clouds,
-stratified by regime, held-out replicate; cloud bootstrap). Cell: error $0.142\to0.120$ (\src{compare}); skill $0.92\to1.00$,
-paired $+0.082$ $[0.030,0.133]$ (\src{evaluation/heldout\_ph\_cell}, 1000 clouds, $k\ge5$).}
+\textbf{Numbers of record} (all on the fixed test split, $\theta$-bootstrap intervals). Accuracy:
+\src{oneshot/results/default/compare/summary.md}. Skill $0.93$: \src{evaluation/heldout} (480 clouds,
+stratified by regime). Wrong-family skill: \src{evaluation/heldout\_ph\_ablation} (1080 clouds in the
+strong-signal strata; 357 misassigned). Cell error $0.142\to0.120$ (classical$+$PH) and $0.117$ (all six filtrations).}
 
 \newpage
 %==============================================================================
-\section*{The one-line pitch}
+\section*{The Story [INFORMAL]}
 
-Judged by label accuracy, amortized point-process fitting looks weak ($0.53$ on 8 families). Judged by
-whether the fit reproduces the pattern, it is strong ($0.92$). The gap is not a failure of the method. It is
-a measurable identifiability limit near CSR, and the paper's job is to show it is a property of the data.
+\begin{itemize}
+    \item All models struggle with classification/inference on clouds near CSR. Unless you cherry-pick your prior (bad), you will have to deal with a large number of near-CSR clouds. Bad performance on these near-CSR clouds is not a failure of the models, it's an inherent property of the problem. 
 
-\textbf{What we do not lead with.} ``A realization engine'' (reads as a tool paper), and persistent homology
-(its gains are real but small; it is a supporting result, not the headline).
+    \item The pitch: we show that, despite this difficulty, classifiers successfully tell us which generating process is "good enough" for inference.
+
+    \item Classification accuracy on the 8 processes seems week ($0.53$), but the final fidelity score - i.e. how well the inferred parameters reproduce the pattern - is high ($0.93$).
+\end{itemize}
 
 %==============================================================================
 \section*{Contributions}
@@ -101,7 +83,7 @@ a measurable identifiability limit near CSR, and the paper's job is to show it i
 \toprule
 section & pages & content, key display \\
 \midrule
-1 Introduction & 1.0 & Hook: accuracy $0.53$ vs skill $0.92$. Why accuracy is the wrong target near CSR. Contributions.
+1 Introduction & 1.0 & Hook: accuracy $0.53$ vs skill $0.93$. Why accuracy is the wrong target near CSR. Contributions.
   \textbf{Fig.~1} (the CSR wall, below). \\
 2 Setting and score & 1.25 & Families table (8 families, parameters, regime coordinate). Bank: 50\,000 $\theta$ $\times$ 2
   replicates per family, $\nb\in[75,950]$, split by $\theta$. Kernel score, anchors, skill; Dawid--Sebastiani
@@ -150,130 +132,23 @@ Low Thomas recall is a trade, not a defect & parsimony prior: Thomas recall $0.1
 Thomas error sits on the $\kappa$--$\mu$ ridge & $\kappa$, $\mu$: $0.79$ each; $\nb=\kappa\mu$: $0.20$--$0.30$;
   $\omega=\sigma\sqrt\kappa$: $0.49$; $\sigma$: $0.54$ & done \\
 Accuracy rises in regime & best $0.535$ all $\to0.652$ at $\tau=0.9$ & done \\
-Fidelity & frozen model $0.92$; trees on classical only $0.91$ (paired $+0.016$ $[-0.017,0.055]$); held-out replicate & done \\
-Wrong family, right pattern & oracle family $0.94$ vs inferred $0.92$: paired $+0.013$ $[-0.006,0.037]$.
-  Misassigned vs identified (1080 strong-signal clouds): $0.91$ $[0.85,0.98]$ vs $0.95$ & done \\
+Fidelity & kernel skill $0.93$ (best) / $0.91$ (classical), held-out replicate & done \\
+Wrong family, right pattern & misassigned $0.95$ vs identified $0.94$ (1080 strong-signal clouds);
+  $0.74$ vs $0.96$ over all strata & done \\
 Routing to Poisson is free & gain $+5{\times}10^{-5}\pm5{\times}10^{-5}$ on 102 misrouted structured clouds & done \\
 Flat beats hierarchical & $-0.054\ [-0.062,-0.046]$ family accuracy & done (7 families, pilot) \\
 Regime coordinate explains detection & explained $0.965$--$0.992$ (original four families) & done; \pending{refit for 8} \\
 Score has power & $d'$ table above & done; \pending{write-up in \src{cascade/scoring/scores.tex}} \\
 PH never hurts estimates & all 7 paired intervals $\le0$ or containing $0$ & done \\
 PH helps where $K$ is blind & cell $0.142\to0.120$ / $0.117$; ring $0.648\to0.642$ ($0.518\to0.498$ at $\tau=0.9$) & done \\
-PH end to end & null overall ($+0.016$ $[-0.017,0.055]$); cell ($k\ge5$, 1000 clouds) $0.92\to1.00$,
-  $+0.082$ $[0.030,0.133]$; DSS agrees ($+0.005$ $[0.003,0.008]$) & done \\
+PH end to end & skill $0.94$ with and without; cell $0.87\to0.96$, interval includes $0$ & null overall;
+  \pending{cell-only run, 1000 clouds, \src{evaluation/heldout\_ph\_cell}} \\
 Training filter & in-regime gain up to $0.055$; estimated-$\theta$ gate: no gain & done; \pending{archive script} \\
-Beats classical estimation & minimum contrast on $K$ (tuned $c$, $r_{\max}$): error $2.2\times$--$4.6\times$ ours on
-  Thomas, nested, ring, cell; selection accuracy $0.33$ vs $0.53$; end-to-end skill $0.84$ vs $0.92$, paired $+0.080$ $[0.029,0.151]$;
-  given the true family still $0.84$ & done \\
+Beats classical estimation & --- & \pending{missing} \\
 Works on real data & --- & \pending{missing} \\
 \bottomrule
 \end{tabularx}
 }
-
-%==============================================================================
-\newpage
-\section*{Key tables (draft, frozen model)}
-
-\textbf{Tab.~A --- Fidelity (headline).} Kernel skill on held-out replicates, 480 test patterns (60 per family,
-stratified by regime); $1=$ as good as the true model, $0=$ no better than CSR. Per-family cells rest on the 20 resolved
-patterns and are wide; read the overall row. ``--'': gain not resolved (Mat\'ern~I). MC = minimum contrast on $K$.
-\src{evaluation/heldout\_mincontrast}
-
-\smallskip
-{\small
-\begin{tabular}{@{}lccccc@{}}
-\toprule
- & \multicolumn{2}{c}{family inferred} & \multicolumn{2}{c}{true family given} & \\
-\cmidrule(r){2-3}\cmidrule(lr){4-5}
- & MC & \textbf{ours} & MC & ours & ours, no PH \\
-\midrule
-overall (kernel) & 0.84 & \textbf{0.92} & 0.84 & 0.94 & 0.91 \\
-overall (DSS)    & 0.89 & \textbf{0.99} & 0.88 & 0.99 & 0.99 \\
-\addlinespace
-Thomas       & 0.60 & 0.76 & 0.13 & 0.82 & 0.64 \\
-nested       & 0.93 & 0.96 & 0.93 & 0.96 & 0.93 \\
-LGCP         & 0.91 & 0.95 & 0.96 & 0.93 & 0.98 \\
-Mat\'ern II  & 0.42 & 0.87 & 0.72 & 0.82 & 0.73 \\
-ring         & 0.95 & 0.93 & 0.93 & 0.95 & 0.98 \\
-Mat\'ern I   & --   & --   & --   & --   & --   \\
-cell         & $-0.30$ & 0.88 & 0.21 & 0.91 & 0.63 \\
-\bottomrule
-\end{tabular}
-}
-
-Paired (cloud bootstrap): ours $-$ MC $+0.080$ $[0.029,0.151]$; ours $-$ MC given the family $+0.080$ $[0.007,0.187]$;
-true family given $-$ ours $+0.013$ $[-0.006,0.037]$; ours $-$ no PH $+0.016$ $[-0.017,0.055]$.
-
-\bigskip
-\textbf{Tab.~B --- Classification and the CSR wall.} Balanced accuracy, 8 families (chance $0.125$), 192\,000 test patterns;
-``in regime'' = frozen cutoff on $\theta$ at detection probability $\tau$. \src{compare/summary.md}, \src{mincontrast/summary.md}
-
-\smallskip
-{\small
-\begin{tabular}{@{}llccc@{}}
-\toprule
-learner & input & all & $\tau=0.5$ & $\tau=0.9$ \\
-\midrule
-trees & classical $+$ PH (6 filtrations) & 0.535 & 0.578 & 0.646 \\
-\textbf{trees} & \textbf{classical $+$ PH (alpha, DTM$_{10}$)} & \textbf{0.534} & \textbf{0.577} & \textbf{0.646} \\
-CNN & curves $+$ PH (alpha) & 0.533 & 0.577 & 0.652 \\
-CNN & curves $L,F,G,J$ & 0.533 & 0.575 & 0.647 \\
-trees & classical & 0.529 & 0.572 & 0.640 \\
-trees & PH & 0.515 & 0.556 & 0.626 \\
-PersLay & DTM$_{10}$ & 0.510 & 0.549 & 0.618 \\
-PersLay & alpha & 0.503 & 0.542 & 0.615 \\
-CNN & persistence image (alpha) & 0.493 & 0.533 & 0.608 \\
-linear & classical & 0.491 & 0.530 & 0.587 \\
-CNN & persistence image (Rips) & 0.488 & 0.527 & 0.602 \\
-\addlinespace
-MC & $K$, penalised contrast & 0.329 & & \\
-\bottomrule
-\end{tabular}
-}
-
-\bigskip
-\textbf{Tab.~C --- Parameter estimation, true family known.} RMSE of $\log\theta$ / prior s.d., mean over a family's
-parameters; lower is better. \src{compare/summary.md}, \src{mincontrast/summary.md}
-
-\smallskip
-{\small
-\begin{tabular}{@{}lcccccc@{}}
-\toprule
- & \multicolumn{3}{c}{all test patterns} & \multicolumn{3}{c}{in regime, $\tau=0.9$} \\
-\cmidrule(r){2-4}\cmidrule(l){5-7}
- & MC & classical & \textbf{$+$PH} & MC & classical & \textbf{$+$PH} \\
-\midrule
-Thomas      & 1.619 & 0.707 & 0.706 & 0.642 & 0.450 & 0.447 \\
-nested      & 1.670 & 0.628 & 0.624 & 1.320 & 0.559 & 0.553 \\
-LGCP        & 0.652 & 0.436 & 0.436 & 0.392 & 0.330 & 0.330 \\
-Mat\'ern II & 0.153 & 0.131 & 0.130 & 0.111 & 0.108 & 0.107 \\
-ring        & 1.417 & 0.648 & 0.642 & 0.876 & 0.518 & 0.498 \\
-Mat\'ern I  & 0.189 & 0.157 & 0.156 & 0.136 & 0.131 & 0.128 \\
-cell        & 0.547 & 0.142 & 0.120 & --    & 0.142 & 0.120 \\
-\bottomrule
-\end{tabular}
-}
-
-Classical and $+$PH are the same trees; the column pair is the PH ablation. Best other estimator per family is within
-$0.02$ of $+$PH (appendix). Poisson: $\hat{\nb}=n$, the MLE, error at the $1/\sqrt{\nb}$ floor.
-
-\bigskip
-\textbf{Tab.~D --- What PH adds.} Paired differences, $+$PH minus classical (negative = PH better for error, positive
-= better for skill).
-
-\smallskip
-{\small
-\begin{tabular}{@{}lccccccc@{}}
-\toprule
- & Thomas & nested & LGCP & Mat\'ern II & ring & Mat\'ern I & cell \\
-\midrule
-estimator error & $-.001$ & $-.004^\ast$ & $.000$ & $-.001^\ast$ & $-.007^\ast$ & $-.001^\ast$ & $-.021^\ast$ \\
-\bottomrule
-\end{tabular}
-}
-
-$^\ast$ 95\% interval excludes $0$; no interval is above $0$. End to end: cell ($k\ge5$, 1000 patterns) skill
-$0.92\to1.00$, $+0.082$ $[0.030,0.133]$; overall $+0.016$ $[-0.017,0.055]$. Classifier accuracy $+0.005$ $[0.003,0.006]$.
 
 %==============================================================================
 \section*{Presenting the weak numbers}
