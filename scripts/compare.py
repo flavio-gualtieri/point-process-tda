@@ -93,7 +93,7 @@ def main(argv=None) -> None:
     cfg = load_config(args.config)
     cc, taus, fams = cfg["compare"], cfg["regime"]["taus"], cfg["families"]
     out_dir = run_dir(cfg, "compare")
-    save_config(args.config, out_dir)
+    save_config(cfg, out_dir)
     prior = family_weights(cfg)
 
     r = load_rows(cfg)

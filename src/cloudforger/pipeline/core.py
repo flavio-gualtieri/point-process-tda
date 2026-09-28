@@ -14,7 +14,6 @@ routes to them.
 from __future__ import annotations
 
 import json
-import shutil
 import time
 from pathlib import Path
 
@@ -22,10 +21,9 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from ..paths import BANK, CONFIGS, RESULTS
+from ..paths import BANK, read_config
 from ..simulation.split import split_of
-
-DEFAULT_CONFIG = CONFIGS / "pipeline.yaml"
+from .units import estimated_families, run_dir, unit_dir  # noqa: F401  (re-exported: the scripts' one import)
 
 # The family's own parameters. Poisson has none to learn: nbar_hat = n is the exact MLE.
 TARGETS = {
@@ -47,30 +45,18 @@ def log(msg: str) -> None:
 # ---------------------------------------------------------------------------------------- config
 
 def load_config(path: str | Path | None = None) -> dict:
-    return yaml.safe_load(Path(path or DEFAULT_CONFIG).read_text())
+    """The run's config (default configs/pipeline.yaml), CLOUDFORGER_CONFIGS overrides merged in."""
+    return read_config(path or "pipeline.yaml")
 
 
 def config_arg(parser) -> None:
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="default: %(default)s")
+    parser.add_argument("--config", help="default: configs/pipeline.yaml")
 
 
-def run_dir(cfg: dict, *parts: str) -> Path:
-    return RESULTS.joinpath(cfg["name"], *parts)
-
-
-def unit_dir(cfg: dict, task: str, model: str, family: str | None = None) -> Path:
-    """<results>/<run>/classify/<model>/ or .../estimate/<family>/<model>/."""
-    return run_dir(cfg, task, *([family] if family else []), model)
-
-
-def save_config(cfg_path: str | Path, out: Path) -> None:
+def save_config(cfg: dict, out: Path) -> None:
+    """The config as run (overrides merged in), next to what it produced."""
     out.mkdir(parents=True, exist_ok=True)
-    shutil.copy(cfg_path, out / "config.yaml")
-
-
-def estimated_families(cfg: dict) -> list[str]:
-    """Families with a learned estimator (everything but poisson)."""
-    return [f for f in cfg["families"] if f != "poisson"]
+    (out / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
 
 # ------------------------------------------------------------------------------------------ rows

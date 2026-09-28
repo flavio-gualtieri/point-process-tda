@@ -14,10 +14,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import yaml
 
 from ..departure.tables import Tables
-from .families import CONFIG, FAMILIES, Family, Rules, cv, log_uniform
+from ..paths import read_config
+from .families import FAMILIES, Family, Rules, cv, log_uniform
 from .lgcp_grid import grid_size
 from .processes import SAMPLERS, lgcp_eigenvalues
 from .seeding import PARAMS, PATTERN, case_rng
@@ -34,13 +34,22 @@ class Config:
     n_range: tuple[int, int]
     shard_size: int
     families: tuple[str, ...]
+    stride: int = 1                 # draw every stride-th theta index: a subset of the full bank
 
     @classmethod
-    def load(cls, path: Path = CONFIG) -> Config:
-        c = yaml.safe_load(path.read_text())
+    def load(cls, path: str | Path = "simulation.yaml") -> Config:
+        c = read_config(path)
         pair = lambda d: (d["low"], d["high"])
         return cls(int(c["root"]), pair(c["nbar"]), int(c["thetas"]), int(c["reps"]),
-                   pair(c["n"]), int(c["shard_size"]), tuple(c["families"]))
+                   pair(c["n"]), int(c["shard_size"]), tuple(c["families"]), int(c.get("stride", 1)))
+
+    def indices(self) -> range:
+        """The theta indices drawn. Theta i always comes from its own streams, so a strided bank is
+        bit-for-bit a subset of the full one."""
+        return range(0, self.thetas, self.stride)
+
+    def n_shards(self) -> int:
+        return -(-len(self.indices()) // self.shard_size)
 
 
 def draw_theta(fam: Family, tables: Tables, cfg: Config, index: int, max_tries: int = 1000,
@@ -86,7 +95,7 @@ def run_shard(fam_name: str, shard: int, cfg: Config) -> Path:
     tables = Tables()
     fam = FAMILIES[fam_name](Rules.load())
     points, rows = [], []
-    for index in range(shard * cfg.shard_size, min((shard + 1) * cfg.shard_size, cfg.thetas)):
+    for index in cfg.indices()[shard * cfg.shard_size:(shard + 1) * cfg.shard_size]:
         theta = draw_theta(fam, tables, cfg, index)
         for rep, pts, tries in sample_patterns(fam_name, theta, cfg, index):
             points.append(pts)

@@ -4,13 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import yaml
 
-from ..paths import CONFIGS, DEPARTURE as DATA  # noqa: F401  (DATA is re-exported to simulate.py)
+from ..paths import DEPARTURE as DATA, config_file, read_config  # noqa: F401  (DATA: re-exported)
 
-CONFIG = CONFIGS / "departure.yaml"
-TABLES = CONFIGS / "departure_tables.npz"          # fitted null tables, shipped with the repo
-REPORT = CONFIGS / "departure_report.json"
+TABLES = config_file("departure_tables.npz")       # fitted null tables, shipped with the repo
+REPORT = config_file("departure_report.json")
 
 
 @dataclass(frozen=True)
@@ -37,8 +35,8 @@ class Config:
         return np.append(n[n < self.n_high], self.n_high)
 
 
-def load(path: Path = CONFIG) -> Config:
-    c = yaml.safe_load(path.read_text())
+def load(path: str | Path = "departure.yaml") -> Config:
+    c = read_config(path)
     return Config(
         root=int(c["root"]), n_low=int(c["n"]["low"]), n_high=int(c["n"]["high"]), n_step=float(c["n"]["step"]),
         fit=int(c["reps"]["fit"]), calibrate=int(c["reps"]["calibrate"]), validation=int(c["validation"]),

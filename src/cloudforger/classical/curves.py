@@ -20,13 +20,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
 from ..featurization.sweep import families
-from ..paths import BANK, CONFIGS, CURVES as DATA
+from ..paths import BANK, CURVES as DATA, read_config
 from .functions import GRID_SIZE, NAMES, axis, curves, tag
-
-CONFIG = CONFIGS / "classical.yaml"
 
 __all__ = ["Config", "DATA", "families", "run", "tag"]
 
@@ -37,8 +34,8 @@ class Config:
     f_grid_size: int
 
     @classmethod
-    def load(cls, path: Path = CONFIG) -> Config:
-        c = yaml.safe_load(path.read_text())
+    def load(cls, path: str | Path = "classical.yaml") -> Config:
+        c = read_config(path)
         return cls(tuple(c["grids"]), int(c["f_grid_size"]))
 
     def spec(self, tag_: str) -> dict:

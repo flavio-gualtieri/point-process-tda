@@ -17,13 +17,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import yaml
 from scipy.optimize import brentq
 from scipy.special import chndtr, lambertw
 
-from ..paths import CONFIGS
-
-CONFIG = CONFIGS / "simulation.yaml"
+from ..paths import read_config
 _R = np.linspace(0.0, 1.0, 4001)
 _K = np.arange(1, 81)
 
@@ -49,8 +46,8 @@ class Rules:
     cell_k: tuple[int, int]
 
     @classmethod
-    def load(cls, path: Path = CONFIG) -> Rules:
-        d = yaml.safe_load(path.read_text())["rules"]
+    def load(cls, path: str | Path = "simulation.yaml") -> Rules:
+        d = read_config(path)["rules"]
         return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in d.items()})
 
 

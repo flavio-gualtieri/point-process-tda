@@ -158,7 +158,7 @@ def main(argv=None) -> None:
     s = ev["sets"][args.set_name]
     pipelines, clouds = s["pipelines"], {**ev["clouds"], **s.get("clouds", {})}
     out = run_dir(cfg, "evaluation", args.set_name + (f"_limit{args.limit}" if args.limit else ""))
-    save_config(args.config, out)
+    save_config(cfg, out)
     t0 = time.time()
 
     report = json.loads((run_dir(cfg, "compare") / "report.json").read_text())

@@ -139,3 +139,38 @@ def test_compare_scores_every_unit(run):
     assert set(rep["estimators"]["thomas"]) == set(CONFIG["estimate"])
     assert len(rep["pipelines"]) == 3 * 2                               # classifiers x estimator assignments
     assert (out / "summary.md").read_text().startswith("# Comparison: test")
+
+
+def test_config_overrides_merge_key_by_key():
+    """configs/smoke/*.yaml replace only the keys they name: mappings merge, lists and values replace."""
+    out = subprocess.run([sys.executable, "-c", """
+from cloudforger.paths import read_config
+from cloudforger.simulation.bank import Config
+print(read_config('pipeline.yaml')['name'], Config.load().stride, len(Config.load().indices()))
+"""], env={**os.environ, "CLOUDFORGER_CONFIGS": str(ROOT / "configs" / "smoke")}, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split() == ["smoke", "100", "200"]
+
+    from cloudforger.paths import _merge
+    merged = _merge({"a": {"x": 1, "y": [1, 2]}, "b": 1}, {"a": {"y": [3]}, "c": 2})
+    assert merged == {"a": {"x": 1, "y": [3]}, "b": 1, "c": 2}
+
+
+@pytest.mark.parametrize("overrides", [None, "smoke"])
+def test_plan_sizes_the_arrays_as_the_scripts_do(overrides, tmp_path):
+    """slurm/plan.py counts without the scripts' imports; the counts must be the scripts' own."""
+    env = {**os.environ, "CLOUDFORGER_RESULTS": str(tmp_path)}      # nothing trained: every unit is todo
+    if overrides:
+        env["CLOUDFORGER_CONFIGS"] = str(ROOT / "configs" / overrides)
+
+    def run(*args):
+        out = subprocess.run([sys.executable, *args], env=env, cwd=ROOT, capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
+        return out.stdout
+
+    plan = dict(line.split("=", 1) for line in run("slurm/plan.py").split())
+    assert plan["simulate"] == run("scripts/simulate.py", "tasks").strip()
+    assert plan["mincontrast"] == run("scripts/mincontrast.py", "tasks").strip()
+    for kind in ("cpu", "gpu"):
+        listed = [line.split()[0] for line in run("scripts/train.py", "list", "--kind", kind).splitlines()]
+        assert plan[f"train_{kind}"] == ",".join(listed)

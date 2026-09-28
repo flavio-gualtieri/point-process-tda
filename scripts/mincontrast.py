@@ -4,6 +4,7 @@
 
     python scripts/mincontrast.py clouds                     # cloud set, K-hat, prior boxes, ring table
     python scripts/mincontrast.py fit --task I               # one (model, chunk) unit of the fit array
+    python scripts/mincontrast.py tasks                      # how many fit units there are
     python scripts/mincontrast.py assemble                   # tune on val, write units, summary
 
 Hyperparameters are tuned on the val split, as every learned model's early stopping and `best` are:
@@ -290,17 +291,20 @@ def main(argv=None) -> None:
     f = sub.add_parser("fit")
     f.add_argument("--task", type=int, required=True, help="model * chunks + chunk")
     sub.add_parser("assemble")
+    sub.add_parser("tasks")
     p.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     args = p.parse_args(argv)
     cfg = load_config(args.config)
     global OUT
     OUT = OUT / cfg["name"]
-    if args.cmd == "clouds":
+    if args.cmd == "tasks":
+        print(len(MODELS) * cfg["mincontrast"]["chunks"])
+    elif args.cmd == "clouds":
         cmd_clouds(cfg, args.workers)
     elif args.cmd == "fit":
         cmd_fit(cfg, args.task, args.workers)
     else:
-        save_config(args.config, run_dir(cfg, "mincontrast"))
+        save_config(cfg, run_dir(cfg, "mincontrast"))
         cmd_assemble(cfg)
 
 

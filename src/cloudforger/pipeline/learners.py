@@ -167,13 +167,8 @@ class NN:
         return {"model.pt": self.saved}
 
 
-LEARNERS = {"hgb": HGB, "linear": Linear, "nn": NN}
-GPU = {"nn"}                                                     # learners that need a GPU job
+LEARNERS = {"hgb": HGB, "linear": Linear, "nn": NN}          # units.GPU_LEARNERS says which need a GPU
 
 
 def make(cfg: dict, name: str, rows: pd.DataFrame):
     return LEARNERS[cfg["models"][name]["learner"]](cfg, name, rows)
-
-
-def needs_gpu(cfg: dict, name: str) -> bool:
-    return cfg["models"][name]["learner"] in GPU

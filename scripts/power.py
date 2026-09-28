@@ -33,13 +33,12 @@ import json
 import multiprocessing as mp
 import os
 import time
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yaml
 
-from cloudforger.paths import BANK, CONFIGS, RESULTS
+from cloudforger.paths import BANK, RESULTS, read_config
 from cloudforger.scores import dss, energy
 from cloudforger.scores.kernel import Component
 from cloudforger.scores.simulate import observed, rng_for, simulate, true_model
@@ -125,14 +124,14 @@ def summarize(df: pd.DataFrame, variants: list[str], edges: list[float]) -> dict
 
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--config", default=str(CONFIGS / "scores.yaml"))
+    p.add_argument("--config", default="scores.yaml", help="default: configs/scores.yaml")
     p.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     p.add_argument("--limit", type=int, help="score only the first N clouds (smoke test)")
     args = p.parse_args(argv)
-    cfg = yaml.safe_load(Path(args.config).read_text())
+    cfg = read_config(args.config)
     out = RESULTS / "scores" / cfg["name"]
     out.mkdir(parents=True, exist_ok=True)
-    (out / "config.yaml").write_text(Path(args.config).read_text())
+    (out / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
     c = cfg["clouds"]
     chosen = pick(cfg["families"], c["per_bin"], c["delta_edges"], c["seed"])

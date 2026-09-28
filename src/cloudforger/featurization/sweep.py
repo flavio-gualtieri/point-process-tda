@@ -18,13 +18,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
 from .filtrations import FILTRATIONS, tag
 
-from ..paths import BANK, CONFIGS, DIAGRAMS as DATA
-
-CONFIG = CONFIGS / "featurization.yaml"
+from ..paths import BANK, DIAGRAMS as DATA, read_config
 
 
 @dataclass(frozen=True)
@@ -34,8 +31,8 @@ class Config:
     filtrations: tuple[dict, ...]
 
     @classmethod
-    def load(cls, path: Path = CONFIG) -> Config:
-        c = yaml.safe_load(path.read_text())
+    def load(cls, path: str | Path = "featurization.yaml") -> Config:
+        c = read_config(path)
         return cls(int(c["maxdim"]), int(c["shard_size"]), tuple(c["filtrations"]))
 
     def spec(self, tag_: str) -> dict:
