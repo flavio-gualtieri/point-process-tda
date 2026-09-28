@@ -9,6 +9,8 @@
 \newcommand{\nb}{\bar n}
 \newcommand{\pending}[1]{\textcolor{red}{[#1]}}
 \newcommand{\src}[1]{{\footnotesize\texttt{#1}}}
+% section header row in the claims table
+\newcommand{\claimsec}[2]{\multicolumn{2}{@{}l}{\textcolor{black!60}{\S#1}\enspace\textsc{#2}} \\}
 
 \title{Wrong Family, Right Fit\\[2pt]
 \large High-Fidelity Parameter Fitting for Spatial Point Processes Near Complete Spatial Randomness}
@@ -19,30 +21,21 @@
 \maketitle
 \thispagestyle{empty}
 
-%==============================================================================
+
 \section*{Abstract [DRAFT]}
 
-The quality of an SPP fit is typically assessed by distance between inferred and true generating process parameters. Existing methods - such as minimum contrast - require prior knowledge of the underlying family, and their performance degrades near complete spatial randomness (CSR): despite the generating process not being Poisson, its second-order structure (e.g. $K$-function) is almost indistinguishable from Poisson's. This is an inherent property of the problem, not a failure of methodology.
+Spatial point processes (SPPs) are widely used to model real-world phenomena, and their parameters can be directly related to physical quantities of interest.
 
-Instead, we evaluate a fit by generating simulations from the predicted parameters and scoring their fidelity to an independent held-out replicate, using a strictly proper scoring rule on local configurations, normalized between a Poisson (CSR) model (0) and the true model (1).
+The quality of an SPP fit is typically assessed by the distance between inferred and true generating parameters. Existing methods, such as minimum contrast, require prior knowledge of the underlying family, and their performance degrades near complete spatial randomness (CSR): despite the generating process not being Poisson, its second-order structure is almost indistinguishable from Poisson's. This is an inherent property of the problem, not a failure of methodology.
 
-We propose a two-stage pipeline: a classifier determines the family, followed by family-specific parameter estimators. The first stage acts as a filter, routing near-CSR to the Poisson estimator.
+Often, practitioners simply need high-fidelity replicates of the original clouds. We therefore score a fit by how well realizations generated with the predicted parameters reproduce an independent held-out replicate, using a strictly proper scoring rule on local configurations.
 
-Near CSR, patterns become inherently difficult to classify: a diverse set of classifiers (gradient-boosted trees, linear models, neural networks) over two feature types (summary functions, topological features) converge to similar accuracy, which degrades as a family's parameters approach the CSR limit.
+We propose a two-stage pipeline: a classifier determines the family, followed by family-specific parameter estimators, with the first stage acting as a filter that routes near-CSR patterns to the Poisson estimator. Both stages draw on second-order summary functions and topological features from persistent homology. 
 
-Reproduction fidelity is $0.92$, despite the classifier only achieving $53\%$ accuracy.  
+Near CSR, patterns become inherently difficult to classify regardless of the model used. We show that in these cases naming the correct family matters little: the pipeline generates high-fidelity replicates even though the patterns are often misclassified. Topological features never hurt parameter estimation, and help substantially where second-order statistics are blind by construction (e.g. cell process).
 
-The inclusion of topological features never hurts parameter estimation, and helps substantially where second-order statistics are blind by construction: for the cell process they cut estimation error by $15\%$ and raise fidelity from $0.92$ to $1.00$.
-
-\vfill
-{\footnotesize
-\textbf{Numbers of record} (all on the fixed test split, $\theta$-bootstrap intervals). Accuracy:
-\src{oneshot/results/default/compare/summary.md}. Skill $0.93$: \src{evaluation/heldout} (480 clouds,
-stratified by regime). Wrong-family skill: \src{evaluation/heldout\_ph\_ablation} (1080 clouds in the
-strong-signal strata; 357 misassigned). Cell error $0.142\to0.120$ (classical$+$PH) and $0.117$ (all six filtrations).}
-
-\newpage
 %==============================================================================
+
 \section*{The Story [INFORMAL]}
 
 \begin{itemize}
@@ -50,169 +43,164 @@ strong-signal strata; 357 misassigned). Cell error $0.142\to0.120$ (classical$+$
 
     \item The pitch: we show that, despite this difficulty, classifiers successfully tell us which generating process is "good enough" for inference.
 
-    \item Classification accuracy on the 8 processes seems week ($0.53$), but the final fidelity score - i.e. how well the inferred parameters reproduce the pattern - is high ($0.93$).
-    
-    \item We show that when near-CSR but non-Poisson clouds get routed to Poison inference by the classifier, the 
-    result is still high-fidelity.
+    \item Classification accuracy on the 8 processes seems weak ($0.53$), but the final fidelity score - i.e. how well the inferred parameters reproduce the pattern - is high ($0.92$).
+
+    \item We show that when near-CSR but non-Poisson clouds get routed to Poisson inference, the resulting fit is still high-fidelity.
+
+    \item The classical alternative (minimum contrast on $K$) does worse at every stage: selection, estimation, and end-to-end fidelity.
 \end{itemize}
 
+\newpage
+
 %==============================================================================
+
 \section*{Contributions}
 
 \begin{enumerate}
-  \item \textbf{Scoring.} We evaluate a fit by whether clouds generated from it look like the
-  input data. 
-    \begin{itemize}
-      \item Rescale pattern to unit intensity. Around each of its points, take the neighbouts within 
-      $R=1.5$ mean spacings, giving X configurations\dots
-      \item Embed each configuration as a smoothed density on an $N \times N$ grid with a Gaussian kernel $k$
-        whose width is fixed by the observed pattern $y$,
-        \[
-          S(P,y)=\tfrac12\,\mathbb{E}\,k(\Phi,\Phi')-\tfrac1m\textstyle\sum_i\mathbb{E}\,k(\phi_i,\Phi),
-        \]
-      where $\phi_i$ are $y$'s configurations and $\Phi,\Phi'$ are configurations from independent
+  \item \textbf{Scoring.} We evaluate a fit by whether patterns simulated from it look like a held-out replicate with the same parameters (for each $\theta$ in the cloud bank we generate two realizations, one of which is held-out for scoring).
+  \begin{itemize}
+    \item \emph{General idea.} $P_j = (\hat f, \hat \theta)$ is the fit for cloud $x_j$ and is scored on the independent replicate $y_j$ (produced with the same $\theta$). We also compute scores for two reference models on $y_j$: the oracle $P^\star_j$ (true family and $\theta$) and Poisson $P^0_j$ with $\bar n=|y_j|$.
+    \item \emph{Local configurations.} Rescale a pattern to unit intensity (multiplying points by $\sqrt{n}$). Around a number of points (up to $m=300$), take neighbours within $R=1.5$ mean spacings, translated to the origin and divided by $R$.
+    \item \emph{Kernel.} Embed each local configuration $\phi$ as a smoothed density on a $21\times21$
+      grid:
+      \[
+      \mu_\phi(u)=\sum_{p\in\phi}e^{-|u-p|^2/2h^2}, \qquad h = 0.1
+      \]
+    Compare configurations with 
+    \[
+    k(\phi,\psi)=\exp\!\big(-\|\mu_\phi-\mu_\psi\|^2/2\ell^2\big)
+    \]
+    where $\ell$ is the median distance between $y$'s own configurations, fixed before any model is scored.
+    \item \emph{Score} (lower is better):
+      \[
+        S(P,y)=\tfrac12\,\mathbb{E}\,k(\Phi,\Phi')-\tfrac1m\textstyle\sum_{i=1}^m\mathbb{E}\,k(\phi_i,\Phi),
+      \]
+      where $\phi_i$ are $y$'s configurations and $\Phi,\Phi'$ are configurations from different
       simulations of $P$.
-      \item $S$ is compared with two reference models on the same pattern: the oracle $P^\star$
-        (true family and $\theta$) and CSR $P_0$. Then
-        \[
-          \text{skill}=\frac{\sum_j\big[S(P_0,y_j)-S(\hat P_j,y_j)\big]}{\sum_j\big[S(P_0,y_j)-S(P^\star_j,y_j)\big]},
-        \]
+    \item \emph{Skill}, pooled over test patterns and reported only where the denominator is
+      resolved ($>2$ s.e.):
+      \[
+        \text{skill}=\frac{\sum_j\big[S(P_{0,j},y_j)-S(\hat P_j,y_j)\big]}{\sum_j\big[S(P_{0,j},y_j)-S(P^\star_j,y_j)\big]},
+      \]
       so $0$ means no better than CSR and $1$ means as good as the truth.
-      \item $\hat P_j$ is fitted to $x_j$ and scored on an independent
-      replicate $y_j$ of the same process.
-    \end{itemize} 
-  \item \textbf{The CSR threshold.} Across 8 families and 11 classifiers + 10 estimators, classification
-    and parameter error collapse at the same boundary, described by one physical coordinate per family (cluster
-    overlap $\omega$, signal-to-noise $\zeta$) times a power of $\nb$. The proper score confirms the boundary
-    independently of any learned model: there, even the true model does not beat CSR.
-  \item \textbf{Pipeline.} $p(f,\theta\mid x)=p(f\mid x)\,p(\theta\mid x,f)$:
-    one classifier (its $p(\text{poisson}\mid x)$ \emph{is} the CSR filter), then per-family estimators. The flat
-    classifier beats a hierarchical cascade (group, then family, with a reject class) by $5.4$ points.
-  \item \textbf{Where topology helps.} Adding PH to classical summaries never makes estimates significantly
-    worse and helps most where second-order statistics cannot see the structure (cell process: $K(r)=\pi r^2$
-    exactly; ring process: loops in $H_1$).
+  \end{itemize}
+  \item \textbf{CSR threshold.} For every family except cell (whose $K$ is exactly Poisson's; there the number of points per cell $k$ plays the role) we show that whether a pattern can be distinguished from CSR is governed by a physical coordinate (cluster overlap $\omega$, or a pair-count signal-to-noise ratio $\zeta$) multiplied by a fitted power of $\nb$. Past this boundary all classifiers and estimators improve; before it the proper score shows that even the oracle (i.e. true family with true parameters) does not beat Poisson inference.
+  \item \textbf{Pipeline.} Classifier followed by family-specific inference model, reflecting the factorization $p(f,\theta\mid x)=p(f\mid x)\,p(\theta\mid x,f)$. The classifier's Poisson call acts as the CSR filter: structured patterns it sends to Poisson cost nothing, and patterns it assigns to the wrong structured family are reproduced about as well as correctly identified ones. The pipeline beats the classical minimum-contrast fit at selection, estimation and end-to-end fidelity.
+  \item \textbf{TDA features.} Adding PH to classical summaries never makes estimates significantly worse and helps significantly where second-order statistics cannot see the structure (e.g. cell process which has $K(r)=\pi r^2$ exactly).
 \end{enumerate}
 
+\newpage
+
 %==============================================================================
+
 \section*{Paper outline (8 pages; check the CfP for the current limit)}
 
-\begin{tabularx}{\linewidth}{@{}p{3.6cm}p{0.9cm}X@{}}
+\begin{tabularx}{\linewidth}{@{}p{2.8cm}X@{}}
 \toprule
-section & pages & content, key display \\
+Section & Content \\
 \midrule
-1 Introduction & 1.0 & Hook: accuracy $0.53$ vs skill $0.93$. Why accuracy is the wrong target near CSR. Contributions.
-  \textbf{Fig.~1} (the CSR wall, below). \\
-2 Setting and score & 1.25 & Families table (8 families, parameters, regime coordinate). Bank: 50\,000 $\theta$ $\times$ 2
-  replicates per family, $\nb\in[75,950]$, split by $\theta$. Kernel score, anchors, skill; Dawid--Sebastiani
-  as secondary. \textbf{Tab.~1} power check ($d'$ at strongest structure: kernel $1.06$--$1.30$, Poisson floor
-  $0.12$; W$_1$ energy $0.00$--$0.86$). \\
-3 Method & 1.0 & Factorisation; classifier as filter; per-family estimators on $\log\theta$. Inputs: 111
-  classical summary-function samples ($L,F,G,J$), 105 PH summaries per filtration, PersLay, persistence images.
-  Learners: gradient-boosted trees, linear, CNNs. Poisson: $\hat{\nb}=n$, the exact MLE (all 22 network inputs
-  reach the same $1/\sqrt{\nb}$ floor, so no model is needed). \\
-4 The CSR wall & 1.5 & Regime coordinates and their fit; per-model detection curves; parameter error vs coordinate;
-  oracle-vs-CSR gain vs coordinate. Structured patterns routed to Poisson have gain $+5{\times}10^{-5}\pm5{\times}10^{-5}$:
-  calling them Poisson costs nothing. \\
-5 Fidelity & 1.5 & \textbf{Tab.~2} skill by family and stratum. Wrong family, right pattern (misassigned vs
-  identified). Ablation: flat vs hierarchical. \pending{classical baseline row} \pending{real-data demo} \\
-6 When topology helps & 0.75 & Paired estimator table; cell and ring; end-to-end ablation. \\
-7 Negative results, limitations & 0.5 & Training filter; W$_1$; point estimates rather than posteriors;
-  synthetic bank. \\
-Related work & 0.5 & Minimum contrast / Palm / composite likelihood; global envelope tests; simulation-based
-  inference and amortized model comparison; PH for point processes; neural summaries (Vihrs et al.). \\
+
+1 Introduction &
+Hook: accuracy $0.53$ vs skill $0.92$. Why accuracy is the wrong target near CSR. Contributions. \\
+
+2 Setting \& score &
+Introduce families and data generation process (50\,000 $\theta$ $\times$ 2 replicates per family). Kernel score, anchors, skill.\\
+
+3 Model &
+Two-step pipeline: classifier as filter, then per-family estimators on $\log\theta$. Inputs: 111 classical summary-function samples ($L,F,G,J$), 105 PH summaries per filtration, PersLay, persistence images. Learners: gradient-boosted trees, linear, CNNs. \\
+
+4 CSR wall &
+Regime coordinates directly explain difficulty: show per-model detection curves, parameter error vs coordinate, and oracle-vs-CSR gain vs coordinate. For non-Poisson clouds with CSR-like structure, calling them Poisson costs nothing. \\
+
+5 Fidelity &
+Report overall results and analysis. Show that classifier performance shoots up when CSR clouds are omitted. Provide specific metrics on misclassified clouds, proving that whether they are inferred with the right family model or not doesn't change fidelity. Compare end to end against minimum contrast (selection and estimation). \\
+
+6 TDA &
+Feature ablation table, show that TDA either does nothing (i.e. doesn't actively hurt), or significantly boosts performance: might as well include always. \\
+
 \bottomrule
 \end{tabularx}
 
-\textbf{Fig.~1, the money figure.} Three panels, each against the family's regime coordinate $u$, one curve per
-model: (a)~detection rate (not called Poisson) for all 11 classifiers; (b)~estimator error for all 10 estimators;
-(c)~score gain of the true model over CSR. All three collapse at the same $u$, and the model curves overlap.
-\pending{to be made; the per-model tables are consistent with it, but panels (a) and (b) have not been plotted per model}
-
-\textbf{Appendix.} Full classifier/estimator tables and paired differences; the single-model network study
-(\src{configs/ablation.yaml}; the old 5-family version is at git tag \texttt{pre-camera-ready}); regime-coordinate selection; score settings and the settings rejected; pilot of the three
-added families; training-filter study with the estimated-$\theta$ gate.
+\newpage
 
 %==============================================================================
-\section*{Evidence behind each claim}
+
+\section*{Main numbers behind each claim}
 
 {\small
-\begin{tabularx}{\linewidth}{@{}Xp{5.4cm}p{2.1cm}@{}}
+\begin{itemize}
+    \item Test split. Accuracy is balanced over the 8 families.
+    \item Estimation error: RMSE$(\log\theta)$/s.d., lower is better.
+    \item Skill: 1 = as good as the true model, 0 = no better than CSR.
+    \item In regime at $\tau$: structured patterns with $P(\text{detected})\ge\tau$.
+    \item Pipeline: one architecture (HGB on classical + PH) for the classifier and every per-family estimator;
+    \item Classical baseline: min contrast on $K$.
+\end{itemize}
+
+\medskip 
+
+{\renewcommand{\arraystretch}{1.45}
+\begin{tabularx}{\linewidth}{@{}p{7.2cm}X@{}}
 \toprule
-claim & number & status \\
+\textbf{Claim} & \textbf{Evidence} \\
 \midrule
-Top classifiers tie & best four $0.533$--$0.535$; all 11 in $[0.488,0.535]$ & done \\
-Accuracy is at a ceiling & all 11 combined (logistic stacking, fit on val): $0.536$ vs best single $0.535$ & done \\
-Errors are CSR or near-equivalences & merge Mat\'ern I/II: $0.535\to0.62$; also nested, ring, LGCP into Thomas: $0.79$.
-  Called Poisson: Thomas $35\%$, ring $26\%$, LGCP $24\%$ & done \\
-Low Thomas recall is a trade, not a defect & parsimony prior: Thomas recall $0.17\to0.32$, accuracy $0.535\to0.500$,
-  nested recall $0.55\to0.23$ & done \\
-Thomas error sits on the $\kappa$--$\mu$ ridge & $\kappa$, $\mu$: $0.79$ each; $\nb=\kappa\mu$: $0.20$--$0.30$;
-  $\omega=\sigma\sqrt\kappa$: $0.49$; $\sigma$: $0.54$ & done \\
-Accuracy rises in regime & best $0.535$ all $\to0.652$ at $\tau=0.9$ & done \\
-Fidelity & kernel skill $0.93$ (best) / $0.91$ (classical), held-out replicate & done \\
-Wrong family, right pattern & misassigned $0.95$ vs identified $0.94$ (1080 strong-signal clouds);
-  $0.74$ vs $0.96$ over all strata & done \\
-Routing to Poisson is free & gain $+5{\times}10^{-5}\pm5{\times}10^{-5}$ on 102 misrouted structured clouds & done \\
-Flat beats hierarchical & $-0.054\ [-0.062,-0.046]$ family accuracy & done (7 families, pilot) \\
-Regime coordinate explains detection & explained $0.965$--$0.992$ (original four families) & done; \pending{refit for 8} \\
-Score has power & $d'$ table above & done; \pending{write-up in \src{paper/notes/scores.tex}} \\
-PH never hurts estimates & all 7 paired intervals $\le0$ or containing $0$ & done \\
-PH helps where $K$ is blind & cell $0.142\to0.120$ / $0.117$; ring $0.648\to0.642$ ($0.518\to0.498$ at $\tau=0.9$) & done \\
-PH end to end & skill $0.94$ with and without; cell $0.87\to0.96$, interval includes $0$ & null overall;
-  \pending{cell-only run, 1000 clouds, \src{evaluation/heldout\_ph\_cell}} \\
-Training filter & in-regime gain up to $0.055$; estimated-$\theta$ gate: no gain & done; \pending{archive script} \\
-Beats classical estimation & --- & \pending{missing} \\
-Works on real data & --- & \pending{missing} \\
+\claimsec{1}{Introduction}
+Accuracy looks weak, fidelity is high & Accuracy $0.53$ vs. skill $0.92$ \\
+Classification errors cost little fidelity & Skill $0.92$ with predicted family vs $0.94$ with correct one \\
+\midrule
+\claimsec{4}{The CSR wall}
+Accuracy has a ceiling & Best classifier $0.535$, all 11 combined $0.537$ \\
+One coordinate governs detection & Detection AUC $0.87$--$0.96$, vs $0.88$--$0.96$ from all parameters \\
+Models improve past the boundary & Accuracy $0.53\to0.65$, Thomas error $-37\%$ \\
+Before the boundary, even the true family does not beat CSR & Oracle beats CSR in 0 of 14 strata below the boundary \\
+Routing to Poisson is free & Oracle gain on structured patterns sent to Poisson $\approx0$ \\
+\midrule
+\claimsec{5}{Fidelity}
+Pipeline reproduces patterns & Skill $0.92$ vs $0.84$ for min.\ contrast \\
+Wrong family, right fit & Skill $0.91$ misclassified vs $0.95$ identified (difference n.s.) \\
+Pipeline beats min.\ contrast & Selection $0.53$ vs $0.33$; min.\ contrast Thomas error $2.3\times$ higher \\
+Min.\ contrast degrades near CSR & Thomas error $3.3\times$ higher outside the regime \\
+\midrule
+\claimsec{6}{TDA}
+PH never hurts & No estimator significantly worse with PH \\
+PH helps where $K$ is blind & Cell error $-15\%$ \\
+\ldots\ and it shows end to end & Cell skill $0.92\to1.00$ \\
 \bottomrule
-\end{tabularx}
+\end{tabularx}}
+
+\newpage
+
+%==============================================================================
+
+\section*{Figures and tables}
+
+{
+
+\medskip
+{\renewcommand{\arraystretch}{1.45}
+\begin{tabularx}{\linewidth}{@{}lp{1.2cm}Xl@{}}
+\toprule
+ID & Section & Content & Status \\
+\midrule
+\multicolumn{4}{@{}l}{\textbf{MAIN TEXT}} \\
+T1 & 2 & The 8 families: parameters, $K$, regime coordinate & written \\
+F1 & 2 & Example realizations, one strongly structured and one near CSR per family & generated \\
+F2 & 3 & Pipeline schematic: cloud $\to$ classifier $\to$ estimator $\to$ score & \pending{to do} \\
+F4 & 4 & $P$(called Poisson) over each family's parameter space, with the fitted boundaries & generated \\
+F5 & 4 & \emph{Key figure}: detection, estimation error and oracle gain over CSR against the regime coordinate, one curve per model & generated \\
+T6 & 4 & Oracle and fitted-model gain over CSR by regime stratum; ``structured, called Poisson'' row & generated \\
+T7 & 5 & Main results: accuracy, error, skill for pipeline / classical / min.\ contrast / true-family routing; wrong-family rows & \pending{to build} \\
+T10 & 6 & What PH adds: paired estimator differences, classifier accuracy, skill with and without & generated \\
+\multicolumn{4}{@{}l}{\textbf{APPENDIX}} \\
+T2 & 2 & Simulation design and data volume & written \\
+T3 & 3 & Models: learner, input, training cost & generated \\
+T8 & 2 & Score power: $d'$ of true model vs CSR, kernel vs alternatives & \pending{rerun} \\
+T4 & 4 & Classification by model $\times$ family, overall and in regime, with min.\ contrast & generated \\
+F3 & 4 & Confusion matrix of the frozen classifier & generated \\
+T5 & 4 & Fitted ``looks like Poisson'' boundary per family & generated \\
+T9 & 5 & Estimation error per family $\times$ estimator, overall and in regime, with min.\ contrast & generated \\
+\bottomrule
+\end{tabularx}}
 }
-
-%==============================================================================
-\section*{Presenting the weak numbers}
-
-None of these can be fixed by more modelling (the ceiling row above); all can be presented honestly and to our
-advantage. Put them in the main text next to their explanation, never only in the appendix.
-\begin{itemize}
-  \item \textbf{Accuracy $0.53$.} Report it against the regime coordinate, not only pooled: the pooled value depends
-    on how much prior mass sits near CSR, which is our design choice ($0.65$ in the strong-signal regime). Add an
-    equivalence-aware accuracy that merges families which coincide in part of their parameter space, justified by the
-    fidelity of misassigned patterns (skill $0.95$).
-  \item \textbf{Thomas recall $0.17$.} Thomas is the limit of three other families (nested with vanishing
-    meta-clusters, ring with large jitter, and LGCP at second order). Report the parsimony operating point as the
-    demonstration that recall only moves between families.
-  \item \textbf{Mat\'ern II recall $0.34$} ($57\%$ called Mat\'ern I). At low packing both are hard cores of the same
-    radius; Mat\'ern II fidelity is $1.00$.
-  \item \textbf{Thomas estimator error $0.70$.} Report the identifiable combinations ($\nb$, $\omega$, $\sigma$) beside
-    $\kappa$ and $\mu$; the $\kappa$--$\mu$ ridge motivates posteriors as future work. In regime: $0.45$.
-  \item \textbf{Wrong-family skill $0.74$ over all strata.} Skill is unstable where the true model barely beats CSR;
-    quote it only where the gain is resolved ($0.95$).
-  \item \textbf{PH end to end.} Fidelity is saturated; PH buys parameter accuracy where second-order statistics are
-    blind. Cell is the one candidate for an end-to-end effect \pending{cell-only run}.
-\end{itemize}
-
-%==============================================================================
-\section*{Before submission}
-
-\textbf{Must have.}
-\begin{itemize}
-  \item Classical baseline: \texttt{spatstat::kppm} (minimum contrast and Palm likelihood) for Thomas, Mat\'ern cluster and
-    LGCP, scored with the same end-to-end score. The other five families have no closed-form fit, which is itself the
-    argument for amortized inference.
-  \item One or two real patterns (candidates in the bank's $n$ range: \texttt{redwoodfull}, \texttt{finpines},
-    \texttt{spruces}), rescaled to the unit window, scored without an oracle (fit vs CSR vs \texttt{kppm}).
-  \item Fig.~1 and the per-model regime curves.
-  \item Confirm the AISTATS 2027 deadline; historically it falls in early October.
-\end{itemize}
-
-\textbf{Cheap and worth it.} Soft routing (simulate from the family mixture weighted by $p(f\mid x)$, using existing
-posteriors); a calibration check of $p(f\mid x)$.
-
-\textbf{Future work, framed as the upgrade the factorisation allows.} Posterior rather than point estimates for $\theta$
-(distributional trees or neural posterior estimation) and posterior-predictive sampling; learned permutation-invariant
-summaries of the raw points (DeepSets / GNN) as the stronger learned baseline.
-
-\textbf{Anticipated reviewer questions.} Why not a classical fit? (\S5 baseline.) Why only synthetic data? (real-data demo.)
-Why point estimates? (limitations; soft routing partly answers it.) Is PH just another feature? (\S6: it helps exactly where
-second-order summaries are blind, and never hurts.) Why is accuracy so low? (\S4: the CSR wall; lead with it, do not hide it.)
 
 \end{document}
