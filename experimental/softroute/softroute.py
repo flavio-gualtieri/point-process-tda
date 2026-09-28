@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Soft routing: does simulating from the classifier's mixture beat simulating from its argmax?
 
-    python extensions/softroute/softroute.py [--config ...] [--limit N]   # sbatch extensions/softroute/softroute.sh
+    python experimental/softroute/softroute.py [--config ...] [--workers N] [--limit N]
 
 The paper's pipeline routes each cloud to argmax_f P(f | x) and simulates from that family at its
 estimate. Soft routing simulates from sum_f w_f P_f(theta_hat_f) instead, with w = P(f | x) or a
 variant of it (config). Everything else is the paper's: its classifier and estimators (their stored
 predictions, frozen in the config), its clouds (fit on replicate 0, scored on replicate 1), and its
-kernel score with the same settings.
+kernel score with the same settings. Nothing here writes outside experimental/softroute/results/;
+the paper run is only read (config `paper_run`).
 
 EXACT MIXTURE SCORE. The kernel score is quadratic in the model's mean embedding, so for a mixture
 
@@ -15,13 +16,13 @@ EXACT MIXTURE SCORE. The kernel score is quadratic in the model's mean embedding
     K_fg = E k(Phi_f, Phi_g')  (configurations of simulations of f and of g; f = g: different simulations)
     c_f  = mean_i E k(phi_i, Phi_f)
 
-With w one-hot this is local_kernel.Component.scores exactly. So every family's model is simulated
+With w one-hot this is scores.kernel.Component.scores exactly. So every family's model is simulated
 once per cloud (config kernel.sims patterns, as the paper), and every weighting is scored from the
 same simulations: differences between weightings carry no simulation noise of their own. A family
 whose estimate the sampler cannot realise is dropped from the mixture and the rest renormalised
 (recorded as `lost`).
 
-Output  extensions/results/softroute/<name>/{clouds.csv, report.json, summary.md}
+Output  experimental/softroute/results/<name>/{clouds.csv, mixture_terms.npz, report.json, summary.md}
 """
 
 from __future__ import annotations
@@ -29,26 +30,42 @@ from __future__ import annotations
 import argparse
 import multiprocessing as mp
 import os
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 from scipy.spatial.distance import cdist
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from common import (FAMILIES, PAPER, TARGETS, load_config, paper_classifier, paper_estimator,  # noqa: E402
-                    results_dir, rows as bank_rows, sampler_kwargs, write_json, points)
-
-import bank as sbank                                         # noqa: E402  (cascade/scoring)
-from local_kernel import Component                           # noqa: E402
+from cloudforger.paths import ROOT
+from cloudforger.pipeline.core import TARGETS, log, rows as bank_rows, write_json
+from cloudforger.scores.kernel import Component
+from cloudforger.scores.simulate import observed, rng_for, sampler_kwargs, simulate, true_model
 
 HERE = Path(__file__).resolve().parent
+FAMILIES = ["poisson", "thomas", "nested", "lgcp", "matern2", "ring", "matern1", "cell"]
 
 
-def log(msg: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+# ------------------------------------------------------------------------- the paper run (read only)
+
+def paper(cfg: dict) -> Path:
+    """The pipeline run whose stored predictions and evaluation clouds are used (config paper_run)."""
+    return ROOT / cfg["paper_run"]
+
+
+def paper_classifier(cfg: dict, model: str) -> pd.DataFrame:
+    """Class posteriors (val + test rows), one column per family."""
+    z = np.load(paper(cfg) / "classify" / model / "predictions.npz")
+    return pd.DataFrame(z["posterior"], columns=[str(c) for c in z["classes"]],
+                        index=pd.Index(z["case_id"], name="case_id"))
+
+
+def paper_estimator(cfg: dict, family: str, model: str) -> pd.DataFrame:
+    """theta_hat from `model` for `family`, on every val + test row (any family)."""
+    z = np.load(paper(cfg) / "estimate" / family / model / "predictions.npz")
+    return pd.DataFrame(z["theta_hat"], columns=[str(c) for c in z["targets"]],
+                        index=pd.Index(z["case_id"], name="case_id"))
 
 
 # ------------------------------------------------------------------------------------- clouds
@@ -57,7 +74,7 @@ def clouds(cfg: dict) -> pd.DataFrame:
     """fit_case_id-indexed: scored_case_id, family, stratum, sets (the paper evaluations it is in)."""
     parts = []
     for name, rel in cfg["clouds"].items():
-        d = pd.read_csv(PAPER / rel / "clouds.csv")
+        d = pd.read_csv(paper(cfg) / rel / "clouds.csv")
         d = d.drop_duplicates("fit_case_id")[["fit_case_id", "scored_case_id", "family", "stratum"]]
         parts.append(d.assign(sets=name))
     d = pd.concat(parts)
@@ -80,7 +97,7 @@ def weightings(p: np.ndarray, true_idx: int, temps: list[float]) -> dict[str, np
 
 def score_cloud(job: dict) -> list[dict]:
     kc, seed, sid, x = job["kernel"], job["seed"], job["scored_case_id"], job["x"]
-    rng = sbank.rng_for(seed, sid, "component")
+    rng = rng_for(seed, sid, "component")
     comp = Component(x, kc["R"], kc["kind"], kc["h"], kc["grid"], kc["centres"], rng)
     t2 = 2 * (float(kc["tau_mult"]) * comp.tau0) ** 2
     per = max(1, kc["pool"] // kc["sims"])
@@ -90,11 +107,11 @@ def score_cloud(job: dict) -> list[dict]:
         try:
             if key.startswith("fam:"):
                 kw = sampler_kwargs(family, kw)
-            sims = sbank.simulate(family, kw, kc["sims"], sbank.rng_for(seed, sid, key))
+            sims = simulate(family, kw, kc["sims"], rng_for(seed, sid, key))
         except (RuntimeError, ValueError) as e:
             failed[key] = str(e)
             continue
-        erng = sbank.rng_for(seed, sid, "embed:" + key)
+        erng = rng_for(seed, sid, "embed:" + key)
         embs = [comp.embed(s, erng, per) for s in sims]
         E[key] = np.concatenate(embs)
         W[key] = np.concatenate([np.full(len(e), i) for i, e in enumerate(embs)])
@@ -210,24 +227,25 @@ def main(argv=None) -> None:
     p.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     p.add_argument("--limit", type=int, help="score only N clouds (smoke test)")
     args = p.parse_args(argv)
-    cfg = load_config(args.config)
-    out = results_dir("softroute", cfg["name"] + (f"_limit{args.limit}" if args.limit else ""))
+    cfg = yaml.safe_load(Path(args.config).read_text())
+    out = HERE / "results" / (cfg["name"] + (f"_limit{args.limit}" if args.limit else ""))
+    out.mkdir(parents=True, exist_ok=True)
     (out / "config.yaml").write_text(Path(args.config).read_text())
     t0 = time.time()
 
     ch = clouds(cfg)
     if args.limit:
         ch = ch.sample(args.limit, random_state=0)
-    r = bank_rows()
-    post = paper_classifier(cfg["classifier"]).loc[ch.index, FAMILIES]
-    est = {f: paper_estimator(f, m).loc[ch.index, TARGETS[f]] for f, m in cfg["estimators"].items()}
-    xs = points(r.loc[ch.scored_case_id])
+    r = bank_rows({"families": FAMILIES})
+    post = paper_classifier(cfg, cfg["classifier"]).loc[ch.index, FAMILIES]
+    est = {f: paper_estimator(cfg, f, m).loc[ch.index, TARGETS[f]] for f, m in cfg["estimators"].items()}
+    xs = observed(r.loc[ch.scored_case_id])
     log(f"{len(ch)} clouds ({ch.family.value_counts().to_dict()}), {args.workers} workers")
 
     jobs = []
     for cid, c in ch.iterrows():
         pv = post.loc[cid].to_numpy(float)
-        models = {"oracle": sbank.true_model(r.loc[cid]), "csr": ("poisson", {"nbar": float(len(xs[c.scored_case_id]))}),
+        models = {"oracle": true_model(r.loc[cid]), "csr": ("poisson", {"nbar": float(len(xs[c.scored_case_id]))}),
                   "fam:poisson": ("poisson", {"nbar": float(r.n[cid])})}
         models |= {f"fam:{f}": (f, {k: float(v) for k, v in est[f].loc[cid].items()}) for f in est}
         am = FAMILIES[int(np.argmax(pv))]
