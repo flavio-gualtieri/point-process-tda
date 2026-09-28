@@ -1,0 +1,18 @@
+# What the paper's figures and tables are built from (paper/scripts/). Paths are relative to the repo.
+# Now: the paper run as it stands. After the rerun: run: <results>/pipeline, evaluation sets named
+# main / ph_ablation / ph_cell / mincontrast, power: <results>/scores/power, ablation: <results>/ablation.
+
+run: oneshot/results/default
+
+evaluation:                         # the run's end-to-end evaluation sets
+  main: evaluation/heldout
+  ph_ablation: evaluation/heldout_ph_ablation
+  ph_cell: evaluation/heldout_ph_cell
+  mincontrast: evaluation/heldout_mincontrast
+
+power: cascade/scoring/results/power      # scripts/power.py output (T8)
+ablation: null                            # the single-model study's run, once it exists
+
+frozen_classifier: hgb_classical_ph       # F3's confusion matrix
+headline_variant: best                    # the evaluation.main pipeline T6 reports
+highlight: [hgb_classical_ph, hgb_classical, nn_curves]   # F5: coloured; every other model muted grey
