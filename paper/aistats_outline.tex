@@ -51,29 +51,46 @@ strong-signal strata; 357 misassigned). Cell error $0.142\to0.120$ (classical$+$
     \item The pitch: we show that, despite this difficulty, classifiers successfully tell us which generating process is "good enough" for inference.
 
     \item Classification accuracy on the 8 processes seems week ($0.53$), but the final fidelity score - i.e. how well the inferred parameters reproduce the pattern - is high ($0.93$).
+    
+    \item We show that when near-CSR but non-Poisson clouds get routed to Poison inference by the classifier, the 
+    result is still high-fidelity.
 \end{itemize}
 
 %==============================================================================
 \section*{Contributions}
 
 \begin{enumerate}
-  \item \textbf{Task and criterion.} Single-pattern model fitting cast as predictive fidelity. A strictly
-    proper kernel score on radius-$R$ local configurations is anchored at the true model (regret) and at CSR
-    (gain), giving skill $=1-\sum\text{regret}/\sum\text{gain}$. Fits are scored on an \emph{independent}
-    replicate, so a fit cannot be flattered by the pattern it was estimated from. A power check shows the obvious
-    alternative (a Wasserstein-1 energy score) fails.
-  \item \textbf{The CSR wall.} Across 8 families and 11 classifiers / 10 estimators, detection, classification
+  \item \textbf{Scoring.} We evaluate a fit by whether clouds generated from it look like the
+  input data. 
+    \begin{itemize}
+      \item Rescale pattern to unit intensity. Around each of its points, take the neighbouts within 
+      $R=1.5$ mean spacings, giving X configurations\dots
+      \item Embed each configuration as a smoothed density on an $N \times N$ grid with a Gaussian kernel $k$
+        whose width is fixed by the observed pattern $y$,
+        \[
+          S(P,y)=\tfrac12\,\mathbb{E}\,k(\Phi,\Phi')-\tfrac1m\textstyle\sum_i\mathbb{E}\,k(\phi_i,\Phi),
+        \]
+      where $\phi_i$ are $y$'s configurations and $\Phi,\Phi'$ are configurations from independent
+      simulations of $P$.
+      \item $S$ is compared with two reference models on the same pattern: the oracle $P^\star$
+        (true family and $\theta$) and CSR $P_0$. Then
+        \[
+          \text{skill}=\frac{\sum_j\big[S(P_0,y_j)-S(\hat P_j,y_j)\big]}{\sum_j\big[S(P_0,y_j)-S(P^\star_j,y_j)\big]},
+        \]
+      so $0$ means no better than CSR and $1$ means as good as the truth.
+      \item $\hat P_j$ is fitted to $x_j$ and scored on an independent
+      replicate $y_j$ of the same process.
+    \end{itemize} 
+  \item \textbf{The CSR threshold.} Across 8 families and 11 classifiers + 10 estimators, classification
     and parameter error collapse at the same boundary, described by one physical coordinate per family (cluster
     overlap $\omega$, signal-to-noise $\zeta$) times a power of $\nb$. The proper score confirms the boundary
     independently of any learned model: there, even the true model does not beat CSR.
-  \item \textbf{A pipeline that is the posterior's factorisation.} $p(f,\theta\mid x)=p(f\mid x)\,p(\theta\mid x,f)$:
+  \item \textbf{Pipeline.} $p(f,\theta\mid x)=p(f\mid x)\,p(\theta\mid x,f)$:
     one classifier (its $p(\text{poisson}\mid x)$ \emph{is} the CSR filter), then per-family estimators. The flat
     classifier beats a hierarchical cascade (group, then family, with a reject class) by $5.4$ points.
   \item \textbf{Where topology helps.} Adding PH to classical summaries never makes estimates significantly
     worse and helps most where second-order statistics cannot see the structure (cell process: $K(r)=\pi r^2$
     exactly; ring process: loops in $H_1$).
-  \item \textbf{Negative results, reported.} Wasserstein scoring has no power; training-set filtering by regime
-    helps in regime but cannot be exploited when the regime must be inferred.
 \end{enumerate}
 
 %==============================================================================
