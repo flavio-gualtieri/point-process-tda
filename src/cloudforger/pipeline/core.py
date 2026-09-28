@@ -96,9 +96,9 @@ def save_predictions(path: Path, **arrays) -> None:
     tmp.replace(path)
 
 
-def load_classifier(cfg: dict, model: str) -> pd.DataFrame | None:
+def load_classifier(cfg: dict, model: str, seed: int | None = None) -> pd.DataFrame | None:
     """case_id-indexed frame: split, one posterior column per class; None if not trained yet."""
-    path = unit_dir(cfg, "classify", model) / "predictions.npz"
+    path = unit_dir(cfg, "classify", model, seed=seed) / "predictions.npz"
     if not path.exists():
         return None
     z = np.load(path)
@@ -107,9 +107,9 @@ def load_classifier(cfg: dict, model: str) -> pd.DataFrame | None:
     return df
 
 
-def load_estimator(cfg: dict, family: str, model: str) -> pd.DataFrame | None:
+def load_estimator(cfg: dict, family: str, model: str, seed: int | None = None) -> pd.DataFrame | None:
     """case_id-indexed frame of theta_hat, one column per target; None if not trained yet."""
-    path = unit_dir(cfg, "estimate", model, family) / "predictions.npz"
+    path = unit_dir(cfg, "estimate", model, family, seed) / "predictions.npz"
     if not path.exists():
         return None
     z = np.load(path)

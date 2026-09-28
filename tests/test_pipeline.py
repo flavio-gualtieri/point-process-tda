@@ -112,8 +112,9 @@ def test_units_train_and_honour_the_contract(run):
     listed = script("train.py", "list").splitlines()
     assert len(listed) == 3 + 2 * 1                                     # 3 classifiers, 2 estimators x thomas
     for line in listed:
-        _, task, model, *family = line.split()
-        script("train.py", task, "--model", model, *(["--family", family[0]] if family else []))
+        _, task, model, family, seed = line.split()
+        assert seed == "-"                                              # no `seeds`: one unit per model
+        script("train.py", task, "--model", model, *(["--family", family] if family != "-" else []))
     assert script("train.py", "list", "--todo").strip() == ""           # everything done
 
     res = tmp / "results" / "test"
@@ -168,9 +169,47 @@ def test_plan_sizes_the_arrays_as_the_scripts_do(overrides, tmp_path):
         assert out.returncode == 0, out.stderr
         return out.stdout
 
-    plan = dict(line.split("=", 1) for line in run("slurm/plan.py").split())
+    plan = dict(line.split("=", 1) for line in run("slurm/plan.py", "pipeline", "ablation").split())
     assert plan["simulate"] == run("scripts/simulate.py", "tasks").strip()
     assert plan["mincontrast"] == run("scripts/mincontrast.py", "tasks").strip()
-    for kind in ("cpu", "gpu"):
-        listed = [line.split()[0] for line in run("scripts/train.py", "list", "--kind", kind).splitlines()]
-        assert plan[f"train_{kind}"] == ",".join(listed)
+    for config in ("pipeline", "ablation"):
+        for kind in ("cpu", "gpu"):
+            listed = [line.split()[0] for line in
+                      run("scripts/train.py", "--config", f"{config}.yaml", "list", "--kind", kind).splitlines()]
+            assert plan[f"train_{kind}_{config}"] == ",".join(listed)
+
+
+def test_seeded_study_reuses_the_pipeline_cutoffs(run):
+    """A config with `seeds` (the ablation) trains a unit per seed, borrows the pipeline's frozen
+    cutoffs, and summarises each model over its seeds."""
+    tmp, script = run
+    cfg = {**CONFIG, "name": "test_seeds", "seeds": [1, 2], "inputs": {},
+           "models": {"nn_curves": CONFIG["models"]["nn_curves"]}, "classify": ["nn_curves"], "estimate": ["nn_curves"],
+           "regime": {"from": "test", "taus": [0.5, 0.9]},
+           "compare": {**CONFIG["compare"], "baseline": "nn_curves", "classifiers": [], "estimators": []}}
+    config = tmp / "seeds.yaml"
+    config.write_text(yaml.safe_dump(cfg))
+    env = {**os.environ, "CLOUDFORGER_DATA": str(tmp / "data"), "CLOUDFORGER_RESULTS": str(tmp / "results")}
+
+    def train(*args):
+        out = subprocess.run([sys.executable, str(ROOT / "scripts" / args[0]), "--config", str(config), *args[1:]],
+                             env=env, cwd=ROOT, capture_output=True, text=True)
+        assert out.returncode == 0, out.stdout + out.stderr
+        return out.stdout
+
+    listed = train("train.py", "list").splitlines()
+    assert [line.split()[4] for line in listed] == ["1", "2", "1", "2"]   # classify x 2 seeds, thomas x 2 seeds
+    for line in listed:
+        train("train.py", "unit", "--kind", "gpu", "--index", line.split()[0])
+    res = tmp / "results" / "test_seeds"
+    assert (res / "classify" / "nn_curves" / "seed_2" / "predictions.npz").exists()
+    a = np.load(res / "classify" / "nn_curves" / "seed_1" / "predictions.npz")["posterior"]
+    b = np.load(res / "classify" / "nn_curves" / "seed_2" / "predictions.npz")["posterior"]
+    assert not np.allclose(a, b)                                        # the seed reaches the network
+
+    train("compare.py")                                                 # needs test's cutoffs: run after it
+    rep = json.loads((res / "compare" / "report.json").read_text())
+    assert rep["cutoffs"] == json.loads((tmp / "results" / "test" / "compare" / "cutoffs.json").read_text())
+    assert set(rep["classifiers"]) == {"nn_curves/seed_1", "nn_curves/seed_2"}
+    assert rep["by_model"]["classifiers"]["nn_curves"]["accuracy all"]["n_seeds"] == 2
+    assert (res / "compare" / "estimators_by_model.csv").exists()

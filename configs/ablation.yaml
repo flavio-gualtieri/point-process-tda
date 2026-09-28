@@ -1,0 +1,98 @@
+# The single-model ablation: one network per input representation, as classifier and as estimator
+# for every family, over several seeds. Same trainer, units and comparison as configs/pipeline.yaml
+# (scripts/train.py --config ablation.yaml; scripts/compare.py --config ablation.yaml), scored on the
+# pipeline's own test clouds and in-regime subsets (regime.from).
+#
+# Axes: 6 filtrations x {H0, H1, H0+H1} x {persistence image, PersLay (z-scored)} = 36 PH inputs, and
+# 4 summary-function inputs (curves): L on the fixed axis alone (the VIHRS feature set, the baseline);
+# L, F, G, J stacked on the fixed axis; stacked on the sqrt(n) axis; L fixed + F, G, J on sqrt(n).
+
+name: ablation
+
+families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]
+prior: equal
+seeds: [1, 2, 3]              # seed s.d. of accuracy was ~0.001-0.004, an order below the bootstrap width
+
+inputs: {}                    # networks only: their inputs are in the entries below
+
+models:
+  # persistence images
+  pi_rips_h0: {learner: nn, filtration: rips, dims: "0"}
+  pi_rips_h1: {learner: nn, filtration: rips, dims: "1"}
+  pi_rips_h01: {learner: nn, filtration: rips, dims: "0,1"}
+  pi_alpha_h0: {learner: nn, filtration: alpha_diameter, dims: "0"}
+  pi_alpha_h1: {learner: nn, filtration: alpha_diameter, dims: "1"}
+  pi_alpha_h01: {learner: nn, filtration: alpha_diameter, dims: "0,1"}
+  pi_dtm5_h0: {learner: nn, filtration: dtm_k5, dims: "0"}
+  pi_dtm5_h1: {learner: nn, filtration: dtm_k5, dims: "1"}
+  pi_dtm5_h01: {learner: nn, filtration: dtm_k5, dims: "0,1"}
+  pi_dtm10_h0: {learner: nn, filtration: dtm_k10, dims: "0"}
+  pi_dtm10_h1: {learner: nn, filtration: dtm_k10, dims: "1"}
+  pi_dtm10_h01: {learner: nn, filtration: dtm_k10, dims: "0,1"}
+  pi_dtm15_h0: {learner: nn, filtration: dtm_k15, dims: "0"}
+  pi_dtm15_h1: {learner: nn, filtration: dtm_k15, dims: "1"}
+  pi_dtm15_h01: {learner: nn, filtration: dtm_k15, dims: "0,1"}
+  pi_dtm20_h0: {learner: nn, filtration: dtm_k20, dims: "0"}
+  pi_dtm20_h1: {learner: nn, filtration: dtm_k20, dims: "1"}
+  pi_dtm20_h01: {learner: nn, filtration: dtm_k20, dims: "0,1"}
+  # PersLay, z-scored pooled vector (the pipeline's PersLay setting)
+  perslay_rips_h0: {learner: nn, filtration: rips, dims: "0", perslay: true, perslay_norm: zscore}
+  perslay_rips_h1: {learner: nn, filtration: rips, dims: "1", perslay: true, perslay_norm: zscore}
+  perslay_rips_h01: {learner: nn, filtration: rips, dims: "0,1", perslay: true, perslay_norm: zscore}
+  perslay_alpha_h0: {learner: nn, filtration: alpha_diameter, dims: "0", perslay: true, perslay_norm: zscore}
+  perslay_alpha_h1: {learner: nn, filtration: alpha_diameter, dims: "1", perslay: true, perslay_norm: zscore}
+  perslay_alpha_h01: {learner: nn, filtration: alpha_diameter, dims: "0,1", perslay: true, perslay_norm: zscore}
+  perslay_dtm5_h0: {learner: nn, filtration: dtm_k5, dims: "0", perslay: true, perslay_norm: zscore}
+  perslay_dtm5_h1: {learner: nn, filtration: dtm_k5, dims: "1", perslay: true, perslay_norm: zscore}
+  perslay_dtm5_h01: {learner: nn, filtration: dtm_k5, dims: "0,1", perslay: true, perslay_norm: zscore}
+  perslay_dtm10_h0: {learner: nn, filtration: dtm_k10, dims: "0", perslay: true, perslay_norm: zscore}
+  perslay_dtm10_h1: {learner: nn, filtration: dtm_k10, dims: "1", perslay: true, perslay_norm: zscore}
+  perslay_dtm10_h01: {learner: nn, filtration: dtm_k10, dims: "0,1", perslay: true, perslay_norm: zscore}
+  perslay_dtm15_h0: {learner: nn, filtration: dtm_k15, dims: "0", perslay: true, perslay_norm: zscore}
+  perslay_dtm15_h1: {learner: nn, filtration: dtm_k15, dims: "1", perslay: true, perslay_norm: zscore}
+  perslay_dtm15_h01: {learner: nn, filtration: dtm_k15, dims: "0,1", perslay: true, perslay_norm: zscore}
+  perslay_dtm20_h0: {learner: nn, filtration: dtm_k20, dims: "0", perslay: true, perslay_norm: zscore}
+  perslay_dtm20_h1: {learner: nn, filtration: dtm_k20, dims: "1", perslay: true, perslay_norm: zscore}
+  perslay_dtm20_h01: {learner: nn, filtration: dtm_k20, dims: "0,1", perslay: true, perslay_norm: zscore}
+  # summary functions
+  curves_L_fixed: {learner: nn, curves: "L@fixed"}
+  curves_LFGJ_fixed: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed"}
+  curves_LFGJ_sqrtn: {learner: nn, curves: "L,F,G,J"}
+  curves_L_fixed_FGJ_sqrtn: {learner: nn, curves: "L@fixed,F,G,J"}
+
+nn:                           # the pipeline's network defaults; `seeds` replaces `seed`
+  seed: 1
+  epochs: 200
+  patience: 30
+  batch_size: 128
+  lr: 0.001
+
+# Every model is trained as the 8-way classifier and as the estimator of every family but poisson.
+classify: [pi_rips_h0, pi_rips_h1, pi_rips_h01, pi_alpha_h0, pi_alpha_h1, pi_alpha_h01,
+           pi_dtm5_h0, pi_dtm5_h1, pi_dtm5_h01, pi_dtm10_h0, pi_dtm10_h1, pi_dtm10_h01,
+           pi_dtm15_h0, pi_dtm15_h1, pi_dtm15_h01, pi_dtm20_h0, pi_dtm20_h1, pi_dtm20_h01,
+           perslay_rips_h0, perslay_rips_h1, perslay_rips_h01, perslay_alpha_h0, perslay_alpha_h1, perslay_alpha_h01,
+           perslay_dtm5_h0, perslay_dtm5_h1, perslay_dtm5_h01, perslay_dtm10_h0, perslay_dtm10_h1, perslay_dtm10_h01,
+           perslay_dtm15_h0, perslay_dtm15_h1, perslay_dtm15_h01, perslay_dtm20_h0, perslay_dtm20_h1, perslay_dtm20_h01,
+           curves_L_fixed, curves_LFGJ_fixed, curves_LFGJ_sqrtn, curves_L_fixed_FGJ_sqrtn]
+estimate: [pi_rips_h0, pi_rips_h1, pi_rips_h01, pi_alpha_h0, pi_alpha_h1, pi_alpha_h01,
+           pi_dtm5_h0, pi_dtm5_h1, pi_dtm5_h01, pi_dtm10_h0, pi_dtm10_h1, pi_dtm10_h01,
+           pi_dtm15_h0, pi_dtm15_h1, pi_dtm15_h01, pi_dtm20_h0, pi_dtm20_h1, pi_dtm20_h01,
+           perslay_rips_h0, perslay_rips_h1, perslay_rips_h01, perslay_alpha_h0, perslay_alpha_h1, perslay_alpha_h01,
+           perslay_dtm5_h0, perslay_dtm5_h1, perslay_dtm5_h01, perslay_dtm10_h0, perslay_dtm10_h1, perslay_dtm10_h01,
+           perslay_dtm15_h0, perslay_dtm15_h1, perslay_dtm15_h01, perslay_dtm20_h0, perslay_dtm20_h1, perslay_dtm20_h01,
+           curves_L_fixed, curves_LFGJ_fixed, curves_LFGJ_sqrtn, curves_L_fixed_FGJ_sqrtn]
+
+clip_to_train_range: true
+
+regime:
+  from: pipeline              # the pipeline's frozen cutoffs (its compare/cutoffs.json)
+  taus: [0.5, 0.9]
+
+compare:
+  baseline: curves_L_fixed    # paired, seed by seed
+  bootstrap: 200
+  seed: 0
+  classifiers: []            # no pipelines: every unit is compared on its own
+  estimators: []
+  poisson_threshold: null

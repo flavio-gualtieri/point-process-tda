@@ -18,9 +18,11 @@ difference against the baseline model is paired (same resamples):
   pipelines    classifier x estimator assignment: accuracy, and RMSE/s.d. on the clouds each family's
                pipeline identifies correctly (poisson: nbar_hat = n). These subsets differ between
                classifiers -- compare estimators on the estimator table, classifiers on accuracy.
+  seeds        a config with `seeds` (the ablation) scores every (model, seed) as `model/seed_<s>`,
+               pairs it with the baseline at the same seed, and adds mean and s.d. over seeds per model.
 
 Output  <results>/<run>/compare/{summary.md, report.json, cutoffs.json, classifiers.csv,
-        estimators.csv, pipelines.csv}
+        estimators.csv, pipelines.csv[, classifiers_by_model.csv, estimators_by_model.csv]}
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from cloudforger.pipeline.core import (TARGETS, config_arg, estimated_families, 
                                        load_config, load_estimator, log, rows as load_rows, run_dir, save_config,
                                        write_json)
 from cloudforger.pipeline.regime import fit_cutoffs, in_regime
+from cloudforger.pipeline.units import label, seeds
 
 
 # ------------------------------------------------------------------------------------ bootstrap
@@ -108,16 +111,25 @@ def main(argv=None) -> None:
         f"tau {t:g} " + " ".join(f"{f} {regime[t][tfam == f].mean():.2f}" for f in cuts) for t in taus))
     missing = []
 
+    # (model, seed) -> label; the baseline a label is paired with is the baseline at its seed
+    seed_of, model_of = {}, {}
+    for m in {*cfg["classify"], *cfg["estimate"]}:
+        for seed in seeds(cfg):
+            seed_of[label(m, seed)], model_of[label(m, seed)] = seed, m
+    base_of = {lab: label(cc["baseline"], seed) for lab, seed in seed_of.items()}
+
     # --------------------------------------------------------------------------- classifiers
     clf, post = {}, {}
     for m in cfg["classify"]:
-        pr = load_classifier(cfg, m)
-        if pr is None:
-            missing.append(f"classify {m}")
-            continue
-        post[m] = pr.reindex(tid)[fams].to_numpy()
-        if np.isnan(post[m]).any():
-            raise SystemExit(f"classifier {m}: predictions missing for some test clouds")
+        for seed in seeds(cfg):
+            lab = label(m, seed)
+            pr = load_classifier(cfg, m, seed)
+            if pr is None:
+                missing.append(f"classify {lab}")
+                continue
+            post[lab] = pr.reindex(tid)[fams].to_numpy()
+            if np.isnan(post[lab]).any():
+                raise SystemExit(f"classifier {lab}: predictions missing for some test clouds")
     calls = {m: np.array(fams)[P.argmax(1)] for m, P in post.items()}
     acc = {m: {s: accuracy(boot, tfam, calls[m] == tfam, prior, mask) for s, mask in subsets.items()} for m in post}
     y = np.array([fams.index(f) for f in tfam])
@@ -127,8 +139,8 @@ def main(argv=None) -> None:
                   "nll": float(sum(prior[f] * nll[tfam == f].mean() for f in fams)),
                   "recall": {f: float((calls[m][tfam == f] == f).mean()) for f in fams},
                   "detected": {f: float((calls[m][tfam == f] != "poisson").mean()) for f in fams}}
-        if cc["baseline"] in acc and m != cc["baseline"]:
-            clf[m]["accuracy minus baseline"] = {s: ci(acc[m][s] - acc[cc["baseline"]][s]) for s in subsets}
+        if base_of[m] in acc and m != base_of[m]:
+            clf[m]["accuracy minus baseline"] = {s: ci(acc[m][s] - acc[base_of[m]][s]) for s in subsets}
     log(f"classifiers: {len(post)}")
 
     # ---------------------------------------------------------------------------- estimators
@@ -141,8 +153,9 @@ def main(argv=None) -> None:
         vmask = (val.family == f).to_numpy()
         vtrue = np.log(val[targets].to_numpy(float))[vmask]
         est[f] = {}
-        for m in cfg["estimate"]:
-            pr = load_estimator(cfg, f, m)
+        for m, seed in ((m, seed) for m in cfg["estimate"] for seed in seeds(cfg)):
+            pr = load_estimator(cfg, f, m, seed)
+            m = label(m, seed)
             if pr is None:
                 missing.append(f"estimate {f} {m}")
                 continue
@@ -154,8 +167,8 @@ def main(argv=None) -> None:
             est[f][m] = {"val": val_err[(f, m)],
                          **{s: ci(rmse_sd(boot, e2, mine & mask, sd)) for s, mask in subsets.items()},
                          "per_target": dict(zip(targets, (np.sqrt(e2[mine].mean(0)) / sd).round(4).tolist()))}
-        base = cc["baseline"]
         for m in est[f]:
+            base = base_of[m]
             if m != base and (f, base) in e2s:
                 est[f][m]["minus baseline"] = {
                     s: ci(rmse_sd(boot, e2s[(f, m)], mine & mask, sd) - rmse_sd(boot, e2s[(f, base)], mine & mask, sd))
@@ -179,14 +192,14 @@ def main(argv=None) -> None:
     pois_sd = np.log(test.nbar.to_numpy(float))[tfam == "poisson"].std()
     for c, spec in itertools.product(chosen, cc["estimators"]):
         a = assignment(spec)
-        label = spec if isinstance(spec, str) else spec.get("name") or json.dumps(spec, sort_keys=True)
+        est_name = spec if isinstance(spec, str) else spec.get("name") or json.dumps(spec, sort_keys=True)
         if a is None:
-            missing.append(f"pipeline {c} x {label}: an estimator is not trained")
+            missing.append(f"pipeline {c} x {est_name}: an estimator is not trained")
             continue
         call = calls[c].copy()
         if cc["poisson_threshold"] is not None:
             call[post[c][:, fams.index("poisson")] >= cc["poisson_threshold"]] = "poisson"
-        rec = {"classifier": c, "estimators": label, "assignment": a,
+        rec = {"classifier": c, "estimators": est_name, "assignment": a,
                **{f"accuracy {s}": ci(accuracy(boot, tfam, call == tfam, prior, mask)) for s, mask in subsets.items()}}
         for f in fams:
             hit = (tfam == f) & (call == f)
@@ -197,16 +210,36 @@ def main(argv=None) -> None:
                 e = rmse_sd(boot, e2s[(f, a[f])], hit, sd)
             rec[f"{f} identified"] = float(hit.sum() / (tfam == f).sum())
             rec[f"{f} rmse/sd"] = ci(e)
-        pipes[f"{c} x {label}"] = rec
+        pipes[f"{c} x {est_name}"] = rec
     log(f"pipelines: {len(pipes)}")
 
     report = {"cutoffs": cuts, "in_regime": {str(t): {f: float(regime[t][tfam == f].mean()) for f in fams} for t in taus},
               "classifiers": clf, "estimators": est, "best": best, "pipelines": pipes, "missing": missing}
+    if cfg.get("seeds"):
+        report["by_model"] = over_seeds(clf, est, model_of, list(subsets))
     write_json(out_dir / "report.json", report)
     write_json(out_dir / "cutoffs.json", cuts)
     tables(report, subsets, out_dir)
     (out_dir / "summary.md").write_text(render(report, cfg, list(subsets)))
     log(f"wrote {out_dir}" + (f"; {len(missing)} missing units (see summary)" if missing else ""))
+
+
+def over_seeds(clf: dict, est: dict, model_of: dict, subsets: list[str]) -> dict:
+    """Mean and s.d. over seeds of every point estimate, per model (the ablation's table)."""
+    def agg(values: list[float]) -> dict:
+        v = np.asarray(values, float)
+        return {"mean": float(v.mean()), "sd": float(v.std(ddof=1)) if len(v) > 1 else 0.0, "n_seeds": len(v)}
+
+    out = {"classifiers": {}, "estimators": {}}
+    for m in dict.fromkeys(model_of[lab] for lab in clf):
+        labs = [lab for lab in clf if model_of[lab] == m]
+        out["classifiers"][m] = {f"accuracy {s}": agg([clf[lab][f"accuracy {s}"]["est"] for lab in labs]) for s in subsets}
+    for f, d in est.items():
+        out["estimators"][f] = {}
+        for m in dict.fromkeys(model_of[lab] for lab in d):
+            labs = [lab for lab in d if model_of[lab] == m]
+            out["estimators"][f][m] = {s: agg([d[lab][s]["est"] for lab in labs]) for s in subsets}
+    return out
 
 
 # -------------------------------------------------------------------------------------- outputs
@@ -219,6 +252,14 @@ def tables(rep: dict, subsets, out_dir) -> None:
                   for f, d in rep["estimators"].items() for m, v in d.items()]).to_csv(out_dir / "estimators.csv", index=False)
     pd.DataFrame([{k: (v["est"] if isinstance(v, dict) and "est" in v else v) for k, v in p.items() if k != "assignment"}
                   for p in rep["pipelines"].values()]).to_csv(out_dir / "pipelines.csv", index=False)
+    if "by_model" in rep:
+        bm = rep["by_model"]
+        pd.DataFrame([{"model": m, "n_seeds": v["accuracy all"]["n_seeds"],
+                       **{f"{k} {stat}": x[stat] for k, x in v.items() for stat in ("mean", "sd")}}
+                      for m, v in bm["classifiers"].items()]).to_csv(out_dir / "classifiers_by_model.csv", index=False)
+        pd.DataFrame([{"family": f, "model": m, "n_seeds": v["all"]["n_seeds"],
+                       **{f"{k} {stat}": x[stat] for k, x in v.items() for stat in ("mean", "sd")}}
+                      for f, d in bm["estimators"].items() for m, v in d.items()]).to_csv(out_dir / "estimators_by_model.csv", index=False)
 
 
 def render(rep: dict, cfg: dict, subsets: list[str]) -> str:
@@ -240,7 +281,10 @@ def render(rep: dict, cfg: dict, subsets: list[str]) -> str:
         L.append(f"| {m} | " + " | ".join(f"{v['recall'][f]:.2f} / {v['detected'][f]:.2f}" for f in fams) + " |")
 
     if rep["cutoffs"]:
-        L += ["", f"## Regime (reference classifier `{cfg['regime']['classifier']}`, event: {cfg['regime']['event']})", "",
+        reg = cfg["regime"]
+        source = (f"the frozen cutoffs of run `{reg['from']}`" if reg.get("from")
+                  else f"reference classifier `{reg['classifier']}`, event: {reg['event']}")
+        L += ["", f"## Regime ({source})", "",
               "| family | coordinate | n̄ exponent | event rate (fit) | " + " | ".join(f"test in regime τ={t:g}" for t in cfg["regime"]["taus"]) + " |",
               "|---|---|---|---|" + "---|" * len(cfg["regime"]["taus"])]
         for f, c in rep["cutoffs"].items():
@@ -268,6 +312,19 @@ def render(rep: dict, cfg: dict, subsets: list[str]) -> str:
     for name, p in sorted(rep["pipelines"].items(), key=lambda kv: -kv[1]["accuracy all"]["est"]):
         L.append(f"| {name} | {fmt(p['accuracy all'])} | "
                  + " | ".join(f"{p[f'{f} rmse/sd']['est']:.3f} ({p[f'{f} identified']:.2f})" for f in fams) + " |")
+    if "by_model" in rep:
+        bm = rep["by_model"]
+        ms = lambda x: f"{x['mean']:.3f} ± {x['sd']:.3f}"
+        L += ["", "## Over seeds (mean ± s.d. of the point estimates)", "",
+              "| classifier | seeds | " + " | ".join(f"accuracy {s}" for s in subsets) + " |",
+              "|---|---|" + "---|" * len(subsets)]
+        for m, v in sorted(bm["classifiers"].items(), key=lambda kv: -kv[1]["accuracy all"]["mean"]):
+            L.append(f"| {m} | {v['accuracy all']['n_seeds']} | " + " | ".join(ms(v[f"accuracy {s}"]) for s in subsets) + " |")
+        models = list(dict.fromkeys(m for d in bm["estimators"].values() for m in d))
+        L += ["", "Estimators, RMSE(log θ)/s.d. over all test clouds of the family:", "",
+              "| family | " + " | ".join(models) + " |", "|---|" + "---|" * len(models)]
+        for f, d in bm["estimators"].items():
+            L.append(f"| {f} | " + " | ".join(ms(d[m]["all"]) if m in d else "—" for m in models) + " |")
     return "\n".join(L) + "\n"
 
 

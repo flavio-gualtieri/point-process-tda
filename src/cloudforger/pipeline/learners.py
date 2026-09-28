@@ -3,14 +3,14 @@
 Every learner is a class with the same four methods over POSITIONAL indices into the row table
 (core.rows), so scripts/train.py never needs to know which one it is running:
 
-    Learner(cfg, name, rows)                          load / build the model's input for every row
+    Learner(cfg, name, rows, seed)                    load / build the model's input for every row
     .classify(y, w, train, val, predict) -> (len(predict), K) class probabilities
     .crossfit(y, w, train, groups, folds) -> (len(train), K) out-of-fold probabilities, or None
     .regress(targets, train, val, predict) -> (len(predict), T) predictions of log(target)
     .artifacts() -> {filename: object} to save next to the predictions (optional)
 
 y is an int label per row (-1 = not a training example), w a per-row weight (the prior), `val` the
-rows a learner may early-stop on. To add a learner: write the class, register it in LEARNERS, and
+rows a learner may early-stop on, seed the network seed (None: the config's). To add a learner: write the class, register it in LEARNERS, and
 use `learner: <name>` in a model entry. Options come from the entry's `params`.
 """
 
@@ -28,8 +28,8 @@ class Table:
     """sklearn estimators on concatenated feature tables (inputs.py)."""
     defaults: dict = {}
 
-    def __init__(self, cfg: dict, name: str, rows: pd.DataFrame):
-        spec = cfg["models"][name]
+    def __init__(self, cfg: dict, name: str, rows: pd.DataFrame, seed: int | None = None):
+        spec = cfg["models"][name]                               # deterministic fits: seed unused
         self.params = {**self.defaults, **spec.get("params", {})}
         self.rows = rows
         self.X, self.columns = inputs.load(cfg, spec["inputs"], rows)
@@ -120,11 +120,11 @@ class Linear(Table):
 class NN:
     """cloudforger's PHNet (nn.py): curves, persistence images or PersLay, per the entry."""
 
-    def __init__(self, cfg: dict, name: str, rows: pd.DataFrame):
+    def __init__(self, cfg: dict, name: str, rows: pd.DataFrame, seed: int | None = None):
         from . import nn                                         # torch: imported only when needed
         self.nn = nn
         self.s = {**cfg["nn"], **{k: v for k, v in cfg["models"][name].items() if k != "learner"},
-                  **cfg["models"][name].get("params", {})}
+                  **cfg["models"][name].get("params", {}), **({"seed": seed} if seed is not None else {})}
         # the network's input is built over every bank row; `pos` maps row-table positions into it
         self.dataset, self.n_tags, self.arm = nn.build(self.s, cfg["families"])
         self.pos = pd.Index(self.dataset.manifest["case_id"].to_numpy(str)).get_indexer(rows.index)
@@ -170,5 +170,5 @@ class NN:
 LEARNERS = {"hgb": HGB, "linear": Linear, "nn": NN}          # units.GPU_LEARNERS says which need a GPU
 
 
-def make(cfg: dict, name: str, rows: pd.DataFrame):
-    return LEARNERS[cfg["models"][name]["learner"]](cfg, name, rows)
+def make(cfg: dict, name: str, rows: pd.DataFrame, seed: int | None = None):
+    return LEARNERS[cfg["models"][name]["learner"]](cfg, name, rows, seed)

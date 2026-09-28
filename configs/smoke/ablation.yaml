@@ -1,0 +1,8 @@
+# Smoke run: merged over configs/ablation.yaml, key by key. One model per kind of input, two seeds.
+name: smoke_ablation
+seeds: [1, 2]
+classify: [pi_rips_h01, perslay_dtm10_h01, curves_L_fixed]
+estimate: [pi_rips_h01, perslay_dtm10_h01, curves_L_fixed]
+nn: {epochs: 2, patience: 1}
+regime: {from: smoke}
+compare: {bootstrap: 20}

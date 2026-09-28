@@ -7,6 +7,9 @@
 #   ONLY="compare endtoend" ... bash slurm/run_all.sh # just these stages
 #   DRY=1 ... bash slurm/run_all.sh                   # print the sbatch calls, submit nothing
 #
+# Runs (RUNS, default "pipeline ablation") are configs/<run>.yaml: the pipeline, and the single-model
+# feature study. Only train and compare are per run; everything else is shared or the pipeline's.
+#
 # Every stage skips outputs that already exist, so re-running this after a failure submits the
 # same chain and only the missing work is done. Data and results roots must be named explicitly
 # (or SMOKE=1), so a run can never write into an earlier one by accident.
@@ -20,8 +23,8 @@
 #   diagrams     -> featurize                  merge the diagram shards
 #   curves       -> merge                      L, F, G, J curves (network inputs)
 #   tables       -> diagrams, curves           classical and PH tables, then check every model input
-#   train        -> tables                     every untrained unit: a CPU array and a GPU array
-#   compare      -> train                      classifier / estimator / pipeline tables, regime cutoffs
+#   train        -> tables                     every untrained unit of each run: a CPU and a GPU array
+#   compare      -> train                      per run; the ablation's also waits on the pipeline's cutoffs
 #   mincontrast  -> merge, compare             clouds -> fit array -> assemble
 #   endtoend     -> compare, mincontrast       evaluation sets main, ph_ablation, ph_cell, mincontrast
 #   power        -> relabel                    power check of the scores (configs/scores.yaml)
@@ -31,6 +34,7 @@ cd "$(dirname "$0")/.."
 ROOT=$PWD
 
 STAGES=(departure simulate merge relabel featurize diagrams curves tables train compare mincontrast endtoend power)
+RUNS=(${RUNS:-pipeline ablation})
 
 if [ -n "${SMOKE:-}" ]; then
   export CLOUDFORGER_CONFIGS="$ROOT/configs/smoke"
@@ -54,7 +58,7 @@ fi
 selected() { [[ " ${SELECTED[*]} " == *" $1 "* ]]; }
 
 source slurm/env.sh                                          # for the python call below
-eval "$(python slurm/plan.py)"                               # array sizes: simulate featurize mincontrast train_*
+eval "$(python slurm/plan.py "${RUNS[@]}")"                  # array sizes: simulate featurize mincontrast train_*
 RUN=$(basename "$CLOUDFORGER_RESULTS")
 LOGS="logs/$RUN"
 mkdir -p "$LOGS"
@@ -115,15 +119,22 @@ if selected tables; then
     bash -c "$py scripts/tables.py classical && $py scripts/tables.py ph && $py scripts/tables.py check"
 fi
 if selected train; then
-  for kind in cpu gpu; do
-    var=train_$kind; idx=${!var}                             # unit indices without a report.json
-    [ -n "$idx" ] || { echo "train_$kind: nothing to train"; continue; }
-    if [ $kind = cpu ]; then res=($CPU_SBATCH -c 16 --mem 64G -t 12:00:00); else res=($GPU_SBATCH -c 8 --mem 192G -t 24:00:00); fi
-    submit train_$kind "tables" "${res[@]}" --array="$idx" -- $py scripts/train.py unit --kind $kind --index '{task}'
+  for run in "${RUNS[@]}"; do
+    for kind in cpu gpu; do
+      var=train_${kind}_$run; idx=${!var}                    # unit indices without a report.json
+      [ -n "$idx" ] || { echo "train_${kind}_$run: nothing to train"; continue; }
+      if [ $kind = cpu ]; then res=($CPU_SBATCH -c 16 --mem 64G -t 12:00:00); else res=($GPU_SBATCH -c 8 --mem 192G -t 24:00:00); fi
+      submit train_${kind}_$run "tables" "${res[@]}" --array="$idx" -- \
+        $py scripts/train.py --config $run.yaml unit --kind $kind --index '{task}'
+    done
   done
 fi
-if selected compare; then
-  submit compare "train_cpu train_gpu" $CPU_SBATCH -c 4 --mem 48G -t 2:00:00 -- $py scripts/compare.py
+if selected compare; then                                    # key `compare` = the pipeline's (cutoffs, `best`)
+  for run in "${RUNS[@]}"; do
+    key=compare; deps="train_cpu_$run train_gpu_$run"
+    [ $run = pipeline ] || { key=compare_$run; deps="$deps compare"; }
+    submit $key "$deps" $CPU_SBATCH -c 4 --mem 48G -t 2:00:00 -- $py scripts/compare.py --config $run.yaml
+  done
 fi
 if selected mincontrast; then
   submit mc_clouds "merge" $CPU_SBATCH -c 16 --mem 64G -t 4:00:00 --export=ALL,$single -- $py scripts/mincontrast.py clouds

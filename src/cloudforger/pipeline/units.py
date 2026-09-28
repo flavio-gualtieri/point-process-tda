@@ -1,8 +1,11 @@
 """The units a config defines and where each one lives. No numerical imports, so slurm/plan.py can
 size the training arrays without paying numpy/pandas start-up on a slow filesystem.
 
-A unit is one trained model: (classify, model, None) over every family, or (estimate, model, family)
-for every family but poisson. It is CPU or GPU by its learner, and done once its report.json exists.
+A unit is one trained model: (classify, model, None, seed) over every family, or
+(estimate, model, family, seed) for every family but poisson. A config with `seeds: [...]` trains
+every unit once per seed, in <model>/seed_<s>/; without it (the pipeline) seed is None and the
+network seed is the `nn:` default. A unit is CPU or GPU by its learner, and done once its
+report.json exists.
 """
 
 from __future__ import annotations
@@ -18,9 +21,9 @@ def run_dir(cfg: dict, *parts: str) -> Path:
     return RESULTS.joinpath(cfg["name"], *parts)
 
 
-def unit_dir(cfg: dict, task: str, model: str, family: str | None = None) -> Path:
-    """<results>/<run>/classify/<model>/ or .../estimate/<family>/<model>/."""
-    return run_dir(cfg, task, *([family] if family else []), model)
+def unit_dir(cfg: dict, task: str, model: str, family: str | None = None, seed: int | None = None) -> Path:
+    """<results>/<run>/classify/<model>[/seed_<s>]/ or .../estimate/<family>/<model>[/seed_<s>]/."""
+    return run_dir(cfg, task, *([family] if family else []), model, *([f"seed_{seed}"] if seed is not None else []))
 
 
 def estimated_families(cfg: dict) -> list[str]:
@@ -28,18 +31,27 @@ def estimated_families(cfg: dict) -> list[str]:
     return [f for f in cfg["families"] if f != "poisson"]
 
 
+def seeds(cfg: dict) -> list[int | None]:
+    return list(cfg.get("seeds") or [None])
+
+
+def label(model: str, seed: int | None) -> str:
+    """How a (model, seed) is named in comparison tables: its directory below the task."""
+    return model if seed is None else f"{model}/seed_{seed}"
+
+
 def needs_gpu(cfg: dict, model: str) -> bool:
     return cfg["models"][model]["learner"] in GPU_LEARNERS
 
 
-def units(cfg: dict, kind: str | None = None) -> list[tuple[str, str, str | None]]:
-    """(task, model, family) in a fixed order -- the SLURM array order; kind filters by cpu | gpu."""
-    out = [("classify", m, None) for m in cfg["classify"]]
-    out += [("estimate", m, f) for m in cfg["estimate"] for f in estimated_families(cfg)]
+def units(cfg: dict, kind: str | None = None) -> list[tuple[str, str, str | None, int | None]]:
+    """(task, model, family, seed) in a fixed order -- the SLURM array order; kind filters by cpu | gpu."""
+    out = [("classify", m, None, s) for m in cfg["classify"] for s in seeds(cfg)]
+    out += [("estimate", m, f, s) for m in cfg["estimate"] for f in estimated_families(cfg) for s in seeds(cfg)]
     if kind:
         out = [u for u in out if needs_gpu(cfg, u[1]) == (kind == "gpu")]
     return out
 
 
-def done(cfg: dict, task: str, model: str, family: str | None) -> bool:
-    return (unit_dir(cfg, task, model, family) / "report.json").exists()
+def done(cfg: dict, task: str, model: str, family: str | None, seed: int | None = None) -> bool:
+    return (unit_dir(cfg, task, model, family, seed) / "report.json").exists()

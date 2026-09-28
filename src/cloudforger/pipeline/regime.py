@@ -12,14 +12,18 @@ logistic model's 50% contour is a straight line in (log x, log nbar), so this is
 cutoff expressed as ONE combined coordinate x * nbar^a -- e.g. for Thomas "cluster overlap omega,
 corrected for how many points there are to see it with". The rule is on theta alone, so every
 model is scored on the same in-regime clouds. A family with no coordinate is in regime everywhere.
+A config may instead take another run's frozen cutoffs (regime: {from: <run name>}), so a second
+study -- the ablation -- is scored on exactly the pipeline's in-regime clouds.
 """
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 
-from .core import load_classifier, log
+from .core import load_classifier, log, run_dir
 
 # Physical coordinates from the manifest's parameter columns. omega = cluster (or ring) overlap,
 # zeta = a back-of-envelope pair-count signal-to-noise ratio.
@@ -63,6 +67,11 @@ def fit_cutoff(x: np.ndarray, nbar: np.ndarray, y: np.ndarray, taus) -> dict:
 def fit_cutoffs(cfg: dict, r: pd.DataFrame) -> dict:
     """family -> fitted cutoff, from the reference classifier's calls (see module doc)."""
     reg = cfg["regime"]
+    if reg.get("from"):
+        path = run_dir({"name": reg["from"]}, "compare", "cutoffs.json")
+        if not path.exists():
+            raise SystemExit(f"{path} missing -- run compare for `{reg['from']}` first")
+        return json.loads(path.read_text())
     pred = load_classifier(cfg, reg["classifier"])
     if pred is None:
         log(f"regime: reference classifier {reg['classifier']} not trained -- every cloud in regime")
