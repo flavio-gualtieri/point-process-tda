@@ -1,0 +1,22 @@
+# The environment every result in the paper was produced with (the cluster's cloud-env).
+#   mamba env create -f environment.yml && mamba activate cloudforger && pip install -e .
+# CPU-only machines: drop pytorch-cuda and the nvidia channel.
+name: cloudforger
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy=2.4.6
+  - scipy=1.17.1
+  - pandas=3.0.5
+  - scikit-learn=1.9.0
+  - joblib=1.6.0
+  - pytorch=2.5.1
+  - pytorch-cuda=12.4
+  - gudhi=3.13.0
+  - ripser=0.6.14
+  - pyyaml=6.0.3
+  - matplotlib=3.11.1
+  - pytest

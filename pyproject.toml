@@ -1,11 +1,16 @@
 [project]
 name = "cloudforger"
 version = "0.1.0"
+description = "Classification and parameter inference for spatial point processes near complete spatial randomness"
 license = "MIT"
 license-files = ["LICENSE"]
+requires-python = ">=3.11"
 dependencies = [
-    "numpy",
+    "numpy>=2",
     "scipy",
+    "pandas",
+    "scikit-learn",
+    "joblib",
     "torch",
     "gudhi",
     "ripser",
@@ -13,12 +18,12 @@ dependencies = [
     "matplotlib",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [build-system]
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-markers = ["slow: exercises the full CLI pipeline end-to-end (generate/featurize/train/evaluate)"]
