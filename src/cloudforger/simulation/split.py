@@ -4,13 +4,11 @@ Theta i is drawn from its own PARAMS stream, so indices are iid prior draws and 
 are a random split. Both replicates of a theta share its split. Thetas past the test block (a
 larger sweep) go to train, so the test set never changes.
 
-The test block is 12000 thetas because the paper's unit of evidence is a regime CELL, not the
-marginal: the bootstrap in scripts/regimes.py resamples test thetas, and a cell is a
-(family, delta bin, nbar bin) slice of them. At the old 2000 the near-CSR bins held 12-19 thetas
-per family, which is where the argument is and where the intervals were widest. Widening is the
-only lever that adds evidence there WITHOUT selecting on delta-tilde: delta-tilde is a label
-applied afterwards by scripts/relabel.py, so a split that referred to it would move every time the
-null tables are refit or a different reduction is read.
+The test block is 12000 thetas because the evidence near CSR comes from slices of the test set
+(regime strata, per-family bootstraps over test thetas), and a narrow block leaves the near-CSR
+slices with a handful of thetas each -- exactly where the argument is. Widening is the only lever
+that adds evidence there WITHOUT selecting on a label: delta-tilde and the regime are applied
+afterwards, so a split that referred to them would move every time they were refit.
 """
 
 from __future__ import annotations

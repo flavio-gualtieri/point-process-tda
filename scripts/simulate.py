@@ -2,7 +2,7 @@
 
     python scripts/simulate.py run --jobs 10                       # every shard of every family (resumable)
     python scripts/simulate.py run --family lgcp --shard 3         # one shard (e.g. one SLURM array task)
-    python scripts/simulate.py merge --family thomas               # -> data/bank/<family>/{points.npz, manifest.csv}
+    python scripts/simulate.py merge                               # -> <data>/bank/<family>/{points.npz, manifest.csv}
     python scripts/simulate.py check --jobs 10                     # samplers vs closed-form K
 """
 
@@ -22,7 +22,6 @@ from cloudforger.simulation.check import check_theta
 from cloudforger.simulation.families import FAMILIES
 from cloudforger.simulation.bank import DATA, Config, run_shard
 
-ORDER = ("poisson", "thomas", "nested", "matern2", "lgcp")
 
 
 def _shard(args):
@@ -40,7 +39,7 @@ def _pool(f, tasks, jobs):
 
 
 def cmd_run(cfg, args):
-    families = [args.family] if args.family else ORDER
+    families = [args.family] if args.family else cfg.families
     shards = range(math.ceil(cfg.thetas / cfg.shard_size))
     tasks = [(f, s, cfg) for f in families for s in ([args.shard] if args.shard is not None else shards)]
     for fam, shard, secs in _pool(_shard, tasks, args.jobs):
@@ -48,7 +47,7 @@ def cmd_run(cfg, args):
 
 
 def cmd_merge(cfg, args):
-    for fam in ([args.family] if args.family else ORDER):
+    for fam in ([args.family] if args.family else cfg.families):
         paths = sorted((DATA / "shards" / fam).glob("shard_*.npz"))
         expected = math.ceil(cfg.thetas / cfg.shard_size)
         if len(paths) != expected:
@@ -73,8 +72,8 @@ def _check(args):
 
 
 def cmd_check(cfg, args):
-    tasks = [(f, i, args.patterns, cfg) for f in ORDER for i in range(args.thetas)]
-    rows = sorted(_pool(_check, tasks, args.jobs), key=lambda r: (ORDER.index(r["family"]), r["theta"]))
+    tasks = [(f, i, args.patterns, cfg) for f in cfg.families for i in range(args.thetas)]
+    rows = sorted(_pool(_check, tasks, args.jobs), key=lambda r: (cfg.families.index(r["family"]), r["theta"]))
     print(pd.DataFrame(rows).to_string(index=False))
 
 

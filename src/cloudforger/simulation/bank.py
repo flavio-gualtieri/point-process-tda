@@ -22,7 +22,7 @@ from .lgcp_grid import grid_size
 from .processes import SAMPLERS, lgcp_eigenvalues
 from .seeding import PARAMS, PATTERN, case_rng
 
-DATA = Path(__file__).resolve().parents[3] / "data" / "bank"
+from ..paths import BANK as DATA
 
 
 @dataclass(frozen=True)
@@ -33,13 +33,14 @@ class Config:
     reps: int
     n_range: tuple[int, int]
     shard_size: int
+    families: tuple[str, ...]
 
     @classmethod
     def load(cls, path: Path = CONFIG) -> Config:
         c = yaml.safe_load(path.read_text())
         pair = lambda d: (d["low"], d["high"])
         return cls(int(c["root"]), pair(c["nbar"]), int(c["thetas"]), int(c["reps"]),
-                   pair(c["n"]), int(c["shard_size"]))
+                   pair(c["n"]), int(c["shard_size"]), tuple(c["families"]))
 
 
 def draw_theta(fam: Family, tables: Tables, cfg: Config, index: int, max_tries: int = 1000,

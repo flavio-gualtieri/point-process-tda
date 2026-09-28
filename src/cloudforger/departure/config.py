@@ -6,11 +6,11 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-CONFIG = PROJECT_ROOT / "configs" / "departure" / "config.yaml"
-TABLES = PROJECT_ROOT / "configs" / "departure" / "tables.npz"
-REPORT = PROJECT_ROOT / "configs" / "departure" / "report.json"
-DATA = PROJECT_ROOT / "data" / "departure"
+from ..paths import CONFIGS, DEPARTURE as DATA  # noqa: F401  (DATA is re-exported to simulate.py)
+
+CONFIG = CONFIGS / "departure.yaml"
+TABLES = CONFIGS / "departure_tables.npz"          # fitted null tables, shipped with the repo
+REPORT = CONFIGS / "departure_report.json"
 
 
 @dataclass(frozen=True)

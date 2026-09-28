@@ -1,6 +1,6 @@
 """Persistence pairs -> persistence image (Adams et al. 2017), 2-D or 1-D.
 
-Pairs are the (m, 2) finite (birth, death) arrays of data/featurization/<family>/<tag>/diagrams.npz.
+Pairs are the (m, 2) finite (birth, death) arrays of <data>/featurization/<family>/<tag>/diagrams.npz.
 Each point becomes a Gaussian in (birth, persistence), weighted by its persistence; a pixel is the
 exact mass of that surface over its box, not a point sample. Bounds are fitted once on training
 diagrams, so a pixel means the same thing everywhere.

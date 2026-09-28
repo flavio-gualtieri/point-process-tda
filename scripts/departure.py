@@ -2,8 +2,8 @@
 
     python scripts/departure.py simulate --jobs 10          # every grid n (resumable), then validation patterns
     python scripts/departure.py simulate --n 137 --jobs 10  # one grid n (e.g. one SLURM array task)
-    python scripts/departure.py fit                         # -> configs/departure/tables.npz
-    python scripts/departure.py validate                    # -> configs/departure/report.json
+    python scripts/departure.py fit                         # -> configs/departure_tables.npz
+    python scripts/departure.py validate                    # -> configs/departure_report.json
 """
 
 from __future__ import annotations

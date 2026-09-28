@@ -1,7 +1,7 @@
 """Summary-function curves for every simulated pattern, one family and grid at a time.
 
-Input   data/bank/<family>/{points.npz, manifest.csv}
-Output  data/classical/<family>/<tag>/curves.npz, rows in manifest.csv order:
+Input   <data>/bank/<family>/{points.npz, manifest.csv}
+Output  <data>/classical/<family>/<tag>/curves.npz, rows in manifest.csv order:
             case_id          (P,)
             L, F, G, J       (P, 512) float32
             axis             (512,)  r under `fixed`, u = r sqrt(n) under `sqrtn`
@@ -22,12 +22,11 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from ..featurization.sweep import BANK, families
+from ..featurization.sweep import families
+from ..paths import BANK, CONFIGS, CURVES as DATA
 from .functions import GRID_SIZE, NAMES, axis, curves, tag
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-CONFIG = PROJECT_ROOT / "configs" / "classical" / "config.yaml"
-DATA = PROJECT_ROOT / "data" / "classical"
+CONFIG = CONFIGS / "classical.yaml"
 
 __all__ = ["Config", "DATA", "families", "run", "tag"]
 

@@ -1,18 +1,16 @@
-# src/cloudforger/provenance.py
 """Per-run provenance stamping.
 
-Every run.json written by scripts/train.py carries one of these stamps, so
-"what commit produced this?" is answerable from run.json alone without
-loading a torch file."""
+Every report.json written by scripts/train.py carries one of these stamps, so
+"what commit produced this?" is answerable from report.json alone without
+loading a model file."""
 
 from __future__ import annotations
 
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from .paths import ROOT as PROJECT_ROOT
 
 
 def _git_head() -> dict[str, Any]:

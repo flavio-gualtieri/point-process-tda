@@ -1,8 +1,8 @@
 """Diagrams for every simulated pattern, one shard of patterns at a time.
 
-Input   data/bank/<family>/{points.npz, manifest.csv}
-Shard   data/featurization/shards/<family>/<tag>/shard_<i>.npz
-Merged  data/featurization/<family>/<tag>/diagrams.npz (shards deleted), rows in manifest.csv order:
+Input   <data>/bank/<family>/{points.npz, manifest.csv}
+Shard   <data>/featurization/shards/<family>/<tag>/shard_<i>.npz
+Merged  <data>/featurization/<family>/<tag>/diagrams.npz (shards deleted), rows in manifest.csv order:
             case_id          (P,)
             h<d>             (m, 2) finite pairs of every pattern, concatenated
             h<d>_offsets     (P + 1,) pattern p's pairs are h<d>[offsets[p]:offsets[p + 1]]
@@ -22,11 +22,9 @@ import yaml
 
 from .filtrations import FILTRATIONS, tag
 
-from ..simulation.bank import DATA as BANK
+from ..paths import BANK, CONFIGS, DIAGRAMS as DATA
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-CONFIG = PROJECT_ROOT / "configs" / "featurization" / "config.yaml"
-DATA = PROJECT_ROOT / "data" / "featurization"
+CONFIG = CONFIGS / "featurization.yaml"
 
 
 @dataclass(frozen=True)

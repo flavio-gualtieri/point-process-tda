@@ -7,7 +7,7 @@
 One column per calibrated reduction (departure.tables.REDUCTIONS): `delta_tilde` for the default
 sup and `delta_tilde_<name>` for the rest. They are alternative coordinates on the same bank, each
 calibrated so that 1 is its own 5% rejection boundary, and they are NOT interchangeable as numbers
--- pick one with regimes.py --delta-column and report the others as a sensitivity check.
+-- the default `delta_tilde` is the one used downstream (the score power check's strata).
 
 Poisson is not special-cased: its closed-form curve is exactly zero, and under the extremum
 reductions a zero curve scores the CSR noise floor (a negative number), not 0. Only the `sup`
@@ -22,19 +22,14 @@ re-simulation.
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
-
-from cloudforger.classical.lfunction import RADII, l_minus_r_from_excess   # noqa: E402
-from cloudforger.departure.tables import DEFAULT, Tables                   # noqa: E402
-from cloudforger.simulation.families import BANK_FAMILIES, FAMILIES, Rules                # noqa: E402
-from cloudforger.simulation.bank import DATA as BANK                # noqa: E402
+from cloudforger.classical.lfunction import RADII, l_minus_r_from_excess
+from cloudforger.departure.tables import DEFAULT, Tables
+from cloudforger.simulation.bank import DATA as BANK, Config
+from cloudforger.simulation.families import FAMILIES, Rules
 
 CHUNK = 500
 
@@ -94,7 +89,7 @@ def main() -> None:
     print(f"tables: min_pairs = {tables.min_pairs:g}, reductions = {', '.join(tables.coef_c)}\n")
     print(f"{'family':<9}{'reduction':<11}{'thetas':>7}{'min':>8}{'max':>8}{'q05':>8}{'q50':>8}{'q95':>8}{'<1':>8}")
     columns = []
-    for family in BANK_FAMILIES:
+    for family in Config.load().families:
         for r in relabel(family, tables, write=not args.check):
             columns.append(column(r["reduction"]))
             print(f"{r['family']:<9}{r['reduction']:<11}{r['thetas']:>7}{r['min']:>8.3f}{r['max']:>8.2f}"

@@ -1,300 +1,179 @@
 #!/usr/bin/env python3
-"""Train one model on the simulated sweep and save its per-pattern test predictions.
+"""Train one unit: a classifier (one model over every family) or an estimator (one model, one family).
 
-    # 5-way family classification, DTM k=10, H0 + H1
-    python scripts/train.py --task classify --filtration dtm_k10 --dims 0,1 --seed 1
+    python scripts/train.py list [--kind cpu|gpu] [--todo]   # the config's units, in array order
+    python scripts/train.py unit --kind cpu --index 3         # unit no. 3 of that kind (a SLURM array task)
+    python scripts/train.py classify --model hgb_classical
+    python scripts/train.py estimate --model nn_curves --family ring
 
-    # the classical arm: summary-function curves instead of diagrams, same everything else
-    python scripts/train.py --task classify --curves L,F,G,J --grid sqrtn_u2 --seed 1
+Units come from the config: every `classify` model, and every `estimate` model x every family but
+poisson. A unit is CPU or GPU by its learner (pipeline.learners.GPU). A unit whose report.json exists is
+skipped unless --force, so adding a model to the config and resubmitting trains only the new units.
 
-    # per-function grids: L on the literature's r axis, F/G/J on the sqrt(n) axis they vary over
-    python scripts/train.py --task classify --curves L@fixed,F,G,J --grid sqrtn_u2 --seed 1
+Training rows are the train split; networks early-stop on val. Classifiers weight rows by the prior
+(config `prior`). The regime's reference classifier also writes out-of-fold train predictions
+(`crossfit_folds`, folds grouped by theta) when its learner supports it.
 
-    # parameter estimation for nested Thomas, rips H0 (a 1-D image: rips births are all 0)
-    python scripts/train.py --task params --family nested --filtration rips --dims 0 --seed 1
+Scores (report.json), test split:
+  classifier  accuracy under the prior, recall per family, NLL, and the detection rate per family
+              (share NOT called poisson -- the CSR filter)
+  estimator   RMSE of log(target) and that over the target's s.d. (1 = no better than the mean), on
+              the family's test clouds
 
-    # the multi-k arm: several filtrations through one shared encoder
-    python scripts/train.py --task classify --filtration dtm_k5,dtm_k10,dtm_k15 --dims 0,1 --seed 1
-
-    # the PersLay arm: the same diagrams, vectorized by the network instead of rasterized
-    python scripts/train.py --task classify --filtration dtm_k10 --dims 0,1 --perslay --seed 1
-
-    # ... with the pooled vector z-scored by statistics fixed on training diagrams at init
-    python scripts/train.py --task classify --filtration dtm_k10 --dims 0,1 --perslay --perslay-norm zscore --seed 1
-
-Writes results/<task>/<group>/<filtrations>/h<dims>/seed_<seed>/ (perslay_h<dims> for that arm,
-perslay_z_h<dims> with --perslay-norm zscore, so the vectorizations of one filtration sit side by
-side):
-
-    predictions.npz  case_id, y_true, y_pred (+ posterior when classifying) for every TEST pattern
-    run.json         the arguments, the fitted vectorizer's parameters, target transform, losses,
-                     git stamp
-    model.pt         the best-validation weights
-
-Everything per regime is computed afterwards by joining predictions.npz to the manifest on case_id;
-no regime enters training. The split is fixed by theta (cloudforger.simulation.split), the same for
-every seed, task and filtration, so runs are paired pattern by pattern.
+Output  <results>/<run>/classify/<model>/  or  .../estimate/<family>/<model>/
+            predictions.npz (pipeline.core's contract), report.json (with the git commit),
+            config.yaml, model.joblib | model.pt
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import sys
-from pathlib import Path
+import time
 
 import numpy as np
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
-
-from cloudforger.provenance import provenance_stamp                      # noqa: E402
-from cloudforger.simulation.split import TEST_END, TRAIN_END, VAL_END    # noqa: E402
-from cloudforger.training import data as D, train as T                   # noqa: E402
-from cloudforger.training.model import PHNet                             # noqa: E402
-from cloudforger.vectorization.persistence_images import Scaling         # noqa: E402
-from cloudforger.vectorization.perslay import NORMS, OPS, PersLay, calibrate   # noqa: E402
-
-RESULTS = ROOT / "results"
+from cloudforger.pipeline import learners
+from cloudforger.pipeline.core import (TARGETS, config_arg, estimated_families, load_config, rows as load_rows,
+                                       sample_weights, save_config, save_predictions, unit_dir, write_json)
+from cloudforger.provenance import provenance_stamp
 
 
-def parse_args(argv=None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--task", choices=["classify", "params"], required=True)
-    p.add_argument("--family", help="params: which family to estimate for (classify uses all five)")
-    p.add_argument("--filtration",
-                   help="PH arm: comma-separated tags as under data/featurization/<family>/ (rips, dtm_k5...)")
-    p.add_argument("--dims", default="0,1", help="PH arm: homology dimensions, comma-separated")
-    p.add_argument("--curves", help="classical arm: comma-separated functions, each optionally with "
-                                    "its own grid (L@fixed,F,G,J)")
-    p.add_argument("--grid", default="sqrtn_u2", help="classical arm: grid for curves that name none")
-    p.add_argument("--curves-separate", action="store_true",
-                   help="classical arm: one encoder per curve even when they share a grid "
-                        "(curves on different grids always get one each)")
-    p.add_argument("--seed", default="1", help="one seed, or several ('1,2,3'): the features are "
-                                                "built once and every seed trained from them")
-    p.add_argument("--targets", help="params: comma-separated manifest columns (default: the family's own)")
-    p.add_argument("--perslay", action="store_true",
-                   help="PH arm: learn the vectorization (PersLay) instead of rasterizing into "
-                        "persistence images; --resolution/--sigma-pixels/--image-transform do not apply")
-    p.add_argument("--perslay-points", type=int, default=64,
-                   help="PersLay: number of learned point transformations (the vectorization's width)")
-    p.add_argument("--perslay-op", choices=list(OPS), default="sum",
-                   help="PersLay: permutation-invariant pooling over a diagram's points")
-    p.add_argument("--perslay-norm", choices=list(NORMS), default="none",
-                   help="PersLay: 'zscore' standardizes the pooled vector with statistics fixed once "
-                        "on training diagrams at initialization (writes perslay_z_h<dims>)")
-    p.add_argument("--calibration-rows", type=int, default=8192,
-                   help="PersLay zscore: training rows, evenly spaced, used to fix the statistics")
-    p.add_argument("--max-points", type=int, default=1024,
-                   help="PersLay: hard cap on a padded diagram's length, whatever --coverage asks for")
-    p.add_argument("--resolution", type=int, default=64)
-    p.add_argument("--sigma-pixels", type=float, default=1.0)
-    p.add_argument("--coverage", type=float, default=0.99)
-    p.add_argument("--raw-coords", action="store_true", help="do not rescale diagrams by sqrt(n)")
-    p.add_argument("--raw-mass", action="store_true", help="do not divide images by n")
-    p.add_argument("--image-transform", choices=["sqrt", "none"], default="sqrt",
-                   help="variance-stabilizing transform applied before the per-channel z-score")
-    p.add_argument("--embedding-dim", type=int, default=64)
-    p.add_argument("--conv-channels", default="32,64,128")
-    p.add_argument("--dropout", type=float, default=0.2)
-    p.add_argument("--batch-size", type=int, default=128)
-    p.add_argument("--epochs", type=int, default=200)
-    p.add_argument("--patience", type=int, default=30)
-    p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--weight-decay", type=float, default=3e-4)
-    p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    p.add_argument("--out", type=Path, help="output directory (default: the results/... path above)")
-    p.add_argument("--force", action="store_true", help="retrain even if run.json exists")
-    args = p.parse_args(argv)
-    if args.task == "params" and not args.family:
-        p.error("--task params needs --family")
-    if args.task == "classify" and args.family:
-        p.error("--task classify uses every family; drop --family")
-    if bool(args.filtration) == bool(args.curves):
-        p.error("pass exactly one of --filtration (PH arm) or --curves (classical arm)")
-    if args.perslay and not args.filtration:
-        p.error("--perslay vectorizes diagrams; it needs --filtration, not --curves")
-    if args.perslay_norm != "none" and not args.perslay:
-        p.error("--perslay-norm only applies with --perslay")
-    return args
+def units(cfg: dict, kind: str | None = None) -> list[tuple[str, str, str | None]]:
+    """(task, model, family) in a fixed order; kind filters by cpu | gpu."""
+    out = [("classify", m, None) for m in cfg["classify"]]
+    out += [("estimate", m, f) for m in cfg["estimate"] for f in estimated_families(cfg)]
+    if kind:
+        out = [u for u in out if learners.needs_gpu(cfg, u[1]) == (kind == "gpu")]
+    return out
 
 
-def run_id(args) -> tuple[str, str, str]:
-    """(group, features, variant): `features` is what was fed in and `variant` how, whichever arm
-    produced it -- dtm_k10/h01 for the PH arm, L+F+G+J/sqrtn_u2 for the classical one."""
-    group = args.family if args.task == "params" else "all"
-    if args.curves:
-        curves = D.parse_curves(args.curves, args.grid)
-        grids = [grid for _, grid in curves]
-        # variant carries the grids in curve order, so features + variant reconstruct the spec
-        return (group, "+".join(name for name, _ in curves),
-                grids[0] if len(set(grids)) == 1 else "+".join(grids))
-    dims = "h" + "".join(args.dims.split(","))
-    if not args.perslay:
-        return group, args.filtration.replace(",", "+"), dims
-    # a normalized PersLay is its own variant, so it sits beside perslay_h<dims> instead of
-    # overwriting it, and scripts/regimes.py compares the two like any other pair of runs
-    prefix = "perslay_z" if args.perslay_norm == "zscore" else "perslay"
-    return group, args.filtration.replace(",", "+"), f"{prefix}_{dims}"
+def done(cfg: dict, task: str, model: str, family: str | None) -> bool:
+    return (unit_dir(cfg, task, model, family) / "report.json").exists()
 
 
-SPLIT = {"train_end": TRAIN_END, "val_end": VAL_END, "test_end": TEST_END}
+def classify(cfg: dict, config_path: str, model: str) -> None:
+    t0 = time.time()
+    r = load_rows(cfg)
+    fam, split = r.family.to_numpy(), r.split.to_numpy()
+    classes = cfg["families"]
+    y = np.array([classes.index(f) for f in fam])
+    w = sample_weights(fam, cfg)
+    train, val = np.flatnonzero(split == "train"), np.flatnonzero(split == "val")
+    held = np.flatnonzero(split != "train")
+    learner = learners.make(cfg, model, r)
+    print(f"classify {model}: {len(train)} train rows, input ready ({time.time() - t0:.0f}s)", flush=True)
+    post = learner.classify(y, w, train, val, held)
+    idx, post_all = held, post
+    if model == cfg["regime"]["classifier"]:
+        oof = learner.crossfit(y, w, train, r.family.to_numpy()[train] + ":" + r.theta.to_numpy()[train].astype(str),
+                               cfg["crossfit_folds"])
+        if oof is not None:
+            idx, post_all = np.concatenate([train, held]), np.vstack([oof, post])
+            print(f"classify {model}: out-of-fold train predictions ({time.time() - t0:.0f}s)", flush=True)
+    out = unit_dir(cfg, "classify", model)
+    save_predictions(out / "predictions.npz", case_id=r.index.to_numpy(str)[idx], split=split[idx],
+                     posterior=post_all.astype(np.float32), classes=np.array(classes))
+    test = split[held] == "test"
+    report = {"task": "classify", "model": model, "spec": cfg["models"][model], "n_train": int(len(train)),
+              "seconds": round(time.time() - t0), **score_classifier(post[test], fam[held][test], classes, cfg)}
+    finish(cfg, config_path, out, learner, report)
 
 
-def run_state(out: Path) -> str:
-    """done / stale / missing.
-
-    A finished run.json is NOT enough to skip a seed: predictions.npz holds the test patterns of
-    whatever split was in force when it was written, so a run from an older cloudforger.simulation
-    .split is not comparable to a fresh one and must not be silently reused. Widening the test block
-    is exactly the case that would otherwise pass unnoticed -- the directory layout does not mention
-    the split, so every path stays the same and only the contents change meaning.
-    """
-    path = out / "run.json"
-    if not path.exists():
-        return "missing"
-    try:
-        saved = json.loads(path.read_text()).get("split")
-    except json.JSONDecodeError:
-        return "stale"
-    return "done" if saved == SPLIT else "stale"
+def score_classifier(post: np.ndarray, fam: np.ndarray, classes: list[str], cfg: dict) -> dict:
+    call = np.array(classes)[post.argmax(1)]
+    y = np.array([classes.index(f) for f in fam])
+    w = sample_weights(fam, cfg)
+    p_true = np.clip(post[np.arange(len(y)), y], 1e-12, None)
+    return {"accuracy": float(np.average(call == fam, weights=w)),
+            "nll": float(np.average(-np.log(p_true), weights=w)),
+            "recall": {f: float((call[fam == f] == f).mean()) for f in classes},
+            "detected": {f: float((call[fam == f] != "poisson").mean()) for f in classes}}
 
 
-def output_dir(args, seed: int) -> Path:
-    """results/<task>/<group>/<features>/<variant>/seed_<n>."""
-    if args.out:
-        return args.out
-    return RESULTS.joinpath(args.task, *run_id(args), f"seed_{seed}")
+def estimate(cfg: dict, config_path: str, model: str, family: str) -> None:
+    t0 = time.time()
+    r = load_rows(cfg)
+    split, fam = r.split.to_numpy(), r.family.to_numpy()
+    targets = TARGETS[family]
+    train, val = (np.flatnonzero((split == s) & (fam == family)) for s in ("train", "val"))
+    held = np.flatnonzero(split != "train")                      # every family: the pipeline may route here
+    learner = learners.make(cfg, model, r)
+    print(f"estimate {family} {model}: {len(train)} train rows, input ready ({time.time() - t0:.0f}s)", flush=True)
+    logs = learner.regress(targets, train, val, held)
+    if cfg["clip_to_train_range"]:
+        Y = np.log(r[targets].to_numpy(float)[train])
+        logs = np.clip(logs, Y.min(0), Y.max(0))
+    out = unit_dir(cfg, "estimate", model, family)
+    save_predictions(out / "predictions.npz", case_id=r.index.to_numpy(str)[held], split=split[held],
+                     theta_hat=np.exp(logs), targets=np.array(targets), family=np.array(family))
+    mine = (split[held] == "test") & (fam[held] == family)
+    y = np.log(r[targets].to_numpy(float)[held][mine])
+    rmse = np.sqrt(((logs[mine] - y) ** 2).mean(0))
+    report = {"task": "estimate", "model": model, "family": family, "spec": cfg["models"][model],
+              "n_train": int(len(train)), "seconds": round(time.time() - t0), "n_test": int(mine.sum()),
+              "rmse_log": dict(zip(targets, rmse.round(4).tolist())),
+              "rmse_over_sd": dict(zip(targets, (rmse / y.std(0)).round(4).tolist())),
+              "mean_rmse_over_sd": float((rmse / y.std(0)).mean())}
+    finish(cfg, config_path, out, learner, report)
+
+
+def finish(cfg, config_path, out, learner, report) -> None:
+    for fname, obj in learner.artifacts().items():
+        if fname.endswith(".pt"):
+            import torch
+            torch.save(obj, out / fname)
+        else:
+            import joblib
+            joblib.dump(obj, out / fname, compress=3)
+    save_config(config_path, out)
+    report["provenance"] = provenance_stamp()
+    write_json(out / "report.json", report)                     # last: its existence marks the unit done
+    head = report.get("accuracy", report.get("mean_rmse_over_sd"))
+    print(f"-> {out}  ({report['seconds']}s, {'accuracy' if 'accuracy' in report else 'mean RMSE/sd'} {head:.4f})", flush=True)
+
+
+def run(cfg, config_path, task, model, family, force) -> None:
+    if not force and done(cfg, task, model, family):
+        print(f"{task} {model} {family or ''}: done (--force to retrain)")
+        return
+    if task == "classify":
+        classify(cfg, config_path, model)
+    else:
+        estimate(cfg, config_path, model, family)
 
 
 def main(argv=None) -> None:
-    args = parse_args(argv)
-    seeds = [int(s) for s in str(args.seed).split(",")]
-    todo, done = [], []
-    for seed in seeds:
-        state = run_state(output_dir(args, seed))
-        (todo if args.force or state != "done" else done).append(seed)
-        if state == "stale":
-            print(f"[stale] {output_dir(args, seed)} was trained on a different split "
-                  f"({SPLIT}); retraining", flush=True)
-    for seed in done:
-        print(f"{output_dir(args, seed)}/run.json exists; --force to retrain")
-    if not todo:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    config_arg(p)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    ls = sub.add_parser("list")
+    ls.add_argument("--kind", choices=["cpu", "gpu"])
+    ls.add_argument("--todo", action="store_true", help="only units without a report.json")
+    u = sub.add_parser("unit")
+    u.add_argument("--kind", choices=["cpu", "gpu"], required=True)
+    u.add_argument("--index", type=int, required=True)
+    c = sub.add_parser("classify")
+    c.add_argument("--model", required=True)
+    e = sub.add_parser("estimate")
+    e.add_argument("--model", required=True)
+    e.add_argument("--family", required=True)
+    for s in (u, c, e):
+        s.add_argument("--force", action="store_true")
+    args = p.parse_args(argv)
+    cfg = load_config(args.config)
+
+    if args.cmd == "list":
+        for i, (task, model, family) in enumerate(units(cfg, args.kind)):
+            if not (args.todo and done(cfg, task, model, family)):
+                print(i, task, model, family or "")
         return
-
-    families = list(D.FAMILIES) if args.task == "classify" else [args.family]
-    tags = args.filtration.split(",") if args.filtration else []
-    dims = [int(d) for d in args.dims.split(",")]
-    scaling = Scaling(coords="none" if args.raw_coords else "sqrt_n", density=not args.raw_mass)
-    run = f"{args.task}/{'/'.join(run_id(args))}"
-
-    print(f"[{run}] building features once for seed(s) {','.join(map(str, todo))}", flush=True)
-    if args.curves:
-        curves = D.parse_curves(args.curves, args.grid)
-        dataset = D.build_curves(families, curves, stack=False if args.curves_separate else None)
-    elif args.perslay:
-        dataset = D.build_diagrams(families, tags, dims, coverage=args.coverage,
-                                   max_points=args.max_points, scaling=scaling)
+    if args.cmd == "unit":
+        task, model, family = units(cfg, args.kind)[args.index]
     else:
-        dataset = D.build(families, tags, dims, resolution=args.resolution, sigma_pixels=args.sigma_pixels,
-                          coverage=args.coverage, scaling=scaling, transform=args.image_transform)
-    train_idx, val_idx, test_idx = (dataset.index(s) for s in ("train", "val", "test"))
-
-    manifest = dataset.manifest
-    if args.task == "classify":
-        labels = list(D.FAMILIES)
-        y = manifest["family"].map(labels.index).to_numpy(np.int64)
-        target_norm = {"classes": labels}
-        loss_fn, n_outputs = nn.CrossEntropyLoss(), len(labels)
-    else:
-        labels = None
-        columns = args.targets.split(",") if args.targets else D.TARGETS[args.family]
-        y, target_norm = D.targets(manifest, columns, train_idx)
-        loss_fn, n_outputs = nn.MSELoss(), len(columns)
-    print(f"[{run}] {len(manifest)} patterns: {len(train_idx)} train, {len(val_idx)} val, "
-          f"{len(test_idx)} test; {n_outputs} outputs", flush=True)
-
-    def loader(index, shuffle):
-        return DataLoader(D.Rows(dataset, y, index), batch_size=args.batch_size, shuffle=shuffle)
-
-    keys = sorted(dataset.images)
-    n_tags = len(tags) if args.filtration else 1   # PH: one pass per filtration; curves: one pass
-
-    def perslay_encoder(rank, channels):
-        return PersLay(embedding_dim=args.embedding_dim, n_transforms=args.perslay_points,
-                       op=args.perslay_op, dropout=args.dropout, in_channels=channels,
-                       norm=args.perslay_norm)
-
-    # Evenly spaced rather than sampled: the rows are grouped by family, so the first N would be one
-    # family, and a random draw would consume the RNG and shift every seed's data order.
-    n_cal = min(args.calibration_rows, len(train_idx))
-    calibration_idx = train_idx[np.linspace(0, len(train_idx) - 1, n_cal).round().astype(int)]
-
-    # Features are seed-independent (the split is fixed by theta, and every fit -- imager box, pixel
-    # z-score, target transform -- uses train rows only), so they are built once above and each seed
-    # only re-initializes and retrains the network.
-    for seed in todo:
-        tag = f"{run}/s{seed}"
-        out = output_dir(args, seed)
-        torch.manual_seed(seed)
-        model = PHNet(
-            ranks=[dataset.images[k].ndim - 2 for k in keys],
-            n_tags=n_tags,
-            channels=[dataset.images[k].shape[1] // n_tags for k in keys],
-            n_covariates=dataset.covariates.shape[1], n_outputs=n_outputs,
-            embedding_dim=args.embedding_dim,
-            conv_channels=tuple(int(c) for c in args.conv_channels.split(",")),
-            dropout=args.dropout,
-            encoder=perslay_encoder if args.perslay else None,
-        ).to(args.device)
-        if args.perslay and args.perslay_norm == "zscore":
-            n_layers = calibrate(model, lambda: T.predict(model, loader(calibration_idx, False), args.device))
-            print(f"[{tag}] fixed the pooled z-score of {n_layers} PersLay layer(s) on {n_cal} "
-                  f"training rows", flush=True)
-
-        fit = T.fit(model, loader(train_idx, True), loader(val_idx, False), loss_fn, args.device,
-                    lr=args.lr, weight_decay=args.weight_decay, epochs=args.epochs,
-                    patience=args.patience, tag=tag)
-
-        test_loader = loader(test_idx, False)
-        test_loss, test_acc = T.evaluate(model, test_loader, loss_fn, args.device)
-        outputs = T.predict(model, test_loader, args.device)
-
-        saved = {"case_id": manifest["case_id"].to_numpy(str)[test_idx]}
-        if args.task == "classify":
-            posterior = torch.softmax(torch.from_numpy(outputs), dim=1).numpy()
-            saved |= {"y_true": y[test_idx], "y_pred": outputs.argmax(axis=1), "posterior": posterior}
-            print(f"[{tag}] test loss {test_loss:.4f}  accuracy {test_acc:.4f}", flush=True)
-        else:
-            saved |= {"y_true": D.invert_targets(y[test_idx], target_norm),
-                      "y_pred": D.invert_targets(outputs, target_norm),
-                      "y_true_std": y[test_idx], "y_pred_std": outputs}
-            print(f"[{tag}] test loss {test_loss:.4f} (standardized MSE)", flush=True)
-
-        out.mkdir(parents=True, exist_ok=True)
-        np.savez(out / "predictions.npz", **saved)
-        torch.save(model.state_dict(), out / "model.pt")
-        (out / "run.json").write_text(json.dumps({
-                "args": {**{k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
-                     "seed": seed},
-            "families": families, "tags": tags, "dims": dims if not args.curves else [],
-            "curves": D.parse_curves(args.curves, args.grid) if args.curves else [],
-            "curves_stacked": bool(args.curves) and len(dataset.images) == 1 and len(args.curves.split(",")) > 1,
-            "split": SPLIT,
-            "n_train": len(train_idx), "n_val": len(val_idx), "n_test": len(test_idx),
-            "imagers": {f"{t}_h{d}": im.params for (t, d), im in dataset.imagers.items()},
-            "image_transform": args.image_transform,
-            "targets": target_norm, "labels": labels,
-            "best_val_loss": fit["best_val_loss"], "best_epoch": fit["best_epoch"],
-            "epochs_run": fit["epochs_run"], "test_loss": test_loss,
-            "test_accuracy": test_acc if args.task == "classify" else None,
-            "history": fit["history"], "provenance": provenance_stamp(),
-        }, indent=2, default=float))
-        print(f"[{tag}] wrote {out}", flush=True)
+        task, model, family = args.cmd, args.model, getattr(args, "family", None)
+        if model not in cfg["models"]:
+            raise SystemExit(f"unknown model `{model}` (config models: {', '.join(cfg['models'])})")
+    run(cfg, args.config, task, model, family, args.force)
 
 
 if __name__ == "__main__":

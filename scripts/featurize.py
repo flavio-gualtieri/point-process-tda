@@ -1,8 +1,8 @@
-"""Persistence diagrams for the simulated patterns (configs/featurization/config.yaml).
+"""Persistence diagrams for the simulated patterns (configs/featurization.yaml).
 
     python scripts/featurize.py run --jobs 10                                # every shard (resumable)
     python scripts/featurize.py run --family thomas --tag dtm_k5 --shard 3   # one shard (e.g. one SLURM array task)
-    python scripts/featurize.py merge                                        # -> data/featurization/<family>/<tag>/diagrams.npz
+    python scripts/featurize.py merge                                        # -> <data>/featurization/<family>/<tag>/diagrams.npz
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """Diagrams on disk -> persistence images, targets and splits, in memory.
 
-    data/bank/<family>/manifest.csv           one row per pattern (case_id, theta, nbar, n, ...)
-    data/featurization/<family>/<tag>/diagrams.npz  its diagrams, h<d> + h<d>_offsets in manifest order
-    data/classical/<family>/<grid>/curves.npz       its L/F/G/J curves (the classical arm)
+    <data>/bank/<family>/manifest.csv                  one row per pattern (case_id, theta, nbar, n, ...)
+    <data>/featurization/<family>/<tag>/diagrams.npz   its diagrams, h<d> + h<d>_offsets in manifest order
+    <data>/classical/<family>/<grid>/curves.npz        its L/F/G/J curves (the classical arm)
 
 Three feature sources, one contract: build() rasterizes diagrams, build_diagrams() pads them for
 the PersLay arm to vectorize itself, build_curves() reads summary functions, and all three return a
@@ -31,13 +31,10 @@ import numpy as np
 import pandas as pd
 import torch.utils.data
 
-from ..classical.curves import DATA as CLASSICAL
-from ..featurization.sweep import DATA as FEATURIZATION, BANK
+from ..paths import BANK, CURVES as CLASSICAL, DIAGRAMS as FEATURIZATION
 from ..simulation.split import split_of
 from ..vectorization.persistence_images import PersistenceImager, Scaling, fit_imager
 from ..vectorization.perslay import DiagramPadder, fit_padder
-
-FAMILIES = ("poisson", "thomas", "nested", "matern2", "lgcp")
 
 
 def birth_axis(tag: str, dim: int) -> bool:

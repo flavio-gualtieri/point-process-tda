@@ -1,14 +1,12 @@
-"""End-to-end: fake diagrams on disk -> scripts/train.py -> predictions.npz.
+"""The network inputs: fake diagrams and curves on disk -> training.data's datasets, and the encoder.
 
 Small and synthetic, so it runs anywhere; what it checks is the wiring, not the science: that rips H0
 becomes a 1-D image and DTM H0 a 2-D one, that imagers are fitted on train rows only, that the split
-reaching the model is split_of's, and that predictions come back for exactly the test patterns.
+reaching the model is split_of's, and that the PersLay and curve arms see the same rows.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -18,17 +16,8 @@ import torch
 
 from cloudforger.training import data as D
 
-ROOT = Path(__file__).resolve().parents[1]
 FAMILIES = ["poisson", "thomas"]
 THETAS = {"train": [0, 1, 2, 3, 4, 5], "val": [7000, 7001], "test": [8000, 8001]}
-
-
-def _train_module():
-    spec = importlib.util.spec_from_file_location("train_script", ROOT / "scripts" / "train.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["train_script"] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def _write_family(root: Path, featurization: Path, family: str, tags: list[str], rng) -> int:
@@ -67,7 +56,6 @@ def fake_data(tmp_path, monkeypatch):
     n_rows = sum(_write_family(simulation, featurization, f, ["rips", "dtm_k10"], rng) for f in FAMILIES)
     monkeypatch.setattr(D, "BANK", simulation)
     monkeypatch.setattr(D, "FEATURIZATION", featurization)
-    monkeypatch.setattr(D, "FAMILIES", tuple(FAMILIES))
     return n_rows
 
 
@@ -88,44 +76,6 @@ def test_split_and_channel_stacking(fake_data):
     assert train_thetas == set(THETAS["train"])
 
 
-def test_train_script_writes_test_predictions(fake_data, tmp_path, monkeypatch):
-    train = _train_module()
-    monkeypatch.setattr(train.D, "BANK", D.BANK)
-    monkeypatch.setattr(train.D, "FEATURIZATION", D.FEATURIZATION)
-    monkeypatch.setattr(train.D, "FAMILIES", tuple(FAMILIES))
-    out = tmp_path / "run"
-
-    train.main(["--task", "classify", "--filtration", "rips", "--dims", "0,1", "--seed", "1",
-                "--resolution", "8", "--epochs", "2", "--batch-size", "8", "--out", str(out)])
-
-    z = np.load(out / "predictions.npz")
-    assert len(z["case_id"]) == 8                      # the test patterns, and only those
-    assert set(z["y_true"]) <= {0, 1}
-    assert z["posterior"].shape == (8, len(FAMILIES))
-    assert np.allclose(z["posterior"].sum(axis=1), 1.0, atol=1e-5)
-    assert torch.load(out / "model.pt", weights_only=True)
-    run = __import__("json").loads((out / "run.json").read_text())
-    assert run["imagers"]["rips_h0"]["birth_range"] is None
-    assert run["labels"] == FAMILIES
-
-
-def test_params_task_predicts_in_parameter_units(fake_data, tmp_path, monkeypatch):
-    train = _train_module()
-    monkeypatch.setattr(train.D, "BANK", D.BANK)
-    monkeypatch.setattr(train.D, "FEATURIZATION", D.FEATURIZATION)
-    out = tmp_path / "params"
-
-    train.main(["--task", "params", "--family", "thomas", "--filtration", "dtm_k10", "--dims", "0",
-                "--seed", "1", "--resolution", "8", "--epochs", "2", "--batch-size", "8",
-                "--out", str(out)])
-
-    z = np.load(out / "predictions.npz")
-    manifest = pd.read_csv(D.BANK / "thomas" / "manifest.csv").set_index("case_id")
-    truth = manifest.loc[list(z["case_id"]), D.TARGETS["thomas"]].to_numpy()
-    assert np.allclose(z["y_true"], truth, rtol=1e-5)   # y_true is in parameter units, not standardized
-    assert (z["y_pred"] > 0).all()                      # log targets come back positive
-
-
 def test_perslay_arm_pads_the_same_diagrams(fake_data):
     """Same diagrams, same split, same covariate -- only the vectorization differs, which is what
     makes the two PH arms comparable."""
@@ -138,29 +88,6 @@ def test_perslay_arm_pads_the_same_diagrams(fake_data):
     # A pattern's real points are its diagram's, and every remaining row is padding.
     pairs = D.load_pairs(FAMILIES[0], "dtm_k10", 0)[0]
     assert (padded.images[0][0, 0, :, 2] != 0).sum() == min(len(pairs), padded.images[0].shape[2])
-
-
-def test_train_script_runs_the_perslay_arm(fake_data, tmp_path, monkeypatch):
-    train = _train_module()
-    for module in (D, train.D):
-        monkeypatch.setattr(module, "BANK", D.BANK)
-        monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
-        monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
-    out = tmp_path / "perslay_run"
-
-    train.main(["--task", "classify", "--filtration", "rips", "--dims", "0,1", "--perslay",
-                "--seed", "1", "--max-points", "16", "--perslay-points", "8", "--epochs", "2",
-                "--batch-size", "8", "--out", str(out)])
-
-    z = np.load(out / "predictions.npz")
-    assert len(z["case_id"]) == 8                        # the same test patterns as the image arm
-    assert z["posterior"].shape == (8, len(FAMILIES))
-    run = __import__("json").loads((out / "run.json").read_text())
-    assert run["args"]["perslay"] is True
-    assert 0 < run["imagers"]["rips_h0"]["capacity"] <= 16   # the padder, where the imager would be
-    assert train.run_id(train.parse_args(
-        ["--task", "classify", "--filtration", "rips", "--dims", "0,1", "--perslay"])) == (
-        "all", "rips", "perslay_h01")                    # its own results directory
 
 
 def _blob(cx, cy, r=64, s=4.0):
@@ -203,7 +130,7 @@ def test_sqrt_transform_tames_the_dynamic_range(fake_data):
 
 
 def _write_curves(tmp_path, rng, grids=("sqrtn_u2", "fixed")):
-    """Minimal data/classical/<family>/<grid>/curves.npz for the classical arm."""
+    """Minimal <data>/classical/<family>/<grid>/curves.npz for the classical arm."""
     root = tmp_path / "classical"
     for family in FAMILIES:
         manifest = pd.read_csv(D.BANK / family / "manifest.csv")
@@ -243,64 +170,3 @@ def test_curves_on_different_grids_get_their_own_encoders(fake_data, tmp_path, m
 
     with pytest.raises(ValueError, match="different grids"):
         D.build_curves(FAMILIES, curves, stack=True, verbose=False)
-
-
-def test_train_script_runs_the_classical_arm(fake_data, tmp_path, monkeypatch):
-    train = _train_module()
-    for module in (D, train.D):
-        monkeypatch.setattr(module, "BANK", D.BANK)
-        monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
-        monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
-        monkeypatch.setattr(module, "CLASSICAL", _write_curves(tmp_path, np.random.default_rng(2)))
-    out = tmp_path / "curves_run"
-
-    train.main(["--task", "classify", "--curves", "L@fixed,F,G,J", "--grid", "sqrtn_u2", "--seed", "1",
-                "--epochs", "2", "--batch-size", "8", "--out", str(out)])
-
-    z = np.load(out / "predictions.npz")
-    assert len(z["case_id"]) == 8                        # the same test patterns as the PH arm
-    run = __import__("json").loads((out / "run.json").read_text())
-    assert run["curves"] == [["L", "fixed"], ["F", "sqrtn_u2"], ["G", "sqrtn_u2"], ["J", "sqrtn_u2"]]
-    assert run["curves_stacked"] is False                # mixed grids -> one encoder each
-    assert train.run_id(train.parse_args(
-        ["--task", "classify", "--curves", "L@fixed,F,G,J", "--grid", "sqrtn_u2"])) == (
-        "all", "L+F+G+J", "fixed+sqrtn_u2+sqrtn_u2+sqrtn_u2")
-
-
-def test_several_seeds_share_one_feature_build(fake_data, tmp_path, monkeypatch, capsys):
-    """--seed 1,2 builds the images once and trains both, which is what lets a SLURM array task
-    cover every seed of a feature set without re-rasterizing per seed."""
-    train = _train_module()
-    for module in (D, train.D):
-        monkeypatch.setattr(module, "BANK", D.BANK)
-        monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
-        monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
-    monkeypatch.setattr(train, "RESULTS", tmp_path / "results")
-
-    train.main(["--task", "classify", "--filtration", "rips", "--dims", "0", "--seed", "1,2",
-                "--resolution", "8", "--epochs", "1", "--batch-size", "8"])
-
-    assert capsys.readouterr().out.count("[image] rips H0") == 1        # rasterized once
-    runs = sorted((tmp_path / "results").glob("classify/all/rips/h0/seed_*/run.json"))
-    assert [p.parent.name for p in runs] == ["seed_1", "seed_2"]
-    seeds = [__import__("json").loads(p.read_text())["args"]["seed"] for p in runs]
-    assert seeds == [1, 2]                                             # each records its own seed
-
-
-def test_finished_seeds_are_skipped(fake_data, tmp_path, monkeypatch, capsys):
-    train = _train_module()
-    for module in (D, train.D):
-        monkeypatch.setattr(module, "BANK", D.BANK)
-        monkeypatch.setattr(module, "FEATURIZATION", D.FEATURIZATION)
-        monkeypatch.setattr(module, "FAMILIES", tuple(FAMILIES))
-    monkeypatch.setattr(train, "RESULTS", tmp_path / "results")
-    argv = ["--task", "classify", "--filtration", "rips", "--dims", "0", "--seed", "1,2",
-            "--resolution", "8", "--epochs", "1", "--batch-size", "8"]
-
-    train.main(argv)
-    capsys.readouterr()
-    train.main(argv[:-8] + ["--seed", "1,2,3"] + argv[-6:])            # seeds 1 and 2 already done
-
-    out = capsys.readouterr().out
-    assert out.count("--force to retrain") == 2
-    assert "seed(s) 3" in out                                          # only the new seed is trained

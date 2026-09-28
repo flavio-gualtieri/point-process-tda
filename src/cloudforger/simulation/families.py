@@ -21,7 +21,9 @@ import yaml
 from scipy.optimize import brentq
 from scipy.special import chndtr, lambertw
 
-CONFIG = Path(__file__).resolve().parents[3] / "configs" / "simulation" / "config.yaml"
+from ..paths import CONFIGS
+
+CONFIG = CONFIGS / "simulation.yaml"
 _R = np.linspace(0.0, 1.0, 4001)
 _K = np.arange(1, 81)
 
@@ -290,7 +292,6 @@ def _matern_pcf(r, lam_p, R):
 
 
 FAMILIES: dict[str, type[Family]] = {f.name: f for f in (Poisson, Thomas, Nested, Matern2, LGCP, Ring, Matern1, Cell)}
-BANK_FAMILIES = ("poisson", "thomas", "nested", "matern2", "lgcp")   # what data/bank holds; the rest are pilot-only
 
 
 def cv(fam: Family, p: dict) -> float:
