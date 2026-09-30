@@ -1,132 +1,309 @@
-# One-shot classification + per-family inference. Every modelling choice is a key here; outputs land
-# in oneshot/results/<name>/. How to run and how to plug things in: oneshot/README.md.
-#
-#   classify    one N-way classifier over every family. Its P(poisson | x) IS the CSR filter: a cloud
-#               called poisson gets nbar_hat = n (the exact MLE) and no further model.
-#   estimate    one regressor per (family, model), on log(target), trained on ALL the family's train clouds
-#   compare     every classifier, every estimator and every classifier x estimator pipeline, scored on
-#               the same test clouds, overall and in regime (cutoffs from a reference classifier)
-
-name: default
-
-families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]
-
-# Class weights for training and scoring: `equal` (every family the same total weight) or a mapping
-# family -> weight (renormalised), e.g. to reproduce a group prior.
+name: pipeline
+families:
+- poisson
+- thomas
+- nested
+- lgcp
+- matern2
+- ring
+- matern1
+- cell
 prior: equal
-
-# ---------------------------------------------------------------------------------------- inputs
-# Named feature tables for table learners (hgb, linear). `source` is a loader in oneshot/inputs.py:
-#   classical   cascade/features.py: L(r)-r on the fixed axis, L,F,G,J on u = r sqrt(n), log n (111)
-#   ph          cloudforger.vectorization.summaries of one filtration's diagrams (105); built by
-#               `oneshot/prepare.py ph` for every `ph` input listed here
 inputs:
-  classical: {source: classical}
-  ph_alpha: {source: ph, filtration: alpha_diameter}
-  ph_dtm10: {source: ph, filtration: dtm_k10}
-  ph_rips: {source: ph, filtration: rips}
-  ph_dtm5: {source: ph, filtration: dtm_k5}
-  ph_dtm15: {source: ph, filtration: dtm_k15}
-  ph_dtm20: {source: ph, filtration: dtm_k20}
-
-# ---------------------------------------------------------------------------------------- models
-# A model = a learner + its input. Any model can serve as classifier and as estimator.
-#   learner: hgb | linear      table learners (CPU); `inputs` = list of names above, concatenated
-#   learner: nn                cloudforger's PHNet (GPU); its input is in the entry itself, as in
-#                              cascade/configs/default.yaml (curves, or filtration + dims [+ perslay])
-# Learner options go in `params` (overriding the learner's defaults in oneshot/learners.py).
+  classical:
+    source: classical
+  ph_alpha:
+    source: ph
+    filtration: alpha_diameter
+  ph_dtm10:
+    source: ph
+    filtration: dtm_k10
+  ph_rips:
+    source: ph
+    filtration: rips
+  ph_dtm5:
+    source: ph
+    filtration: dtm_k5
+  ph_dtm15:
+    source: ph
+    filtration: dtm_k15
+  ph_dtm20:
+    source: ph
+    filtration: dtm_k20
 models:
-  hgb_classical: {learner: hgb, inputs: [classical]}
-  hgb_ph: {learner: hgb, inputs: [ph_alpha, ph_dtm10]}
-  hgb_classical_ph: {learner: hgb, inputs: [classical, ph_alpha, ph_dtm10]}
-  linear_classical: {learner: linear, inputs: [classical]}
-  nn_curves: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed"}
-  perslay_dtm10: {learner: nn, filtration: dtm_k10, dims: "0,1", perslay: true, perslay_norm: zscore}
-  perslay_alpha: {learner: nn, filtration: alpha_diameter, dims: "0,1", perslay: true, perslay_norm: zscore}
-  # Feature-coverage round: every filtration in one table; persistence-image CNNs (the vectorization
-  # that beat classical on Matern in docs/05_results); curves + PH images fused in one network.
-  hgb_classical_ph6: {learner: hgb, inputs: [classical, ph_alpha, ph_dtm10, ph_rips, ph_dtm5, ph_dtm15, ph_dtm20]}
-  pi_alpha: {learner: nn, filtration: alpha_diameter, dims: "0,1"}
-  pi_rips: {learner: nn, filtration: rips, dims: "0,1"}
-  fusion_curves_alpha: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed", filtration: alpha_diameter, dims: "0,1"}
-
-nn:                             # defaults for every `learner: nn` model (scripts/train.py's)
+  hgb_classical:
+    learner: hgb
+    inputs:
+    - classical
+  hgb_ph:
+    learner: hgb
+    inputs:
+    - ph_alpha
+    - ph_dtm10
+  hgb_classical_ph:
+    learner: hgb
+    inputs:
+    - classical
+    - ph_alpha
+    - ph_dtm10
+  linear_classical:
+    learner: linear
+    inputs:
+    - classical
+  nn_curves:
+    learner: nn
+    curves: L@fixed,F@fixed,G@fixed,J@fixed
+  perslay_dtm10:
+    learner: nn
+    filtration: dtm_k10
+    dims: 0,1
+    perslay: true
+    perslay_norm: zscore
+  perslay_alpha:
+    learner: nn
+    filtration: alpha_diameter
+    dims: 0,1
+    perslay: true
+    perslay_norm: zscore
+  hgb_classical_ph6:
+    learner: hgb
+    inputs:
+    - classical
+    - ph_alpha
+    - ph_dtm10
+    - ph_rips
+    - ph_dtm5
+    - ph_dtm15
+    - ph_dtm20
+  pi_alpha:
+    learner: nn
+    filtration: alpha_diameter
+    dims: 0,1
+  pi_rips:
+    learner: nn
+    filtration: rips
+    dims: 0,1
+  fusion_curves_alpha:
+    learner: nn
+    curves: L@fixed,F@fixed,G@fixed,J@fixed
+    filtration: alpha_diameter
+    dims: 0,1
+  fusion_curves_dtm10:
+    learner: nn
+    curves: L@fixed,F@fixed,G@fixed,J@fixed
+    filtration: dtm_k10
+    dims: 0,1
+  fusion_curves_alpha_dtm10:
+    learner: nn
+    curves: L@fixed,F@fixed,G@fixed,J@fixed
+    filtration: alpha_diameter,dtm_k10
+    dims: 0,1
+nn:
   seed: 1
   epochs: 200
   patience: 30
   batch_size: 128
   lr: 0.001
-
-# ------------------------------------------------------------------------------------ what to train
-# Each name trains once per task (and per family for estimators); existing outputs are skipped, so
-# adding a name here and resubmitting trains only what is new.
-classify: [hgb_classical, hgb_ph, hgb_classical_ph, linear_classical, nn_curves, perslay_dtm10, perslay_alpha,
-           hgb_classical_ph6, pi_alpha, pi_rips, fusion_curves_alpha]
-estimate: [hgb_classical, hgb_ph, hgb_classical_ph, nn_curves, perslay_dtm10, perslay_alpha,
-           hgb_classical_ph6, pi_alpha, pi_rips, fusion_curves_alpha]
-
-# Out-of-fold predictions on the train split (folds grouped by theta), for classifiers whose learner
-# supports cheap refits (table learners). The regime cutoffs are fitted on these when present.
+classify:
+- hgb_classical
+- hgb_ph
+- hgb_classical_ph
+- linear_classical
+- nn_curves
+- perslay_dtm10
+- perslay_alpha
+- hgb_classical_ph6
+- pi_alpha
+- pi_rips
+- fusion_curves_alpha
+- fusion_curves_dtm10
+- fusion_curves_alpha_dtm10
+estimate:
+- hgb_classical
+- hgb_ph
+- hgb_classical_ph
+- nn_curves
+- perslay_dtm10
+- perslay_alpha
+- hgb_classical_ph6
+- pi_alpha
+- pi_rips
+- fusion_curves_alpha
+- fusion_curves_dtm10
+- fusion_curves_alpha_dtm10
 crossfit_folds: 5
-clip_to_train_range: true       # estimates clipped to the train targets' range (log scale)
-
-# ---------------------------------------------------------------------------------------- regime
-# "In regime" = the reference classifier detects the family (does not call it poisson) with
-# probability >= tau, as a monotone function of u = log(coordinate) + a log(nbar) (cascade/regime.py).
-# The cutoff is a frozen rule on theta, so every model is scored on the SAME in-regime clouds.
+clip_to_train_range: true
 regime:
-  classifier: hgb_classical     # fitted on its out-of-fold train predictions, else on val
-  event: detected               # detected = not called poisson | identified = called its own family
-  # One coordinate per family (oneshot/core.py COORDINATES, or any manifest column); null = no
-  # monotone coordinate, the whole family counts as in regime. Cell's detection is U-shaped in k
-  # (k = 2 is clumpy, large k near-lattice), so it has none by default.
-  coordinates: {thomas: omega, nested: omega_inner, lgcp: zeta, matern2: zeta, ring: omega,
-                matern1: zeta, cell: null}
-  taus: [0.5, 0.9]
-
-# ------------------------------------------------------------------------------------- compare
+  classifier: hgb_classical
+  event: detected
+  coordinates:
+    thomas: omega
+    nested: omega_inner
+    lgcp: zeta
+    matern2: zeta
+    ring: omega
+    matern1: zeta
+    cell: null
+  taus:
+  - 0.5
+  - 0.9
 compare:
-  baseline: hgb_classical       # paired differences are against this model
-  bootstrap: 200                # resamples of test thetas, within family
+  baseline: hgb_classical
+  bootstrap: 200
   seed: 0
-  # Pipelines = every classifier x every estimator assignment below. An assignment is a model name
-  # (every family), `best` (per family, the estimator with the lowest val error), or a mapping
-  # family -> model with an optional `name`, e.g. {name: nets, thomas: nn_curves, ...}.
-  classifiers: all              # or a list of names from `classify`
-  estimators: [best, hgb_classical]
-  poisson_threshold: null       # null = argmax; t = call poisson whenever P(poisson | x) >= t
-
-# ------------------------------------------------------------------------------------ evaluation
-# End-to-end kernel / Dawid-Sebastiani score of whole pipelines (oneshot/endtoend.py, scoring code
-# from cascade/evaluate.py and cascade/scoring). Kernel and DSS settings are the cascade's, verbatim.
+  classifiers: all
+  estimators:
+  - best
+  - hgb_classical
+  poisson_threshold: null
 evaluation:
-  pipelines:                    # each = a classifier + an estimator assignment, as compare.estimators
-    best: {classifier: hgb_classical_ph, estimators: best}
-    classical: {classifier: hgb_classical, estimators: hgb_classical}
   clouds:
-    # Test clouds, stratified WITHOUT delta-tilde: by the regime (P(detected | u) from the frozen
-    # cutoffs: below 0.5, 0.5-0.9, above 0.9) for families with a coordinate, by k for cell, and
-    # per_bin x 3 poisson clouds as the noise floor.
     per_bin: 20
-    cell_k_edges: [2, 3, 5, 31]
+    cell_k_edges:
+    - 2
+    - 3
+    - 5
+    - 31
     seed: 0
-  # heldout = fit on replicate 0, score against the independent replicate 1 of the same theta (the
-  # honest version); same = score against the pattern the fit came from (the cascade's old setting).
-  score_on: heldout
-  kernel: {R: 1.5, kind: point, h: 0.1, grid: 21, centres: 300, pool: 1000, sims: 16, tau_mult: "1.0"}
-  dss: {enabled: true, groups: no_ph, sims: 150}
+  kernel:
+    R: 1.5
+    kind: point
+    h: 0.1
+    grid: 21
+    centres: 300
+    pool: 1000
+    sims: 16
+    tau_mult: '1.0'
+  dss:
+    enabled: true
+    groups: no_ph
+    sims: 150
   skill_min_z: 2
   seed: 0
-  # Named evaluation sets (endtoend.py --set NAME -> evaluation/<score_on>_<NAME>/): each overrides
-  # `pipelines` and any `clouds` keys above; everything else is shared.
   sets:
-    # Does PH change the realizations? Same learner everywhere, with and without the PH columns, and
-    # the classifier held fixed in `ph_estimators` to separate routing from parameters. Clouds only
-    # where the score has power (the 480-cloud run resolved gain only above 0.9 and in cell), sized
-    # from its per-cloud noise: ~1100 clouds to see the `best` - `classical` difference at 2 s.e.
+    main:
+      pipelines:
+        best:
+          classifier: hgb_classical_ph
+          estimators: best
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
     ph_ablation:
       pipelines:
-        classical: {classifier: hgb_classical, estimators: hgb_classical}
-        ph: {classifier: hgb_classical_ph, estimators: hgb_classical_ph}
-        ph_estimators: {classifier: hgb_classical, estimators: hgb_classical_ph}
-      clouds: {per_bin: 120, strata: [above 0.9, k 2-2, k 3-4, k 5-30], poisson: 0, seed: 1}
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+        ph:
+          classifier: hgb_classical_ph
+          estimators: hgb_classical_ph
+        ph_estimators:
+          classifier: hgb_classical
+          estimators: hgb_classical_ph
+      clouds:
+        per_bin: 120
+        strata:
+        - above 0.9
+        - k 2-2
+        - k 3-4
+        - k 5-30
+        poisson: 0
+        seed: 1
+    ph_cell:
+      pipelines:
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+        ph:
+          classifier: hgb_classical_ph
+          estimators: hgb_classical_ph
+        ph_estimators:
+          classifier: hgb_classical
+          estimators: hgb_classical_ph
+      clouds:
+        per_bin: 1000
+        strata:
+        - k 5-30
+        poisson: 0
+        seed: 2
+    mincontrast:
+      pipelines:
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+        ph:
+          classifier: hgb_classical_ph
+          estimators: hgb_classical_ph
+        mincontrast:
+          classifier: mincontrast
+          estimators: mincontrast
+        oracle_ph:
+          classifier: oracle
+          estimators: hgb_classical_ph
+        oracle_mincontrast:
+          classifier: oracle
+          estimators: mincontrast
+    networks:
+      pipelines:
+        fusion:
+          classifier: fusion_curves_alpha_dtm10
+          estimators: fusion_curves_alpha_dtm10
+        curves:
+          classifier: nn_curves
+          estimators: nn_curves
+        ph:
+          classifier: hgb_classical_ph
+          estimators: hgb_classical_ph
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+        best:
+          classifier: hgb_classical_ph
+          estimators: best
+    networks_cell:
+      pipelines:
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+        ph_estimators:
+          classifier: hgb_classical
+          estimators: hgb_classical_ph
+        curves_estimators:
+          classifier: hgb_classical
+          estimators: nn_curves
+        fusion_estimators:
+          classifier: hgb_classical
+          estimators: fusion_curves_alpha_dtm10
+      clouds:
+        per_bin: 1000
+        strata:
+        - k 5-30
+        poisson: 0
+        seed: 2
+mincontrast:
+  c:
+  - 0.25
+  - 0.5
+  r_max:
+  - 0.0625
+  - 0.125
+  - 0.25
+  lambdas:
+  - 0
+  - 0.003
+  - 0.01
+  - 0.016
+  - 0.03
+  - 0.1
+  - 0.3
+  - 1
+  - 3
+  default:
+    c: 0.25
+    r_max: 0.25
+    lambda: 0.016
+  radii_step: 4
+  init: 64
+  starts: 2
+  chunks: 16
+  seed: 0
