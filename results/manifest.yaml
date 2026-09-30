@@ -1,24 +1,23 @@
-# Freeze of the results the paper is written from. Written once, by hand, on the date below;
-# results/summary.csv (paper/scripts/summary.py) is built from exactly this run.
+# Freeze of the results the paper is written from. results/summary.csv and results/story.md
+# (paper/scripts/summary.py) are built from exactly these files; paper/paper.yaml names them.
 frozen: 2026-09-30
-git_commit: b5d617bb9a8fcdcf11dbd6b1b58806d8f2156aac
-git_branch: posterior
-git_dirty: true            # uncommitted: the fused two-filtration network (pipeline/nn.py, its test, 2 models in pipeline.yaml), paper/
-git_diff_sha256: e5e3f30258c827fa79ba44ff0b89b983bb2737ef1abee11de937d92616d2bb9e
+git_commit: 08ec0c58f228549dd6d2b1fd0f4d167cc0522716      # code that produced every output below; the freeze commit follows it
+git_dirty_at_freeze: [paper/main.tex, the v2 bank work in src/cloudforger/simulation/, scripts/simulate.py, slurm/run_all.sh]
+                           # none of it is read by the frozen outputs
 run: oneshot/results/default                # = results_paper/pipeline (symlink) = paper/paper.yaml `run`
-families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]
+families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]      # the first bank; configs/v2 (adds strauss) is a separate, later bank
 bank: {thetas_per_family: 50000, replicates: 2, split_thetas: [37000, 1000, 12000], test_clouds: 192000}
 configs:                   # sha256
   configs/ablation.yaml: 6668d527476fee043504b60ee8c3a99bc88070f9ed9409b5c98f5e20c4b26efb
   configs/classical.yaml: 39bd183f67467ed2e067784c6a9998148cd6705727acbc35d465ebf33f56bba5
   configs/departure.yaml: 2ffaf2e41bc1fd5c6d877b5fc93dfd90e86f878eeea7964b9b22cb62d53be291
   configs/featurization.yaml: 226668ab4fe41fdbdf35e4f46e782ade7733eecbadd26308443d4393e5096a8e
-  configs/pipeline.yaml: f6babefcf36fd86c08e8e9764cc1dbdf4b5c29470ba73b89b250000283e0cbc5
+  configs/pipeline.yaml: c3acfdf1e28cc3f60bc45c0d69aab788d67990035bd4892bd800cee4bd7a2cfe
   configs/scores.yaml: d4cea88762f2a1a4901830312519aabbe28dd9020b8f1f01e8fb6b7daa9d2eae
   configs/simulation.yaml: 5ffac87c299937889b0b7c76b138a3bd663d309b617498ae7e483d95ff11dd7f
   configs/departure_tables.npz: bb6350df2c614215f0ec8779371ff1bbff047595c9a302b73f79ca601dca444e
-  paper/paper.yaml: 266b45beac5a2b70c4edc626ec8126d3fe9dce00b62213d1023721f007419c86
-bank_manifests:            # sha256 of data/bank/<family>/manifest.csv
+  paper/paper.yaml: 84f3b44aa889dcb0d50d1badf75f8c3afa4f5bfebc2b7e5353da1968fb2235df
+bank_manifests:            # sha256 of data/bank/<family>/manifest.csv (no relabel was run)
   poisson: 65427c38709c34851dfc19da2ed7a351622b96b02cbe07da521945ca41ad8183
   thomas: b35ba7ac9f742285b80fc47f0348e3fadf5d85e3bf6ffbe9c3d645c053bcc45a
   nested: 5388710eb7abca0479cfa27df4cebaa30acd3ac148f5e53e8ea034d6c9dc66ce
@@ -27,20 +26,29 @@ bank_manifests:            # sha256 of data/bank/<family>/manifest.csv
   ring: a8bd0da0217f3724fb323e26cc45981dc6fdba9bc0098eaa46db095bed00ed66
   matern1: bb6ceeab38bbfce6f733f6db0419b9bc74e925c4cfef614168e7cd739f3549c1
   cell: 853469b9d8b47d6f0bc4024263563c430bf9058c18ce13290cd87934204c59d7
-units:                     # trained units with a report.json
-  classify: 13
-  estimate: 84   # 12 models x 7 families (+ mincontrast, not counted)
-outputs:                   # last written (UTC)
-  compare/report.json: 2026-09-27
-  mincontrast/report.json: 2026-09-27
-  evaluation/heldout/report.json: 2026-09-25
-  evaluation/heldout_mincontrast/report.json: 2026-09-27
-  evaluation/heldout_ph_ablation/report.json: 2026-09-27
-  evaluation/heldout_ph_cell/report.json: 2026-09-27
-  cascade/scoring/results/power/report.json: 2026-09-24   # paper.yaml `power`; 5 families only
-known_gaps:                # see paper/notes/plan.md, section 1
-  - compare/ predates fusion_curves_dtm10 and fusion_curves_alpha_dtm10 (trained 2026-09-29): no intervals, not in `best`
-  - evaluation/heldout `best` was scored with the 7-model assignment of 2026-09-25, not compare's current `best`
-  - one training seed per unit; units before 2026-09-29 carry no provenance block (retired oneshot/ trainer)
-  - power check covers poisson, thomas, nested, lgcp, matern2 only
+units: {classify: 13, estimate: 84, training_seeds: 1}
+outputs:                   # written (UTC date), sha256
+  oneshot/results/default/compare/report.json: [2026-09-30, 9a955477890204a64fa289c98020bedc3391e8b3040b2bdf125586c925edeb3d]
+  oneshot/results/default/mincontrast/report.json: [2026-09-27, b0572d46c278d98fd1cea00a8405950b727d84c06598583636adfbca6840384f]
+  oneshot/results/default/evaluation/networks/clouds.csv: [2026-09-30, e31ba6f9d99f59ec892b702b7ece55af74b392ea014ee8b1f02fead20aca732d]
+  oneshot/results/default/evaluation/networks_cell/clouds.csv: [2026-09-30, 17da1e787b146d9b6b044b800715218b7ada8536b5e1df6ceca86c7c2f508a0c]
+  oneshot/results/default/evaluation/heldout_mincontrast/clouds.csv: [2026-09-27, 982e6cff951e506992460f219a93d4e851fdc1af5e528997186103f1db8b4221]
+  oneshot/results/default/evaluation/heldout_ph_ablation/clouds.csv: [2026-09-27, 47039102b42bd00a4bb70ad1fbc2aaaa0c599256fc0e972efe0453186d19c1e3]
+  oneshot/results/default/evaluation/heldout_ph_cell/clouds.csv: [2026-09-27, 9c9a700c51d7f198c7d3c9da512880186f9e3bc4f3d382613d8bde190ce3ac34]
+frozen_copies:             # outputs of /gpfs/scratch/qp252676/globus/scorecheck/scorecheck.py (outside the repo), copied here
+  script_sha256: c9424026e66167434ecde26e68f256347906fbbf46d0af8ab78703052635efd0
+  jobs: {repeat: [29571364, 29571365, 29571366, 29571367, 29571368], dose: 29576616}
+  results/frozen/scorecheck/dose_seed0.csv: 87623b17ca1d9830432fdb9e9ec568a95d33bbc1f7b77dc0aa47b10998ee382b
+  results/frozen/scorecheck/repeat_seed0.csv: 0646e3ca141de048791ced52df1bb7bd7456a53b2ce90dd49883227dc35cb3df
+  results/frozen/scorecheck/repeat_seed1.csv: 2b8a76de2084e281ce44047416b9ab272de10b360f594d52b236c3661cc4135d
+  results/frozen/scorecheck/repeat_seed2.csv: 35712098f3d4fe76fa394c6fd61ae09336d98cc557c6d092329c0997dd0adfc8
+  results/frozen/scorecheck/repeat_seed3.csv: ff812c039916dbe864de06f525784b09819cada468e7cc583559cfa58410acc8
+  results/frozen/scorecheck/repeat_seed4.csv: a67e3947585c598f1a6d3163c2db03ae498f369347f663c919c26e7ffb44c8ea
+known_gaps:
+  - one training seed per unit: model-vs-model intervals cover test sampling only
+  - end-to-end numbers over 5 simulation seeds exist for the 480 headline clouds only (kernel score);
+    the cell set (1000 clouds) and the DSS score are one seed
+  - scorecheck.py lives outside the repo; promoting it = a --seed option in scripts/endtoend.py
+  - power check (T8): 5 families, pre-camera-ready code; the wrong-model ladder and minimum detectable gain replace it
+  - evaluation/heldout (`best` with the 25 Sep assignment) is superseded by evaluation/networks and no longer read
 environment: /gpfs/scratch/qp252676/globus/envs/cloud-env

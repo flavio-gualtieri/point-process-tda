@@ -1,0 +1,265 @@
+name: pipeline
+families:
+- poisson
+- thomas
+- nested
+- lgcp
+- matern2
+- ring
+- matern1
+- cell
+prior: equal
+inputs:
+  classical:
+    source: classical
+  ph_alpha:
+    source: ph
+    filtration: alpha_diameter
+  ph_dtm10:
+    source: ph
+    filtration: dtm_k10
+  ph_rips:
+    source: ph
+    filtration: rips
+  ph_dtm5:
+    source: ph
+    filtration: dtm_k5
+  ph_dtm15:
+    source: ph
+    filtration: dtm_k15
+  ph_dtm20:
+    source: ph
+    filtration: dtm_k20
+models:
+  hgb_classical:
+    learner: hgb
+    inputs:
+    - classical
+  hgb_ph:
+    learner: hgb
+    inputs:
+    - ph_alpha
+    - ph_dtm10
+  hgb_classical_ph:
+    learner: hgb
+    inputs:
+    - classical
+    - ph_alpha
+    - ph_dtm10
+  linear_classical:
+    learner: linear
+    inputs:
+    - classical
+  nn_curves:
+    learner: nn
+    curves: L@fixed,F@fixed,G@fixed,J@fixed
+  perslay_dtm10:
+    learner: nn
+    filtration: dtm_k10
+    dims: 0,1
+    perslay: true
+    perslay_norm: zscore
+  perslay_alpha:
+    learner: nn
+    filtration: alpha_diameter
+    dims: 0,1
+    perslay: true
+    perslay_norm: zscore
+  hgb_classical_ph6:
+    learner: hgb
+    inputs:
+    - classical
+    - ph_alpha
+    - ph_dtm10
+    - ph_rips
+    - ph_dtm5
+    - ph_dtm15
+    - ph_dtm20
+  pi_alpha:
+    learner: nn
+    filtration: alpha_diameter
+    dims: 0,1
+  pi_rips:
+    learner: nn
+    filtration: rips
+    dims: 0,1
+  fusion_curves_alpha:
+    learner: nn
+    curves: L@fixed,F@fixed,G@fixed,J@fixed
+    filtration: alpha_diameter
+    dims: 0,1
+  fusion_curves_dtm10:
+    learner: nn
+    curves: L@fixed,F@fixed,G@fixed,J@fixed
+    filtration: dtm_k10
+    dims: 0,1
+nn:
+  seed: 1
+  epochs: 200
+  patience: 30
+  batch_size: 128
+  lr: 0.001
+classify:
+- hgb_classical
+- hgb_ph
+- hgb_classical_ph
+- linear_classical
+- nn_curves
+- perslay_dtm10
+- perslay_alpha
+- hgb_classical_ph6
+- pi_alpha
+- pi_rips
+- fusion_curves_alpha
+- fusion_curves_dtm10
+estimate:
+- hgb_classical
+- hgb_ph
+- hgb_classical_ph
+- nn_curves
+- perslay_dtm10
+- perslay_alpha
+- hgb_classical_ph6
+- pi_alpha
+- pi_rips
+- fusion_curves_alpha
+- fusion_curves_dtm10
+crossfit_folds: 5
+clip_to_train_range: true
+regime:
+  classifier: hgb_classical
+  event: detected
+  coordinates:
+    thomas: omega
+    nested: omega_inner
+    lgcp: zeta
+    matern2: zeta
+    ring: omega
+    matern1: zeta
+    cell: null
+  taus:
+  - 0.5
+  - 0.9
+compare:
+  baseline: hgb_classical
+  bootstrap: 200
+  seed: 0
+  classifiers: all
+  estimators:
+  - best
+  - hgb_classical
+  poisson_threshold: null
+evaluation:
+  clouds:
+    per_bin: 20
+    cell_k_edges:
+    - 2
+    - 3
+    - 5
+    - 31
+    seed: 0
+  kernel:
+    R: 1.5
+    kind: point
+    h: 0.1
+    grid: 21
+    centres: 300
+    pool: 1000
+    sims: 16
+    tau_mult: '1.0'
+  dss:
+    enabled: true
+    groups: no_ph
+    sims: 150
+  skill_min_z: 2
+  seed: 0
+  sets:
+    main:
+      pipelines:
+        best:
+          classifier: hgb_classical_ph
+          estimators: best
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+    ph_ablation:
+      pipelines:
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+        ph:
+          classifier: hgb_classical_ph
+          estimators: hgb_classical_ph
+        ph_estimators:
+          classifier: hgb_classical
+          estimators: hgb_classical_ph
+      clouds:
+        per_bin: 120
+        strata:
+        - above 0.9
+        - k 2-2
+        - k 3-4
+        - k 5-30
+        poisson: 0
+        seed: 1
+    ph_cell:
+      pipelines:
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+        ph:
+          classifier: hgb_classical_ph
+          estimators: hgb_classical_ph
+        ph_estimators:
+          classifier: hgb_classical
+          estimators: hgb_classical_ph
+      clouds:
+        per_bin: 1000
+        strata:
+        - k 5-30
+        poisson: 0
+        seed: 2
+    mincontrast:
+      pipelines:
+        classical:
+          classifier: hgb_classical
+          estimators: hgb_classical
+        ph:
+          classifier: hgb_classical_ph
+          estimators: hgb_classical_ph
+        mincontrast:
+          classifier: mincontrast
+          estimators: mincontrast
+        oracle_ph:
+          classifier: oracle
+          estimators: hgb_classical_ph
+        oracle_mincontrast:
+          classifier: oracle
+          estimators: mincontrast
+mincontrast:
+  c:
+  - 0.25
+  - 0.5
+  r_max:
+  - 0.0625
+  - 0.125
+  - 0.25
+  lambdas:
+  - 0
+  - 0.003
+  - 0.01
+  - 0.016
+  - 0.03
+  - 0.1
+  - 0.3
+  - 1
+  - 3
+  default:
+    c: 0.25
+    r_max: 0.25
+    lambda: 0.016
+  radii_step: 4
+  init: 64
+  starts: 2
+  chunks: 16
+  seed: 0
