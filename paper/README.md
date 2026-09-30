@@ -1,7 +1,7 @@
 # paper — everything for the writing
 
 ```
-main.tex              the paper (AISTATS template; aistats2026.sty)
+main.tex              the paper (AISTATS template; aistats2027.sty + fancyhdr.sty)
 paper.yaml            which results the figures and tables are built from -- the one file to switch after a rerun
 scripts/              one script per display; `python paper/scripts/make.py [f1 t4 ...]` builds them all
 figs/, tables/        generated (committed, so the paper compiles without re-running anything)

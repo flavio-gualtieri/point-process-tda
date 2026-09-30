@@ -1,0 +1,46 @@
+# Freeze of the results the paper is written from. Written once, by hand, on the date below;
+# results/summary.csv (paper/scripts/summary.py) is built from exactly this run.
+frozen: 2026-09-30
+git_commit: b5d617bb9a8fcdcf11dbd6b1b58806d8f2156aac
+git_branch: posterior
+git_dirty: true            # uncommitted: the fused two-filtration network (pipeline/nn.py, its test, 2 models in pipeline.yaml), paper/
+git_diff_sha256: e5e3f30258c827fa79ba44ff0b89b983bb2737ef1abee11de937d92616d2bb9e
+run: oneshot/results/default                # = results_paper/pipeline (symlink) = paper/paper.yaml `run`
+families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]
+bank: {thetas_per_family: 50000, replicates: 2, split_thetas: [37000, 1000, 12000], test_clouds: 192000}
+configs:                   # sha256
+  configs/ablation.yaml: 6668d527476fee043504b60ee8c3a99bc88070f9ed9409b5c98f5e20c4b26efb
+  configs/classical.yaml: 39bd183f67467ed2e067784c6a9998148cd6705727acbc35d465ebf33f56bba5
+  configs/departure.yaml: 2ffaf2e41bc1fd5c6d877b5fc93dfd90e86f878eeea7964b9b22cb62d53be291
+  configs/featurization.yaml: 226668ab4fe41fdbdf35e4f46e782ade7733eecbadd26308443d4393e5096a8e
+  configs/pipeline.yaml: f6babefcf36fd86c08e8e9764cc1dbdf4b5c29470ba73b89b250000283e0cbc5
+  configs/scores.yaml: d4cea88762f2a1a4901830312519aabbe28dd9020b8f1f01e8fb6b7daa9d2eae
+  configs/simulation.yaml: 5ffac87c299937889b0b7c76b138a3bd663d309b617498ae7e483d95ff11dd7f
+  configs/departure_tables.npz: bb6350df2c614215f0ec8779371ff1bbff047595c9a302b73f79ca601dca444e
+  paper/paper.yaml: 266b45beac5a2b70c4edc626ec8126d3fe9dce00b62213d1023721f007419c86
+bank_manifests:            # sha256 of data/bank/<family>/manifest.csv
+  poisson: 65427c38709c34851dfc19da2ed7a351622b96b02cbe07da521945ca41ad8183
+  thomas: b35ba7ac9f742285b80fc47f0348e3fadf5d85e3bf6ffbe9c3d645c053bcc45a
+  nested: 5388710eb7abca0479cfa27df4cebaa30acd3ac148f5e53e8ea034d6c9dc66ce
+  lgcp: aa7a67bcb74d0be0610ce6624fd8507cf76e7ccc4849f089b0c499058c29dba4
+  matern2: 08b9baf399be4387e371bec7875be3aaa4374bf2310a27d83a2fe5daaed84c62
+  ring: a8bd0da0217f3724fb323e26cc45981dc6fdba9bc0098eaa46db095bed00ed66
+  matern1: bb6ceeab38bbfce6f733f6db0419b9bc74e925c4cfef614168e7cd739f3549c1
+  cell: 853469b9d8b47d6f0bc4024263563c430bf9058c18ce13290cd87934204c59d7
+units:                     # trained units with a report.json
+  classify: 13
+  estimate: 84   # 12 models x 7 families (+ mincontrast, not counted)
+outputs:                   # last written (UTC)
+  compare/report.json: 2026-09-27
+  mincontrast/report.json: 2026-09-27
+  evaluation/heldout/report.json: 2026-09-25
+  evaluation/heldout_mincontrast/report.json: 2026-09-27
+  evaluation/heldout_ph_ablation/report.json: 2026-09-27
+  evaluation/heldout_ph_cell/report.json: 2026-09-27
+  cascade/scoring/results/power/report.json: 2026-09-24   # paper.yaml `power`; 5 families only
+known_gaps:                # see paper/notes/plan.md, section 1
+  - compare/ predates fusion_curves_dtm10 and fusion_curves_alpha_dtm10 (trained 2026-09-29): no intervals, not in `best`
+  - evaluation/heldout `best` was scored with the 7-model assignment of 2026-09-25, not compare's current `best`
+  - one training seed per unit; units before 2026-09-29 carry no provenance block (retired oneshot/ trainer)
+  - power check covers poisson, thomas, nested, lgcp, matern2 only
+environment: /gpfs/scratch/qp252676/globus/envs/cloud-env

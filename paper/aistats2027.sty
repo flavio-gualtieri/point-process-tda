@@ -1,10 +1,11 @@
-% File:  aistats2026.sty
+% File:  aistats2027.sty
 
+% Modified by Martin Trapp, 2026: changed venue, year and volume number, enforce all caps sections, enforce author-year citations in accepted papers, minor bug fixes.
 % Modified by Arno Solin, 2025: changed venue, year, and volume number, clarified the instructions, fixed title spacing bug in onecolumn (suppelement) mode, added a `preprint' option similar to other conference style files.
 %
-% Modified by Javier Burroni, 2024 (late): adapted to 2025; stop compilation if running headings are too long. 
-% Modified by Javier Burroni, 2024: volume number. 
-% Modified by Yingzhen Li, 2023: changed year and volume number. 
+% Modified by Javier Burroni, 2024 (late): adapted to 2025; stop compilation if running headings are too long.
+% Modified by Javier Burroni, 2024: volume number.
+% Modified by Yingzhen Li, 2023: changed year and volume number.
 %
 % Modified by Francisco Ruiz, 2022: changed venue, year, and volume number.
 %
@@ -51,12 +52,12 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Content to be changed from year to year
 
-\ProvidesPackage{aistats2026}[2026/08/29 AISTATS2026 submission/camera-ready style file]
+\ProvidesPackage{aistats2027}[2026/09/02 AISTATS2027 submission/camera-ready style file]
 
-\newcommand{\@conferenceordinal}{29\textsuperscript{th}}
-\newcommand{\@conferenceyear}{2026}
-\newcommand{\@conferencelocation}{Tangier, Morocco}
-\newcommand{\@conferencevolume}{300}
+\newcommand{\@conferenceordinal}{30\textsuperscript{th}}
+\newcommand{\@conferenceyear}{2027}
+\newcommand{\@conferencelocation}{Montréal, Québec, Canada}
+\newcommand{\@conferencevolume}{345}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -96,6 +97,11 @@
 \setlength\textwidth{6.75in} \setlength\columnsep{0.25in}
 \newlength\titlebox \setlength\titlebox{2.375in}
 \setlength\headheight{10pt} \setlength\headsep{15pt}
+
+% Emit the PDF at the paper size LaTeX is actually laying out for. No size is
+% Without this, the engine emits its own format default which might be A4.
+\ifdefined\pdfpagewidth \pdfpagewidth=\paperwidth \pdfpageheight=\paperheight \fi
+\ifdefined\pagewidth    \pagewidth=\paperwidth    \pageheight=\paperheight    \fi
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -139,7 +145,8 @@
 \thispagestyle{empty}     \pagestyle{empty}
 \flushbottom \twocolumn \sloppy
 
-\def\addcontentsline#1#2#3{}
+\renewcommand{\addcontentsline}[3]{}
+% \def\addcontentsline#1#2#3{}
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -191,7 +198,7 @@
 
    \ifnum\@runningheadingerrortitle=0
          {
-         \global\setbox\titrun=\vbox{\small\bfseries\@runningtitle}%
+         \global\setbox\titrun=\hbox{\small\bfseries\@runningtitle}%
          \ifdim\wd\titrun>\textwidth%
             {\gdef\@runningheadingerrortitle{2}
              \gdef\@messagetitle{Running heading title too long}
@@ -218,7 +225,7 @@
            \typeout{*******************************************************}%
            \typeout{}%
            \typeout{}%
-           \PackageError{Document}{Running heading title exceeds size limitations. Provide a shorter form for the running head using \string\runningtitle{...}.}{Provide a shorter form for the running head using \string\runningtitle{...}.}
+           \PackageError{aistats2027}{Running heading title exceeds size limitations. Provide a shorter form for the running head using \string\runningtitle{...}.}{Provide a shorter form for the running head using \string\runningtitle{...}.}
         \fi
      }
   \else
@@ -292,7 +299,7 @@
            \typeout{*******************************************************}%
            \typeout{}%
            \typeout{}%
-            \PackageError{Document}{Running heading author exceeds size limitations. Provide a shorter form for the running head using \string\runningauthor{...}.}{Provide a shorter form for the running head using \string\runningauthor{...}.}
+            \PackageError{aistats2027}{Running heading author exceeds size limitations. Provide a shorter form for the running head using \string\runningauthor{...}.}{Provide a shorter form for the running head using \string\runningauthor{...}.}
       \fi
      }
   \else
@@ -402,7 +409,7 @@ Abstract}\vspace{0.5ex}\begin{quote}}{\par\end{quote}\vskip 1ex}
 
 % sections with less space
 \def\section{\@startsection {section}{1}{\z@}{-2.0ex plus
-    -0.5ex minus -.2ex}{1.5ex plus 0.3ex minus .2ex}{\large\bfseries\raggedright}}
+    -0.5ex minus -.2ex}{1.5ex plus 0.3ex minus .2ex}{\large\bfseries\raggedright\MakeUppercase}}
 \def\subsection{\@startsection{subsection}{2}{\z@}{-1.8ex plus
     -0.5ex minus -.2ex}{0.8ex plus .2ex}{\normalsize\bfseries\raggedright}}
 \def\subsubsection{\@startsection{subsubsection}{3}{\z@}{-1.5ex plus
@@ -498,3 +505,19 @@ Abstract}\vspace{0.5ex}\begin{quote}}{\par\end{quote}\vskip 1ex}
      {\def\@noitemerr
        {\@latex@warning{Empty `thebibliography' environment}}%
       \endlist}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%  Ensure author–year citation style for accepted papers
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newcommand{\aistats@checkcitationstyle}{%
+  \@ifpackageloaded{natbib}{%
+    \ifNAT@numbers
+      \PackageError{aistats2027}{Camera-ready papers must use author-year
+        citations}{Load natbib without the `numbers' or `super' option, and use
+        an author-year bibliography style such as plainnat or apalike.}%
+    \fi}{%
+    \PackageWarning{aistats2027}{Camera-ready papers must use author-year
+      citations; natbib was not loaded, so the style cannot be verified}}}
+\if@preprint\else
+  \AtEndDocument{\ifnum\statePaper=1 \aistats@checkcitationstyle \fi}%
+\fi

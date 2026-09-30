@@ -8,12 +8,12 @@
 
 \newcommand{\nb}{\bar n}
 \newcommand{\pending}[1]{\textcolor{red}{[#1]}}
+\newcommand{\edit}[1]{\textcolor{blue}{[#1]}}
 \newcommand{\src}[1]{{\footnotesize\texttt{#1}}}
 % section header row in the claims table
 \newcommand{\claimsec}[2]{\multicolumn{2}{@{}l}{\textcolor{black!60}{\S#1}\enspace\textsc{#2}} \\}
 
-\title{Wrong Family, Right Fit\\[2pt]
-\large High-Fidelity Parameter Fitting for Spatial Point Processes Near Complete Spatial Randomness}
+\title{Wrong Family, Right Fit: Parameter Fitting for Spatial Point Processes}
 \author{AISTATS submission plan}
 \date{}
 
@@ -21,8 +21,39 @@
 \maketitle
 \thispagestyle{empty}
 
+Alternative titles:
+\begin{itemize}
+\item Wrong Family, Right Fit: Fitting Spatial Point Processes from a Single Realization
+\item Inferring Spatial Point Processes from One Realization with Topological Deep Learning
+\end{itemize}
 
-\section*{Abstract [DRAFT]}
+\section{Abstract -- Omer}
+
+Spatial point processes (SPPs) are widely used to model data consisting of discrete event locations. A broad range of statistical models has been developed to capture spatial interactions, from homogeneous Poisson processes describing complete spatial independence to models capturing clustering, repulsion, and more complex spatial dependence. In many applications, only a single point pattern is available, and we seek a plausible generative model from which additional patterns with a similar underlying distribution can be simulated. This requires both selecting an appropriate model family and estimating its parameters, from a single realization. We develop a unified pipeline for these tasks across multiple SPP families, combining classical spatial summary statistics with geometric and topological features derived from \emph{persistent homology}. 
+We show that these features improve estimation performance across a range of SPP families, with the resulting pipeline achieving state-of-the-art results on the evaluated benchmarks.
+Beyond predictive performance, we further analyze the estimation problem itself, characterizing regimes in which parameters are difficult to recover from a single point pattern while showing that new realizations preserving the statistical properties of the observed pattern can nonetheless be generated. Together, these results provide a practical framework for fitting spatial models and generating new realizations consistent with the observed data.
+
+%Beyond predictive performance, we identify regimes in which realizations from different distributions are statistically indistinguishable, revealing fundamental limitations of inference from a single point pattern. [[[is it a limitation? I thought the result show that for estimation it doesn't matter...]]] Together, these results provide a practical framework for fitting spatial models and generating new realizations that preserve the statistical properties of the observed pattern.
+
+\edit{We show that these features improve estimation performance across a range of SPP families, with the resulting pipeline achieving state-of-the-art results on the evaluated benchmarks. Beyond predictive performance, we identify regimes in which realization from different distributions are statistically indistinguishable (an intrinsic property of the data, not necessarily a failure of inference) and show that this ambiguity is inconsequential in practice: even when the generating family cannot be reliably identified, our pipeline produces high-fidelity realizations of the observed pattern. Together, these results provide a practical framework for fitting spatial models and generating new realizations that preserve the statistical properties of the observed pattern.}
+
+
+\section*{Abstract -- version 1}
+
+
+Spatial point processes (SPPs) are  used to model data arising as collections of event locations. A wide range of models has been developed, from homogeneous Poisson processes describing complete spatial randomness to models capturing clustering, repulsion, and more complex spatial dependence. In many applications, only a single point pattern is observed, yet we seek a plausible generative model from which additional patterns with similar spatial structure can be simulated. This motivates both selecting an appropriate model family and estimating its parameters from a single realization. We develop a unified pipeline for these tasks across multiple SPP families, combining classical spatial summary statistics with geometric and topological features derived from \emph{persistent homology}. Across several model families, these features improve parameter estimation, with the resulting pipeline achieving state-of-the-art performance on the evaluated benchmarks. Beyond predictive performance, we analyze the conditions under which estimation becomes difficult, providing insight into the challenges of inference from a single point pattern. Together, these results provide a practical approach to fitting plausible spatial models and generating additional realizations that reflect the structure of the observed data.
+
+\section{abstract -- version 2}
+Spatial point processes (SPPs) are commonly used to model data arising as collections of event locations. A wide range of models has been developed, from homogeneous Poisson processes describing complete spatial randomness to models capturing clustering, repulsion, and more complex spatial dependence. In many applications, only a single point pattern is observed, but we require a plausible generative model from which similar spatial patterns can be simulated from an established parametric SPP model. In this paper, we study model classification and parameter estimation in this setting, developing a pipeline that combines classical spatial summary statistics with geometric and topological features derived from \emph{persistent homology}. Across several SPP families, these features improve parameter estimation, with the resulting pipeline achieving state-of-the-art performance. Finally, we also provide an in-depth analysis of the estimation problem, identifying a class of parameters that are difficult to estimate and showing how these difficulties can be mitigated.
+
+\section{Abstract -- short}
+Spatial point processes (SPPs) are common models for random event locations. Given a single observed pattern, we aim to find a plausible model from an established parametric SPP family to generate similar patterns. We develop a pipeline combining classical spatial summary statistics with topological features derived from \emph{persistent homology} for model classification and parameter estimation. These features improve parameter estimation across several SPP families, yielding state-of-the-art performance. 
+We further analyze the estimation problem itself, characterizing a regime in which parameters are difficult to recover from a single pattern and showing how plausible point patterns can be nonetheless produced. 
+
+%Beyond the pipeline, we perform an in-depth analysis of the estimation problem, identifying a class of problems in which it is difficult to recover parameters from a single observed pattern and showing how estimation can be improved.
+
+\section{Abstract -- old}
+\vspace{2cm}
 
 Spatial point processes (SPPs) are widely used to model real-world phenomena, and their parameters can be directly related to physical quantities of interest.
 
@@ -93,7 +124,7 @@ Near CSR, patterns become inherently difficult to classify regardless of the mod
 
 %==============================================================================
 
-\section*{Paper outline (8 pages; check the CfP for the current limit)}
+\section*{Paper outline}
 
 \begin{tabularx}{\linewidth}{@{}p{2.8cm}X@{}}
 \toprule
