@@ -170,3 +170,24 @@ def test_curves_on_different_grids_get_their_own_encoders(fake_data, tmp_path, m
 
     with pytest.raises(ValueError, match="different grids"):
         D.build_curves(FAMILIES, curves, stack=True, verbose=False)
+
+
+def test_fusion_gives_every_filtration_and_dim_its_own_encoder(fake_data, tmp_path, monkeypatch):
+    """Two fused filtrations whose H0 images differ in rank (rips 1-D, DTM 2-D) cannot be stacked as
+    n_tags, so each (filtration, dim) is its own key beside the curves, and PHNet takes them all."""
+    from cloudforger.pipeline import nn
+    from cloudforger.training.model import PHNet
+
+    monkeypatch.setattr(D, "CLASSICAL", _write_curves(tmp_path, np.random.default_rng(1)))
+    s = {"curves": "L@fixed,F@fixed,G@fixed,J@fixed", "filtration": "rips,dtm_k10", "dims": "0,1"}
+    data, n_tags, _ = nn.build(s, FAMILIES)
+    keys = sorted(data.images)
+    assert n_tags == 1
+    assert keys == ["L@fixed+F@fixed+G@fixed+J@fixed", "dtm_k10_h0", "dtm_k10_h1", "rips_h0", "rips_h1"]
+    assert [data.images[k].ndim - 2 for k in keys] == [1, 2, 2, 1, 2]
+    assert all(len(v) == fake_data for v in data.images.values())
+
+    model = PHNet(ranks=[data.images[k].ndim - 2 for k in keys], n_tags=1,
+                  channels=[data.images[k].shape[1] for k in keys], n_covariates=1, n_outputs=3)
+    batch = [torch.from_numpy(data.images[k][:4]) for k in keys]
+    assert model(batch, torch.from_numpy(data.covariates[:4])).shape == (4, 3)

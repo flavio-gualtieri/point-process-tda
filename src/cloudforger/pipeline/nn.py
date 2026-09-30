@@ -9,6 +9,7 @@ A model spec is the config's `nn:` defaults overridden by one entry of `models:`
     {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed"}                     the curves arm
     {learner: nn, filtration: dtm_k10, dims: "0,1", perslay: true, perslay_norm: zscore}
     {learner: nn, curves: "...", filtration: alpha_diameter, dims: "0,1"}         curves + PH, fused
+    {learner: nn, curves: "...", filtration: "alpha_diameter,dtm_k10", dims: "0,1"}   ... on two filtrations
 
 The input is built once over every configured family, so one fitted network can predict for any
 cloud the pipeline routes to it. Its normalisation statistics therefore use every family's train
@@ -35,24 +36,29 @@ def build(s: dict, families: list[str]):
     """(dataset over `families` in manifest order, n_tags, input description).
 
     `curves` alone is the curves arm, `filtration` alone the diagram arm; both together fuse them:
-    the persistence images and the curves each get their own encoder and meet at the head, as H0 and
-    H1 do. Fusion takes one filtration (PHNet passes every key through its encoder n_tags times) and
-    persistence images, not PersLay (train() gives every key the same kind of encoder)."""
+    the curves and every (filtration, dim) persistence image get their own encoder and meet at the
+    head, as H0 and H1 do. Fused filtrations are built one at a time, not stacked as n_tags, since
+    their images need not share a shape (alpha H0 is 1-D, DTM H0 2-D). Fusion takes persistence
+    images, not PersLay (train() gives every key the same kind of encoder)."""
     curves = D.build_curves(families, D.parse_curves(s["curves"], "sqrtn_u2")) if s.get("curves") else None
     if not s.get("filtration"):
         return curves, 1, s["curves"]
     tags = s["filtration"].split(",")
     dims = [int(d) for d in str(s["dims"]).split(",")]
-    make = D.build_diagrams if s.get("perslay") else D.build
+    scaling = Scaling(coords="sqrt_n", density=True)
     arm = f"{s['filtration']} h{s['dims']}" + (f" perslay({s.get('perslay_norm', 'none')})" if s.get("perslay") else "")
-    if curves is not None and (len(tags) != 1 or s.get("perslay")):
-        raise ValueError(f"fusion needs one filtration and persistence images, got {arm}")
-    data = make(families, tags, dims, scaling=Scaling(coords="sqrt_n", density=True))
     if curves is None:
-        return data, len(tags), arm
+        make = D.build_diagrams if s.get("perslay") else D.build
+        return make(families, tags, dims, scaling=scaling), len(tags), arm
+    if s.get("perslay"):
+        raise ValueError(f"fusion takes persistence images, not PersLay: got {arm}")
     # string keys throughout: the image and curve blocks are ordered by sorted(key) in train() and Rows
-    data.images = {f"ph_h{d}": v for d, v in data.images.items()} | curves.images
-    return data, 1, f"{arm} + {s['curves']}"
+    for tag in tags:
+        data = D.build(families, [tag], dims, scaling=scaling)
+        curves.images |= {f"{tag}_h{d}": v for d, v in data.images.items()}
+        curves.norm |= {f"{tag}_h{d}": v for d, v in data.norm.items()}
+        curves.imagers |= data.imagers
+    return curves, 1, f"{arm} + {s['curves']}"
 
 
 def _loader(dataset, y, index, s, shuffle):

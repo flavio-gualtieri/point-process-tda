@@ -48,6 +48,10 @@ models:
   pi_alpha: {learner: nn, filtration: alpha_diameter, dims: "0,1"}
   pi_rips: {learner: nn, filtration: rips, dims: "0,1"}
   fusion_curves_alpha: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed", filtration: alpha_diameter, dims: "0,1"}
+  # The same fusion on DTM (2-D H0): dtm_k10 is where PH summaries carry cell (hgb_ph), alpha images do not.
+  fusion_curves_dtm10: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed", filtration: dtm_k10, dims: "0,1"}
+  # Both: alpha keeps the exact small-scale geometry (Matern), DTM the local density (cell).
+  fusion_curves_alpha_dtm10: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed", filtration: "alpha_diameter,dtm_k10", dims: "0,1"}
 
 nn:                             # defaults for every `learner: nn` model
   seed: 1
@@ -60,9 +64,9 @@ nn:                             # defaults for every `learner: nn` model
 # Each name trains once per task (and per family for estimators); existing outputs are skipped, so
 # adding a name here and resubmitting trains only what is new.
 classify: [hgb_classical, hgb_ph, hgb_classical_ph, linear_classical, nn_curves, perslay_dtm10, perslay_alpha,
-           hgb_classical_ph6, pi_alpha, pi_rips, fusion_curves_alpha]
+           hgb_classical_ph6, pi_alpha, pi_rips, fusion_curves_alpha, fusion_curves_dtm10, fusion_curves_alpha_dtm10]
 estimate: [hgb_classical, hgb_ph, hgb_classical_ph, nn_curves, perslay_dtm10, perslay_alpha,
-           hgb_classical_ph6, pi_alpha, pi_rips, fusion_curves_alpha]
+           hgb_classical_ph6, pi_alpha, pi_rips, fusion_curves_alpha, fusion_curves_dtm10, fusion_curves_alpha_dtm10]
 
 # Out-of-fold predictions on the train split (folds grouped by theta), for classifiers whose learner
 # supports cheap refits (table learners). The regime cutoffs are fitted on these when present.
@@ -145,6 +149,25 @@ evaluation:
         mincontrast: {classifier: mincontrast, estimators: mincontrast}
         oracle_ph: {classifier: oracle, estimators: hgb_classical_ph}
         oracle_mincontrast: {classifier: oracle, estimators: mincontrast}
+    # The networks end to end, on the headline evaluation's clouds: one network for the classifier and
+    # every estimator, with PH (`fusion`) and without (`curves`), beside the tree pipelines and `best`
+    # so every difference is paired on the same oracle and CSR simulations.
+    networks:
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        curves: {classifier: nn_curves, estimators: nn_curves}
+        ph: {classifier: hgb_classical_ph, estimators: hgb_classical_ph}
+        classical: {classifier: hgb_classical, estimators: hgb_classical}
+        best: {classifier: hgb_classical_ph, estimators: best}
+    # Does PH change the networks' realizations where K is blind? ph_cell's clouds, the classifier held
+    # fixed as in its `ph_estimators`, so only the cell estimator differs between pipelines.
+    networks_cell:
+      pipelines:
+        classical: {classifier: hgb_classical, estimators: hgb_classical}
+        ph_estimators: {classifier: hgb_classical, estimators: hgb_classical_ph}
+        curves_estimators: {classifier: hgb_classical, estimators: nn_curves}
+        fusion_estimators: {classifier: hgb_classical, estimators: fusion_curves_alpha_dtm10}
+      clouds: {per_bin: 1000, strata: [k 5-30], poisson: 0, seed: 2}
 
 # ----------------------------------------------------------------------------------- mincontrast
 # Classical baseline (scripts/mincontrast.py): minimum contrast on Ripley's K against each family's
