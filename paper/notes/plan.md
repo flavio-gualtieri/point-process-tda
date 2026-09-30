@@ -209,3 +209,55 @@ be checked from the repo. They need a literature pass before they go in (`main.t
 
 Not started (stop after task 3). Inputs already settled here: displays that are stale (1.2), the headline
 decision (`ph` vs `best` vs a network pipeline, pending E2), and the claim wording in 3d.
+
+---
+
+## 5. Controls on the kernel score (2026-09-30)
+
+Kernel score only, seed 0 reproduces the stored oracle/CSR/fit scores exactly (max diff 0.0). Code and outputs
+are in `/gpfs/scratch/qp252676/globus/scorecheck/` (outside the repo, not committed; `analysis.out` has every table).
+
+**1. Wrong-model ladder** (2 100 clouds, 100 per regime stratum; regret ×1e-4; failed fits excluded, ≤ 13% at 2 sd).
+Perturbation = independent Gaussian noise on log θ, in units of the family's test s.d. (the RMSE/s.d. unit).
+
+| model | strong strata (gain 56.0, z 13) | middle (gain 1.14, z 4) | weak (gain 0.13, z 0.9) |
+|---|---|---|---|
+| noise 0.1 sd | 0.4 (z 0.8) | 0.3 (1.7) | 0.1 (0.6) |
+| noise 0.25 sd | 7.7 (5.3) | 0.5 (2.7) | 0.1 (0.6) |
+| noise 0.5 sd | 28.6 (8.9) | 3.6 (5.8) | 0.4 (1.7) |
+| noise 1 sd | 94.3 (8.9) | 38.9 (5.6) | 3.7 (4.4) |
+| constant guess (train median) | 40.4 (11.1) | 5.2 (9.0) | 6.5 (11.1) |
+| random θ, same family | 60.8 (10.2) | 62.0 (7.5) | 64.8 (7.9) |
+| random other family | 93.7 (13.4) | 57.1 (8.0) | 70.7 (7.0) |
+
+- Regret rises monotonically with error. The score notices a 0.25 sd error in strong strata (z 5), not 0.1 sd.
+- It also separates wrong models from the truth in weak strata (the constant guess: z 11), so it is not noise there.
+- Family-dependent: Matérn I is nearly blind to parameter error (0.5 sd: z 0.2; gain only 3.5e-4); cell and Matérn II need ≥ 0.5–1 sd.
+- Skill calibration in strong strata: 1 − regret/gain = 0.99 (0.1 sd), 0.86 (0.25), 0.49 (0.5), −0.7 (1 sd), 0.28 (constant guess).
+  Pipelines score 0.92–0.96 yet have RMSE/s.d. 0.4–0.7: their errors sit in directions the score does not punish. So 0.92 must not be read as "parameters nearly right".
+
+**2. Minimum detectable gain** (oracle − CSR; 100 clouds per stratum; MDG = 2·sd/√n).
+- Below 0.5 (6 families): all |z| ≤ 0.8. Gains above about 0.7–1.0e-4 excluded at n = 100 (0.7–6% of the family's strong-stratum gain; Matérn I 27%).
+- **0.5–0.9 band: LGCP (z 2.75, gain 2.2e-4) and ring (z 2.72, 3.6e-4) are positive.** About 2–3% of the strong-stratum gain. This replaces "0 of 14 strata" (n = 20) in claim 6 and in `main.tex`.
+  With 14 strata about 0.7 z > 2 are expected by chance; both hits sit in the transition band, where a small gain is expected.
+- Cell: k 2 z 1.8 (0.6e-4), k 3–4 z −0.1. Thomas 0.5–0.9 z 1.8 (1.3e-4). Nested, Matérn I/II: nothing.
+- At n = 20 (the stored sets) MDG is 3–6e-4 in the middle band, so the earlier null was underpowered there.
+
+**3. Repeatability** (same 480 clouds, same fits, 5 simulation seeds; seed 0 = stored).
+
+| pipeline | seed 0 | mean of 5 | s.d. over seeds |
+|---|---|---|---|
+| oracle_ph | 0.941 | 0.957 | 0.017 |
+| best | 0.931 | 0.943 | 0.014 |
+| fusion | 0.957 | 0.941 | 0.016 |
+| ph | 0.925 | 0.940 | 0.016 |
+| classical | 0.913 | 0.918 | 0.016 |
+| curves | 0.923 | 0.915 | 0.009 |
+| mincontrast | 0.846 | 0.853 | 0.010 |
+
+- Overall skill moves ±0.015 from re-simulation alone. Per-family skill: Matérn I 0.4–0.7, Matérn II 0.15–0.23, cell 0.15–0.27, LGCP 0.05, Thomas 0.02–0.06, nested 0.01, ring 0.02–0.03. **Do not report per-family skill for Matérn I, Matérn II, cell.**
+- Paired differences over the 5 seeds (mean, range): ph − mincontrast +0.087 (+0.076..+0.096); classical − mincontrast +0.065 (+0.046..+0.078);
+  ph − classical +0.023 (+0.012..+0.031); fusion − curves +0.025 (+0.007..+0.036); oracle_ph − ph +0.016 (+0.009..+0.024);
+  **fusion − ph +0.000 (−0.013..+0.032): the 0.96 vs 0.92 seen in the `networks` set was seed luck.**
+- These cover simulation noise only; the bootstrap over clouds (earlier interval for ph − classical [−0.016, +0.058]) is separate and still applies.
+- Report skill as the mean over seeds. Within-cloud regret s.d. over seeds is 2.7e-4 against 8.1e-4 across clouds.
