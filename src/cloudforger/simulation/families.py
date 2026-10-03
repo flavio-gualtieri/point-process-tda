@@ -44,6 +44,18 @@ class Rules:
     ring_jitter: tuple[float, float]
     matern1_fill: float
     cell_k: tuple[int, int]
+    kappa_eff_min: float | None = None       # set: the cv bound is this many effective clusters (cv_limit)
+    strauss_q: tuple[float, float] = (0.01, 1.0)
+    strauss_core_max: float = 0.8
+
+    def cv_limit(self, nbar: float) -> float:
+        """The largest sd(n) / nbar a theta may have. With kappa_eff_min set it is a count of
+        clusters, not a number: a cluster process has cv^2 ~ 1/nbar + 1/kappa, so
+        kappa_eff = 1 / (cv^2 - 1/nbar) >= kappa_eff_min is "at least that many clusters in the
+        window" for every family, LGCP included. Unset, it is the constant cv_max."""
+        if self.kappa_eff_min is None:
+            return self.cv_max
+        return math.sqrt(1 / nbar + 1 / self.kappa_eff_min)
 
     @classmethod
     def load(cls, path: str | Path = "simulation.yaml") -> Rules:
@@ -62,6 +74,7 @@ def gauss_step(r, sigma):
 class Family:
     name = ""
     params: tuple[str, ...] = ()      # model keys, in the order the sampler takes them
+    closed_form = True                # K(r) in closed form (excess); False = simulated at fixed n
 
     def __init__(self, rules: Rules):
         self.rules = rules
@@ -264,6 +277,26 @@ class Cell(Family):
         return np.zeros_like(np.asarray(r, float))
 
 
+class Strauss(Family):
+    """Strauss process conditional on its count, on the unit torus: density proportional to
+    gamma^(pairs closer than R), gamma = 1 - q. q is the strength of the inhibition -- q -> 0 is
+    the binomial process (CSR given n), q = 1 the Gibbs hard core -- and the range is
+    c = R sqrt(n) in mean-spacing units, up to packing pi c^2 / 4 = 0.5 at strauss_core_max = 0.8,
+    twice what Matern II reaches. Given n the activity drops out, so the count is exact and needs
+    no intensity approximation; K has no closed form."""
+    name, params, closed_form = "strauss", ("nbar", "q", "R"), False
+
+    def draw(self, rng, nbar):
+        c = self.rules
+        n = round(nbar)
+        q = float(rng.uniform(*c.strauss_q))
+        core = log_uniform(rng, c.core_min, c.strauss_core_max)
+        return {"nbar": float(n), "q": q, "R": core / math.sqrt(n)}
+
+    def nbar(self, p):
+        return p["nbar"]
+
+
 def ring_step(r, rho, sigma):
     """CDF of the distance between two offspring of one ring: |2 rho sin(psi/2) e + Z|, psi ~ U(0, pi),
     Z ~ N(0, 2 sigma^2 I) -- Rician given psi, averaged over psi by the midpoint rule. Nodes are
@@ -288,30 +321,37 @@ def _matern_pcf(r, lam_p, R):
     return np.where(r < R, 0.0, np.where(r >= 2 * R, 1.0, rho2 / lam**2))
 
 
-FAMILIES: dict[str, type[Family]] = {f.name: f for f in (Poisson, Thomas, Nested, Matern2, LGCP, Ring, Matern1, Cell)}
+FAMILIES: dict[str, type[Family]] = {f.name: f for f in (Poisson, Thomas, Nested, Matern2, LGCP, Ring, Matern1, Cell, Strauss)}
 
 
 def cv(fam: Family, p: dict) -> float:
-    """sd(n) / nbar from K via the isotropic set covariogram of W (valid to r = 1)."""
+    """sd(n) / nbar from K via the isotropic set covariogram of W (valid to r = 1). A family
+    without a closed form is simulated at fixed n, so its count does not vary."""
+    if not fam.closed_form:
+        return 0.0
     e = fam.excess(_R, p)
     return math.sqrt(1 / fam.nbar(p) + (1 - 3 / np.pi) * e[-1] + np.trapezoid((4 - 2 * _R) / np.pi * e, _R))
 
 
+def _over(fam: Family, p: dict) -> float:
+    return cv(fam, p) - fam.rules.cv_limit(fam.nbar(p))
+
+
 def cv_cap(fam: Family, build, lo: float, hi: float) -> float | None:
-    """Largest value with cv <= cv_max, where `build` turns a value into model parameters."""
-    f = lambda v: cv(fam, build(math.exp(v))) - fam.rules.cv_max
+    """Largest value with cv <= the limit, where `build` turns a value into model parameters."""
+    f = lambda v: _over(fam, build(math.exp(v)))
     if f(math.log(lo)) > 0:
         return None
     return hi if f(math.log(hi)) <= 0 else math.exp(brentq(f, math.log(lo), math.log(hi), xtol=1e-6))
 
 
 def cv_floor(fam: Family, build, lo: float, hi: float) -> float | None:
-    """Smallest value with cv <= cv_max, for a `build` whose cv DECREASES in the value.
+    """Smallest value with cv <= the limit, for a `build` whose cv DECREASES in the value.
 
     The mirror of cv_cap. Returns None when even the largest value is too variable, which is a
     genuine infeasibility at this nbar rather than a rejectable draw.
     """
-    f = lambda v: cv(fam, build(math.exp(v))) - fam.rules.cv_max
+    f = lambda v: _over(fam, build(math.exp(v)))
     if f(math.log(hi)) > 0:
         return None
     return lo if f(math.log(lo)) <= 0 else math.exp(brentq(f, math.log(lo), math.log(hi), xtol=1e-6))

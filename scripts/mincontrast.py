@@ -37,7 +37,8 @@ for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
 import numpy as np
 import pandas as pd
 
-from cloudforger.baselines.mincontrast import FREE, MODELS, N_FREE, fit_one, init_worker, radii_mask, ring_table, settings
+from cloudforger.baselines.mincontrast import (FALLBACK, FREE, N_FREE, fit_one, init_worker, models, radii_mask,
+                                               ring_table, settings)
 from cloudforger.classical.lfunction import RADII, k_function
 from cloudforger.paths import BANK, MINCONTRAST
 from cloudforger.pipeline.core import (TARGETS, config_arg, load_classifier, load_config, load_estimator, log,
@@ -49,7 +50,7 @@ OUT = MINCONTRAST                   # / <run name>, set in main()
 
 def cmd_fit(cfg: dict, task: int, workers: int) -> None:
     mc = cfg["mincontrast"]
-    model, chunk = MODELS[task // mc["chunks"]], task % mc["chunks"]
+    model, chunk = models(cfg["families"])[task // mc["chunks"]], task % mc["chunks"]
     out = run_dir(cfg, "mincontrast", "fits", model) / f"chunk_{chunk}.npz"
     if out.exists():
         log(f"{out} exists")
@@ -94,7 +95,7 @@ def cmd_clouds(cfg: dict, workers: int) -> None:
         log(f"  K-hat {f}: {len(g)}")
     np.save(OUT / "khat.npy", khat)
     clouds.to_csv(OUT / "clouds.csv", index=False)
-    for f in MODELS:            # search box and starts: the family's train prior, on the free log scale
+    for f in models(cfg["families"]):   # search box and starts: the family's train prior, on the free log scale
         X = np.column_stack(FREE[f][0](r[(r.split == "train") & (r.family == f)]))
         starts = X[np.random.default_rng(mc["seed"]).choice(len(X), mc["init"], replace=False)]
         np.savez(OUT / f"prior_{f}.npz", lo=X.min(0), hi=X.max(0), starts=starts)
@@ -125,6 +126,7 @@ def cmd_assemble(cfg: dict) -> None:
     mc = cfg["mincontrast"]
     out = run_dir(cfg, "mincontrast")
     fams = cfg["families"]
+    fitted, fallback = models(fams), [f for f in FALLBACK if f in fams]
     setts = settings(mc)
     dflt = setts.index((mc["default"]["c"], mc["default"]["r_max"]))
     clouds = pd.read_csv(OUT / "clouds.csv").set_index("case_id")
@@ -135,7 +137,7 @@ def cmd_assemble(cfg: dict) -> None:
 
     # fits[model] -> theta (N, S, T), D (N, S), bound (N, S), aligned to clouds
     fits = {}
-    for f in MODELS:
+    for f in fitted:
         parts = [np.load(p) for p in sorted((out / "fits" / f).glob("chunk_*.npz"))]
         if len(parts) != mc["chunks"]:
             raise SystemExit(f"{f}: {len(parts)} of {mc['chunks']} chunks")
@@ -145,7 +147,7 @@ def cmd_assemble(cfg: dict) -> None:
 
     split, family, n = clouds.split.to_numpy(), clouds.family.to_numpy(), clouds.n.to_numpy(float)
     val, test = split == "val", split == "test"
-    k_med = float(np.exp(np.median(np.log(r.k[(r.split == "train") & (r.family == "cell")]))))
+    prior = {f: FALLBACK[f](r[(r.split == "train") & (r.family == f)], n) for f in fallback}   # aligned to clouds
     sd_all = {f: np.log(r[(r.split == "test") & (r.family == f)][TARGETS[f]].to_numpy(float)).std(0) for f in fams}
     vsd = {f: np.log(r[(r.split == "val") & (r.family == f)][TARGETS[f]].to_numpy(float)).std(0) for f in fams}
     Y = {f: np.log(info[TARGETS[f]].to_numpy(float)) for f in fams if f != "poisson"}
@@ -154,7 +156,7 @@ def cmd_assemble(cfg: dict) -> None:
 
     # ---- estimator tuning: per family, the setting with the lowest val error on its own clouds
     tune, chosen = [], {}
-    for f in MODELS:
+    for f in fitted:
         own = family == f
         for s, (c, rm) in enumerate(setts):
             lg = est(f, s)
@@ -180,8 +182,8 @@ def cmd_assemble(cfg: dict) -> None:
         return float(sum(fam_w[f] * np.mean(call[mask & (family == f)] == f) for f in fams))
 
     def select(s, lam):
-        crit = np.column_stack([np.log(d_poisson(s))] + [np.log(fits[f]["D"][:, s]) + lam * N_FREE[f] for f in MODELS])
-        return np.array(["poisson", *MODELS])[np.argmin(crit, axis=1)]
+        crit = np.column_stack([np.log(d_poisson(s))] + [np.log(fits[f]["D"][:, s]) + lam * N_FREE[f] for f in fitted])
+        return np.array(["poisson", *fitted])[np.argmin(crit, axis=1)]
 
     sel = [{"c": setts[s][0], "r_max": setts[s][1], "lambda": lam, "val": balanced_acc(select(s, lam), val),
             "test": balanced_acc(select(s, lam), test)} for s in range(len(setts)) for lam in mc["lambdas"]]
@@ -200,13 +202,13 @@ def cmd_assemble(cfg: dict) -> None:
                          posterior=onehot(labels), classes=np.array(fams))
         write_json(d / "report.json", {"source": "scripts/mincontrast.py",
                                        "note": "K-contrast selection" if name == "mincontrast" else "the true family"})
-    for f in [*MODELS, "cell"]:
-        theta = (np.column_stack([n, np.full(len(n), k_med)]) if f == "cell" else np.exp(est(f, chosen[f])))
+    for f in [*fitted, *fallback]:
+        theta = prior[f] if f in FALLBACK else np.exp(est(f, chosen[f]))
         d = unit_dir(cfg, "estimate", "mincontrast", f)
         save_predictions(d / "predictions.npz", case_id=clouds.index.to_numpy(), split=split, theta_hat=theta,
                          targets=np.array(TARGETS[f]), family=f)
         write_json(d / "report.json", {"source": "scripts/mincontrast.py",
-                                       "setting": None if f == "cell" else dict(zip(("c", "r_max"), setts[chosen[f]]))})
+                                       "setting": None if f in FALLBACK else dict(zip(("c", "r_max"), setts[chosen[f]]))})
 
     # ---- comparison with the learned units on the same test clouds
     learned = [m for m in cfg["estimate"] if m in ("hgb_classical", "hgb_classical_ph", "nn_curves")]
@@ -220,12 +222,12 @@ def cmd_assemble(cfg: dict) -> None:
          f"`mc default` = c {setts[dflt][0]}, r_max {setts[dflt][1]}; `mc tuned` = the setting with the lowest val error.", "",
          "| family | mc default | mc tuned (c, r_max) | at bound | " + " | ".join(learned) + " | tuned − hgb_classical_ph |",
          "|---|---|---|---|" + "---|" * len(learned) + "---|"]
-    for f in [*MODELS, "cell"]:
+    for f in [*fitted, *fallback]:
         own = test & (family == f)
         tid = clouds.index[own]
         true = Y[f][own]
-        mc_t = (np.log(np.column_stack([n[own], np.full(own.sum(), k_med)])) if f == "cell" else est(f, chosen[f])[own])
-        mc_d = mc_t if f == "cell" else est(f, dflt)[own]
+        mc_t = np.log(prior[f][own]) if f in FALLBACK else est(f, chosen[f])[own]
+        mc_d = mc_t if f in FALLBACK else est(f, dflt)[own]
         cells, ref = {}, None
         for m in learned:
             p = load_estimator(cfg, f, m)
@@ -236,8 +238,8 @@ def cmd_assemble(cfg: dict) -> None:
             if m == "hgb_classical_ph":
                 ref = lg
         lo, hi = boot_diff(mc_t, ref, true, sd_all[f], info.theta.to_numpy()[own]) if ref is not None else (np.nan, np.nan)
-        eb = "—" if f == "cell" else f"{fits[f]['at_bound'][own, chosen[f]].mean():.2f}"
-        st = "n, median k" if f == "cell" else f"{setts[chosen[f]][0]}, {setts[chosen[f]][1]}"
+        eb = "—" if f in FALLBACK else f"{fits[f]['at_bound'][own, chosen[f]].mean():.2f}"
+        st = "n, prior median" if f in FALLBACK else f"{setts[chosen[f]][0]}, {setts[chosen[f]][1]}"
         e_t, e_d = err(mc_t, true, sd_all[f]), err(mc_d, true, sd_all[f])
         L.append(f"| {f} | {e_d:.3f} | {e_t:.3f} ({st}) | {eb} | " + " | ".join(f"{cells.get(m, np.nan):.3f}" for m in learned)
                  + f" | {e_t - cells.get('hgb_classical_ph', np.nan):+.3f} [{lo:+.3f}, {hi:+.3f}] |")
@@ -245,7 +247,7 @@ def cmd_assemble(cfg: dict) -> None:
 
     L += ["", "By regime (tuned mc vs hgb_classical_ph; in regime = compare's frozen cutoffs, τ = 0.5 / 0.9):", "",
           "| family | subset | n | mc tuned | mc at bound | hgb_classical_ph |", "|---|---|---|---|---|---|"]
-    for f in MODELS:
+    for f in fitted:
         own = test & (family == f)
         sub = info[own]
         p = load_estimator(cfg, f, "hgb_classical_ph")
@@ -275,7 +277,8 @@ def cmd_assemble(cfg: dict) -> None:
         rec = [np.mean(cl[test & (family == f)] == f) for f in fams]
         L.append(f"| {name} | {acc:.3f} | " + " | ".join(f"{x:.2f}" for x in rec) + " |")
         report["classifiers"][name] = {"accuracy": acc, "recall": dict(zip(fams, rec))}
-    L += ["", "Cell is never called: its K is exactly πr², so any K-based selection sends it to poisson.", ""]
+    L += ["", f"Never called: {', '.join(fallback)} -- no K to fit (cell's is exactly πr², so K-based selection "
+          "sends it to poisson); estimated as n and the train-prior median.", ""]
     write_json(out / "report.json", report)
     (out / "summary.md").write_text("\n".join(L) + "\n")
     log(f"-> {out / 'summary.md'}")
@@ -298,7 +301,7 @@ def main(argv=None) -> None:
     global OUT
     OUT = OUT / cfg["name"]
     if args.cmd == "tasks":
-        print(len(MODELS) * cfg["mincontrast"]["chunks"])
+        print(len(models(cfg["families"])) * cfg["mincontrast"]["chunks"])
     elif args.cmd == "clouds":
         cmd_clouds(cfg, args.workers)
     elif args.cmd == "fit":

@@ -1,0 +1,90 @@
+# The v2 bank's results, for the paper scripts: PAPER_CONFIG=paper/paper_v2.yaml python paper/scripts/<script>.py
+# Same keys as paper/paper.yaml; what differs is said here. paper/paper.yaml and its outputs are untouched.
+#
+# v2: minimal curation (configs/v2/simulation.yaml) and the library Strauss in, Matern I out
+# (configs/v2/pipeline.yaml). Matern I is in the bank as the out-of-distribution family.
+
+run: results_v2/pipeline
+data: data_v2                       # the bank the run was trained on (sets CLOUDFORGER_DATA)
+outputs:                            # kept apart from v1's paper/figs, paper/tables, results/
+  figs: paper/figs/v2
+  tables: paper/tables/v2
+  results: results/v2
+
+evaluation:
+  main: evaluation/fidelity         # 1440 clouds, 60 per stratum under the size-0.05 regime: fusion, mincontrast, oracle_fusion, oracle_mincontrast
+  mincontrast: evaluation/fidelity
+  curves: evaluation/fidelity_curves   # the same 1440 clouds: fusion (identical rows) vs curves, paired
+  filtrations: evaluation/fidelity_filtrations   # the same 1440 clouds: alpha alone vs DTM_10 alone vs fusion, paired
+  # evaluation/headline and headline_mc were picked under the earlier argmax regime: not used here
+
+ood: ood                            # <run>/ood/<family>/: the classifiers' calls on families never trained on
+
+# Not run on v2 yet: the 5-seed rescoring, the wrong-model ladder, the cell set, the PH ablation sets,
+# the power check and the single-model ablation. Every display that needs one is skipped.
+repeat: null
+dose: null
+power: null
+ablation: null
+
+frozen_classifier: fusion_curves_alpha_dtm10
+headline_variant: fusion
+highlight: [fusion_curves_alpha_dtm10, nn_curves, hgb_classical]
+
+story:
+  headline: fusion_curves_alpha_dtm10
+  grid:                             # input -> {learner: model}; v2 trained only these networks
+    classical + PH: {network: fusion_curves_alpha_dtm10, trees: hgb_classical_ph}
+    classical: {network: nn_curves, trees: hgb_classical}
+    PH: {trees: hgb_ph}
+  floor: [linear_classical]
+  pipelines:
+    fusion: network, classical + PH
+    mincontrast: minimum contrast
+    oracle_fusion: true family, network classical + PH
+    oracle_mincontrast: true family, minimum contrast
+  cell_pipelines: {}
+  contrasts:                        # evaluation sets re-scoring the main clouds: set -> paired differences
+    curves: [[fusion, curves]]
+    filtrations: [[fusion, alpha], [fusion, dtm10], [alpha, dtm10]]
+  filtrations:                      # s6_filtrations: label -> the same network on these inputs
+    both: fusion_curves_alpha_dtm10
+    alpha: fusion_curves_alpha
+    DTM: fusion_curves_dtm10
+    neither: nn_curves
+  filtration_pipelines: {both: fusion, alpha: alpha, DTM: dtm10}   # s6_filtrations skill row -> evaluation variant
+
+# ---- results displays (paper/scripts/tables.py: m_main in the main body; m_fidelity, m_families, m_classification
+#      and f3 confusion in the appendix)
+names:                              # how the paper names pipelines and models
+  fusion: ParamNet
+  mincontrast: Minimum contrast
+  oracle_fusion: ParamNet, true family
+  oracle_mincontrast: Minimum contrast, true family
+  fusion_curves_alpha_dtm10: ParamNet
+  nn_curves: ParamNet, classical
+  hgb_classical_ph: Trees, classical + PH
+  hgb_classical: Trees, classical
+  hgb_ph: Trees, PH
+  linear_classical: Logistic, classical
+fidelity:                           # m_fidelity: one row per estimator, [given the predicted family, given the true one];
+  - [fusion, oracle_fusion]         # paired differences down (first row - second) and across (true - predicted)
+  - [mincontrast, oracle_mincontrast]
+main_table:                         # m_main: pipeline -> the classifier that routes it, for the identification columns
+  fusion: fusion_curves_alpha_dtm10
+  mincontrast: mincontrast
+family_pair: [fusion, mincontrast]  # m_families: per-family skill of these two, and their difference
+family_pair_true: [oracle_fusion, oracle_mincontrast]   # m_families: their difference given the true family
+coarse:                             # m_classification: the mechanism a family belongs to
+  poisson: CSR
+  thomas: clustered
+  nested: clustered
+  lgcp: clustered
+  ring: clustered
+  matern2: regular
+  strauss: regular
+  cell: cell
+main_body_exclude:                  # single-filtration ablations: Section 6b's contrast, not Table 1's ceiling
+  - fusion_curves_alpha
+  - fusion_curves_dtm10
+confusion_tau: 0.9                  # F3: confusion matrix on the clouds beyond the wall at this tau (null: all)

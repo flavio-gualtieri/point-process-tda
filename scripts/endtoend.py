@@ -2,6 +2,8 @@
 """End-to-end score of whole pipelines: fit on one replicate, score on the other.
 
     python scripts/endtoend.py --set main [--config ...] [--workers N] [--limit N]
+    python scripts/endtoend.py --set main --shard 2/6      # score every 6th cloud from the 3rd (a SLURM array task)
+    python scripts/endtoend.py --set main --merge          # the shards -> clouds.csv, report.json, summary.md
 
 A pipeline = a classifier + an estimator assignment, as in compare.py (`best` = compare's
 validation choice per family, read from compare/report.json). Each named set in the config's
@@ -18,6 +20,14 @@ per_bin x 3 poisson clouds as the noise floor. `clouds.strata` keeps only the na
 pipeline of a set is scored on the same clouds with the same oracle and CSR simulations.
 
 Output  <results>/<run>/evaluation/<set>/{clouds.csv, report.json, summary.md, config.yaml}
+
+Sharding splits the clouds, never the work on one cloud: every simulation is seeded by (seed, case_id,
+model) (scores.simulate.rng_for), so a merged sharded run is identical to an unsharded one. Shards land
+in <set>/shards/clouds_<i>.csv; --merge refuses a set with a shard missing.
+
+A set may also set `seed` to rescore at another simulation seed. `clouds.seed` chooses WHICH clouds and
+must stay fixed for the sets to be paired; `seed` reseeds the simulations scored on them, which is how the
+re-simulation noise on skill is measured (several such sets -> paper.yaml `repeat`).
 """
 
 from __future__ import annotations
@@ -152,6 +162,8 @@ def main(argv=None) -> None:
     p.add_argument("--set", dest="set_name", default="main", help="an evaluation.sets entry (default: %(default)s)")
     p.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 4)))
     p.add_argument("--limit", type=int, help="score only N clouds (smoke test)")
+    p.add_argument("--shard", help="i/k: score clouds i, i+k, i+2k, ... only (0-based)")
+    p.add_argument("--merge", action="store_true", help="assemble the shards and summarize; scores nothing")
     args = p.parse_args(argv)
     cfg = load_config(args.config)
     ev = cfg["evaluation"]
@@ -169,6 +181,24 @@ def main(argv=None) -> None:
         chosen = chosen.sample(args.limit, random_state=0)
     scored = r.loc[[partner(c) for c in chosen.index]]
     log(f"{len(chosen)} clouds ({chosen.groupby('family').size().to_dict()})")
+    if args.merge:
+        k = len(list((out / "shards").glob("clouds_*.csv")))
+        n = json.loads((out / "shards" / "plan.json").read_text())["shards"] if (out / "shards" / "plan.json").exists() else k
+        if k != n or not k:
+            raise SystemExit(f"{out / 'shards'}: {k} of {n} shards")
+        df = pd.concat([pd.read_csv(out / "shards" / f"clouds_{i}.csv") for i in range(n)], ignore_index=True)
+        if set(df.fit_case_id) != set(chosen.index) or df.duplicated(["fit_case_id", "variant"]).any():
+            raise SystemExit("the shards' clouds are not this set's clouds (config changed since they ran?)")
+        if (df.scored_case_id != df.fit_case_id.map(partner)).any():
+            raise SystemExit("a fit is scored on a pattern other than its own theta's other replicate")
+        return finish(df, cfg, ev, args.set_name, pipelines, best, clouds, out, t0)
+    if args.shard:
+        shard, n_shards = (int(x) for x in args.shard.split("/"))
+        (out / "shards").mkdir(parents=True, exist_ok=True)
+        write_json(out / "shards" / "plan.json", {"shards": n_shards})
+        chosen = chosen.iloc[shard::n_shards]
+        scored = r.loc[[partner(c) for c in chosen.index]]
+        log(f"shard {shard}/{n_shards}: {len(chosen)} clouds")
 
     per_cloud = {cid: [] for cid in chosen.index}
     for name, spec in pipelines.items():
@@ -176,6 +206,8 @@ def main(argv=None) -> None:
             per_cloud[cid].append(v)
     xs = observed(scored)
     ev_score = {k: ev[k] for k in ("kernel", "dss", "seed")}
+    if "seed" in s:                      # a set may rescore the SAME clouds at another simulation seed:
+        ev_score["seed"] = s["seed"]     # `clouds.seed` picks the clouds and stays fixed, this reseeds the sims
     jobs = []
     for cid, sid in zip(chosen.index, scored.index):
         jobs.append({"case_id": sid, "x": xs[sid], "oracle": true_model(r.loc[cid]), "variants": per_cloud[cid],
@@ -195,12 +227,20 @@ def main(argv=None) -> None:
     df = df.rename(columns={"case_id": "scored_case_id"}).join(
         chosen[["family", "stratum", "n"]].rename(columns={"n": "n_fit"}), on="fit_case_id")
     df["n_scored"] = df.scored_case_id.map(scored.n)
+    if args.shard:
+        df.to_csv(out / "shards" / f"clouds_{shard}.csv", index=False)
+        log(f"-> {out / 'shards' / f'clouds_{shard}.csv'}  ({time.time() - t0:.0f}s)")
+        return
+    finish(df, cfg, ev, args.set_name, pipelines, best, clouds, out, t0)
+
+
+def finish(df, cfg, ev, set_name, pipelines, best, clouds, out, t0) -> None:
     df.to_csv(out / "clouds.csv", index=False)
     scores = ["kernel"] + (["dss"] if ev["dss"]["enabled"] else [])
     rep = summarize(df, scores, ev["skill_min_z"])
-    write_json(out / "report.json", {"set": args.set_name, "pipelines": pipelines, "best": best,
+    write_json(out / "report.json", {"set": set_name, "pipelines": pipelines, "best": best,
                                      "clouds": clouds, "variants": rep})
-    (out / "summary.md").write_text(render(rep, cfg, args.set_name, scores, cfg["families"]))
+    (out / "summary.md").write_text(render(rep, cfg, set_name, scores, cfg["families"]))
     for v, d in rep.items():
         log(f"{v:10s} " + " | ".join(f"{s}: skill overall {fmt(d['overall'], s)}, structured {fmt(d['structured'], s)}"
                                      for s in scores))

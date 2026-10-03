@@ -15,6 +15,9 @@ identifies a row all the way to predictions.npz.
 Imagers are fitted on TRAIN rows only, once per (tag, dim), and applied frozen to every row; the
 per-channel z-score likewise -- one (mean, std) per filtration channel, pooled over train patterns
 and pixels, so the picture is only shifted and rescaled, never reshaped per pattern or per pixel.
+Families passed as `unseen` are appended with split "unseen": every row gets an input, but none of
+theirs is a train row, so a model can be applied to a family it never saw through exactly the
+statistics it was trained under.
 
 Images pass through sqrt before that z-score: a linearly weighted persistence image of H1 is ~93%
 empty with a handful of very bright pixels (standardized range [-0.2, +50] on real Thomas dtm_k10
@@ -54,11 +57,11 @@ class Dataset:
         return np.flatnonzero((self.manifest["split"] == split).to_numpy())
 
 
-def load_manifest(families: list[str]) -> pd.DataFrame:
+def load_manifest(families: list[str], unseen: list[str] = ()) -> pd.DataFrame:
     frames = []
-    for family in families:
+    for family in [*families, *unseen]:
         m = pd.read_csv(BANK / family / "manifest.csv")
-        m["split"] = split_of(m["theta"].to_numpy())
+        m["split"] = "unseen" if family in unseen else split_of(m["theta"].to_numpy())
         frames.append(m)
     return pd.concat(frames, ignore_index=True)
 
@@ -106,8 +109,9 @@ def build(
     scaling: Scaling = Scaling(),
     transform: str = "sqrt",
     verbose: bool = True,
+    unseen: list[str] = (),
 ) -> Dataset:
-    manifest = load_manifest(families)
+    manifest = load_manifest(families, unseen)
     n = manifest["n"].to_numpy()
     train = manifest.index[manifest["split"] == "train"].to_numpy()
 
@@ -115,7 +119,7 @@ def build(
     for dim in dims:
         channels = []
         for tag in tags:
-            pairs = [p for family in families for p in load_pairs(family, tag, dim)]
+            pairs = [p for family in [*families, *unseen] for p in load_pairs(family, tag, dim)]
             if len(pairs) != len(manifest):
                 raise ValueError(f"{tag} H{dim}: {len(pairs)} diagrams for {len(manifest)} patterns")
             channel, imager = _channel(pairs, n, train, tag, dim, resolution, sigma_pixels,
@@ -147,6 +151,7 @@ def build_diagrams(
     max_points: int = 1024,
     scaling: Scaling = Scaling(),
     verbose: bool = True,
+    unseen: list[str] = (),
 ) -> Dataset:
     """The PersLay arm: the same diagrams, padded instead of rasterized.
 
@@ -162,7 +167,7 @@ def build_diagrams(
     No birth_axis here either: rips/alpha H0 births are all 0, so that column standardizes to a
     constant the layer can only ignore, which is what the 1-D image says by dropping it.
     """
-    manifest = load_manifest(families)
+    manifest = load_manifest(families, unseen)
     n = manifest["n"].to_numpy()
     train = manifest.index[manifest["split"] == "train"].to_numpy()
 
@@ -170,7 +175,7 @@ def build_diagrams(
     for dim in dims:
         channels, stats = [], []
         for tag in tags:
-            pairs = [p for family in families for p in load_pairs(family, tag, dim)]
+            pairs = [p for family in [*families, *unseen] for p in load_pairs(family, tag, dim)]
             if len(pairs) != len(manifest):
                 raise ValueError(f"{tag} H{dim}: {len(pairs)} diagrams for {len(manifest)} patterns")
             padder, truncated = fit_padder([pairs[i] for i in train], n[train], coverage=coverage,
@@ -211,7 +216,7 @@ def parse_curves(spec: str, default_grid: str) -> list[tuple[str, str]]:
 
 
 def build_curves(families: list[str], curves: list[tuple[str, str]], stack: bool | None = None,
-                 verbose: bool = True) -> Dataset:
+                 verbose: bool = True, unseen: list[str] = ()) -> Dataset:
     """The classical arm: (curve, grid) pairs as 1-D channels.
 
     stack puts the curves in as channels of ONE encoder, which is only meaningful when they share a
@@ -230,12 +235,12 @@ def build_curves(families: list[str], curves: list[tuple[str, str]], stack: bool
     elif stack and len(grids) > 1:
         raise ValueError(f"curves on different grids ({sorted(grids)}) cannot share an encoder")
 
-    manifest = load_manifest(families)
+    manifest = load_manifest(families, unseen)
     train = manifest.index[manifest["split"] == "train"].to_numpy()
 
     blocks = {}
     for name, grid in curves:
-        block = np.concatenate([load_curves(f, grid, name) for f in families])[:, None, :]
+        block = np.concatenate([load_curves(f, grid, name) for f in [*families, *unseen]])[:, None, :]
         if len(block) != len(manifest):
             raise ValueError(f"{name} on {grid}: {len(block)} curves for {len(manifest)} patterns")
         blocks[f"{name}@{grid}"] = block

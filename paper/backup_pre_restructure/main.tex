@@ -1,0 +1,655 @@
+\documentclass[twoside]{article}
+
+\usepackage{aistats2027}
+%\usepackage[accepted]{aistats2027}
+%\usepackage[preprint]{aistats2027}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[round]{natbib}
+\renewcommand{\bibname}{References}
+\renewcommand{\bibsection}{\subsubsection*{\bibname}}
+
+% FLOATS. Figures are drawn at the width they print at (paper/scripts/common.py: 6.75in = \textwidth for
+% figure*, 3.25in = \columnwidth for figure), so their text keeps its size. Let floats share a page with
+% text before LaTeX sends them to a page of their own.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\dbltopfraction}{0.9}
+\renewcommand{\bottomfraction}{0.5}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.8}
+\renewcommand{\dblfloatpagefraction}{0.8}
+\setcounter{topnumber}{3}
+\setcounter{dbltopnumber}{2}
+\setcounter{totalnumber}{4}
+
+% MARKERS
+\newcommand{\TBD}[1]{\textcolor{red}{[TBD\ifx\relax#1\relax\else: #1\fi]}}
+\newcommand{\NI}[1]{\textcolor{red}{[NEEDS INPUT: #1]}}
+\newcommand{\WIP}[1]{\textcolor{blue}{[WIP: #1]}}
+\newcommand{\src}[1]{{\footnotesize\texttt{#1}}}
+\newcommand{\nb}{\bar n}
+\newcommand{\pc}{\mathbf{x}}
+\newcommand{\kpar}{\kappa}
+\newcommand{\mo}{\mu}
+
+\begin{document}
+
+\twocolumn[
+\aistatstitle{Inferring Spatial Point Processes from a Single Realization with Topological Deep Learning}
+\aistatsauthor{Anonymous Author(s)}
+\aistatsaddress{Anonymous Institution(s)} ]
+
+%==============================================================================
+
+\begin{abstract}
+Spatial point processes (SPPs) are widely used to model data consisting of discrete event locations. A range of statistical
+models has been developed to capture spatial interactions, from homogeneous Poisson processes describing complete spatial
+independence to models capturing clustering, repulsion, and more complex spatial dependence. In many applications,
+only a single point pattern is available, and we seek a plausible generative model from which additional patterns with a
+similar underlying distribution can be simulated. This requires selecting an appropriate model family and estimating its parameters
+from a single realization. We develop a unified pipeline for these tasks across multiple SPP families,
+in which neural networks trained on simulated patterns combine classical spatial summary statistics with
+topological features derived from persistent homology. We show that these features improve estimation performance,
+with the resulting pipeline achieving state-of-the-art results on classical benchmarks.
+In addition, we analyze the state space of the classification problem, characterizing regimes in which different point process
+families are indistinguishable. Nevertheless, we show that even in these ambiguous regimes, our pipeline can generate new
+realizations that preserve the statistical properties of the observed pattern.
+Together, these results provide a practical framework for fitting spatial models and simulating patterns
+consistent with the observed data.
+\end{abstract}
+
+%==============================================================================
+
+\section{INTRODUCTION}
+\label{sec:intro}
+
+\begin{itemize}
+  \item Setting: a single observed pattern; we want a plausible generative model from an established parametric
+        family, from which similar patterns can be simulated. This means selecting the family and estimating its
+        parameters from one realization.
+  \item Hook: classification accuracy over the 8 families looks weak ($0.45$; $0.75$ beyond the CSR wall), yet the
+        end-to-end skill of the fitted models is high ($0.90$, against $0.74$ for minimum contrast, whose gap comes
+        from the two families $K$ cannot fit). Classification errors cost no fidelity: skill $0.90$ with the
+        predicted family vs $0.89$ with the correct one.
+  \item Why accuracy is the wrong target near CSR: every model struggles on patterns near complete spatial randomness,
+        and any prior that is not cherry-picked produces many of them. This is a property of the problem, not a
+        failure of the models. What matters is whether the fitted model reproduces the pattern.
+  \item Contributions:
+  \begin{enumerate}
+    \item \textbf{Scoring} (Section~\ref{sec:score}): a fit is scored by how well its simulations match an independent held-out
+          replicate, with a strictly proper kernel score on local configurations, reported as skill between CSR
+          and the true model.
+    \item \textbf{CSR threshold} (Section~\ref{sec:wall}): for every family except cell, detectability from CSR is governed by one
+          physical coordinate (cluster overlap $\omega$ or a pair-count signal-to-noise ratio $\zeta$) times a fitted
+          power of $\nb$. Before this boundary even the oracle does not beat Poisson.
+    \item \textbf{Pipeline} (Sections~\ref{sec:model} and~\ref{sec:fidelity}): classifier then family-specific estimator,
+          $p(f,\theta\mid x)=p(f\mid x)\,p(\theta\mid x,f)$. Structured patterns sent to Poisson cost nothing,
+          wrong-family fits are about as good as right-family ones. The pipeline beats minimum contrast at
+          selection; end to end, it matches minimum contrast given the true family where $K$ can be fitted, and
+          fits Strauss and cell, where it cannot.
+    \item \textbf{TDA features} (Section~\ref{sec:fidelity}): adding persistent homology never makes estimates significantly worse and
+          helps where second-order statistics are blind (cell, $K(r)=\pi r^2$ exactly).
+  \end{enumerate}
+\end{itemize}
+
+%==============================================================================
+
+\section{SETTING AND SCORE}
+\label{sec:setting}
+
+\subsection{Spatial Point Processes}
+\label{sec:spp}
+
+A spatial point process $X$ is a random collection of points in $\mathbb{R}^2$. We observe a single realization of $X$ restricted to $W = [0, 1]^2$, $\pc := \{x_1, \dots, x_{N(W)}\}$,
+where the number of points $N(W)$ is random, with expected value $\mathbb{E}N(W) = \nb$.
+
+The process $X$ is \emph{stationary} if the translation
+$X+h=\{x+h : x\in X\}$ has the same distribution as $X$ for every $h\in\mathbb{R}^2$, and \emph{isotropic} if the
+rotation $\mathcal{R}X$ has the same distribution as $X$ for every rotation $\mathcal{R}$ about the origin.
+Under stationarity, $\mathbb{E}N(W)=\lambda|W|$ for a constant intensity $\lambda$, thus we have $\lambda=\nb$.
+
+Second-order and nearest-neighbour summary statistics are widely used to analyse SPPs. In this study, we consider the
+$K$, $L$, $F$, $G$ and $J$ functions, defined for a stationary process with intensity $\lambda$. Ripley's $K$
+function is defined so that $\lambda K(r)$ is the expected number of further points within distance $r$ of a typical
+point of $X$. The $L$ function,
+\[
+  L(r)=\sqrt{K(r)/\pi},
+\]
+rescales $K$ to units of distance, and is more widely used in practice. For small $r$, $L(r) - r > 0$ can suggest clustering, and  $L(r) - r < 0$ suggests regularity.
+
+The remaining functions are based on distances to the nearest point of $X$. The empty-space function
+$F(r)=\mathbb{P}\bigl(d(u,X)\le r\bigr)$ is the distribution of the distance from an arbitrary fixed location
+$u\in\mathbb{R}^2$ to the nearest point of $X$, and the nearest-neighbour function
+$G(r)=\mathbb{P}\bigl(d(x,X\setminus\{x\})\le r\bigr)$ is the distribution of the distance from a typical point $x$ of
+$X$ to its nearest neighbour. Intuitively, $F$ measures the size of the gaps between points, while $G$ measures how
+tightly points are packed around each other. The $J$ function combines them,
+\[
+  J(r)=\frac{1-G(r)}{1-F(r)}, \qquad F(r)<1,
+\]
+and compares what a typical point sees with what an arbitrary location sees: $J(r)<1$ indicates that points are closer
+to each other than arbitrary locations are to points (clustering), and $J(r)>1$ indicates the opposite (regularity).
+
+
+\subsection{Families}
+\label{sec:families}
+
+We consider nine families of stationary point processes, covering clustering, regularity and a process that is
+indistinguishable from Poisson at second order. Eight are used for training; Mat\'ern~I is held out as an
+out-of-distribution family. Table~\ref{tab:families} lists their parameters, second-order structure and the coordinate that locates each family's near-CSR regime (Section~\ref{sec:wall}); Figure~\ref{fig:examples} shows
+example realizations.
+
+\paragraph{Poisson.}
+The homogeneous Poisson process is the most fundamental SPP. It serves as a model for \emph{complete spatial
+randomness} (CSR), where there is no interaction between points. It is characterized by its intensity $\lambda=\nb$:
+the count $N(B)$ in any region $B$ is Poisson with mean $\lambda|B|$, counts in disjoint regions are independent, and
+given $N(W)=n$ the points are i.i.d.\ uniform on $W$. Under CSR, $K(r)=\pi r^2$ and $L(r)=r$, which is why the sign of
+$L(r)-r$ separates clustering from regularity, and $F=G$, so $J\equiv1$. CSR is the reference against which the other
+families are measured.
+
+\paragraph{Neyman--Scott processes.}
+Let $P$ be a homogeneous Poisson \emph{parent} process with intensity $\kpar$. Each parent $p\in P$ independently
+generates a Poisson($\mo$) number of \emph{offspring} points, displaced from $p$ according to a kernel $k$; only the
+offspring are observed. Conditionally on $P$, the offspring form a Poisson process with intensity
+\[
+  \Lambda(u) = \mo \sum_{p \in P} k(u - p).
+\]
+We consider three such processes: 
+\begin{enumerate}
+    \item \emph{Thomas.} Displaces offspring by an isotropic Gaussian kernel $k=\mathcal N(0,\sigma^2 I)$. We have $\nb=\kpar\mo$.
+    \item \emph{Nested Thomas.} Applies Thomas twice: parents have Poisson($\mu_1$) children displaced with scale $\sigma_1$, and each child in turn has Poisson($\mu_2$) offspring displaced with scale $\sigma_2$. We have $\nb=\kpar\mu_1\mu_2$.
+    \item \emph{Ring.} Places offspring uniformly on a circle of radius $\rho$ around the parent and perturbs them by $\mathcal N(0,\sigma^2 I)$, producing annular clusters. 
+\end{enumerate}
+
+For all three processes, the visibility of the clustering depends primarily on the \emph{overlap}
+$\omega=\sigma\sqrt{\kpar}$ (with $\sigma = \rho$ for ring). For $\omega\ll1$ the clusters are well-separated, while for $\omega\gg1$ they overlap and the pattern approaches CSR.
+
+\paragraph{Log-Gaussian Cox process.}
+A Cox process is a Poisson process with a random intensity. The log-Gaussian Cox process (LGCP) has intensity
+\[
+    \Lambda(u)=e^{Y(u)}
+\]
+for $Y$ a stationary Gaussian random field with mean $\mu_{\log}$, variance $\sigma^2$
+and exponential covariance $\sigma^2 e^{-r/s}$. We have $\nb=\exp(\mu_{\log}+\sigma^2/2)$. Points cluster where $Y$ peaks, and the pattern approaches CSR as $\sigma^2\to0$, or as the correlation range $s$ shrinks relative to the spacing between points.
+
+\paragraph{Mat\'ern hard-core processes.}
+Mat\'ern processes start with a Poisson process with intensity $\lambda_p$ and delete points such that no two retained points are closer than a \emph{hard-core radius} $R$. Mat\'ern~I deletes every point that has another point within distance $R$; we have $\nb=\lambda_p e^{-\lambda_p\pi R^2}$. Mat\'ern~II gives each point an independent uniform mark and deletes a point only if another point within distance $R$ has a smaller mark; we have $\nb=(1-e^{-\lambda_p\pi R^2})/\pi R^2$. Mat\'ern~II therefore retains more points and can pack more densely. Both are regular, and approach CSR as $R$ shrinks relative to the spacing between points. Mat\'ern~I is not used in training: its range lies inside Mat\'ern~II's, and it serves as an out-of-distribution family.
+
+\paragraph{Strauss process.}
+The Strauss process is a Gibbs process that penalizes, rather than forbids, close pairs. Given $N(W)=n$, its density is proportional to
+\[
+  \gamma^{s_R(\pc)}, \qquad \gamma=1-q\in[0,1),
+\]
+where $s_R(\pc)$ is the number of pairs closer than $R$. The \emph{inhibition strength} $q$ interpolates between the binomial process ($q\to0$, CSR given $n$) and the Gibbs hard core ($q=1$), which packs up to twice as densely as Mat\'ern~II. We simulate it conditionally on $n=\nb$, so the count is exact; $K$ has no closed form. It approaches CSR as $q\to0$ or as $R$ shrinks relative to the spacing between points.
+
+\paragraph{Cell process.}
+The generalised Baddeley--Silverman cell process tiles the plane with a randomly shifted, axis-aligned grid of square
+cells of area $1/\nb$. Each cell independently receives $0$, $1$, or $k$ uniformly placed points, with probabilities $1/k$, $1-1/(k-1)$, and $1/(k(k-1))$, respectively. Each cell holds one point on average, with variance one (like a Poisson process). As a result, $K(r)=\pi r^2$ exactly. The cell process is therefore indistinguishable from CSR by second-order statistics, despite not being Poisson or isotropic. This motivates the use of topological features (Section~\ref{sec:inputs}).
+
+\paragraph{Limits between families.}
+Some families become difficult to distinguish in certain regimes. For example, as $\sigma/\rho \to 1$, the ring process becomes Thomas-like; and when the outer level of a nested Thomas pattern is smeared out ($\sigma_1$ large relative to the parent
+spacing), only the inner clusters remain visible and the pattern again resembles Thomas. The Mat\'ern processes and the Strauss hard core have similar pair correlations. These near equivalences account for most of the confusions between non-Poisson families (Section~\ref{sec:fidelity}).
+
+\begin{table}[t]
+\caption{[PLACEHOLDER — The nine process families: parameters, second-order structure, and the
+coordinate that locates each family's near-CSR regime.]}
+\label{tab:families}
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Family & Parameters & Regime coordinate \\
+\midrule
+Poisson (CSR) & $\nb$ & --- \\
+\addlinespace[2pt]
+\multicolumn{3}{@{}l}{\emph{Clustered}} \\
+Thomas       & $\kappa,\mu,\sigma$ & $\omega=\sigma\sqrt\kappa$ \\
+Nested       & $\kappa,\mu_1,\mu_2,\sigma_1,\sigma_2$ & $\omega_{\rm in}=\sigma_2\sqrt{\kappa\mu_1}$ \\
+Ring         & $\kappa,\mu,\rho,\sigma$ & $\omega=\rho\sqrt\kappa$ \\
+LGCP         & $\mu_{\log},\sigma^2,s$ & $\zeta=(e^{\sigma^2}-1)\,s\,\nb$ \\
+\addlinespace[2pt]
+\multicolumn{3}{@{}l}{\emph{Regular}} \\
+Mat\'ern II  & $R,\lambda_p$ & $\zeta=R\,\nb$ \\
+Strauss      & $\nb,q,R$ & $\zeta=q\,R\,\nb$ \\
+Mat\'ern I$^\dagger$ & $R,\lambda_p$ & $\zeta=R\,\nb$ \\
+\addlinespace[2pt]
+\multicolumn{3}{@{}l}{\emph{Second-order CSR}} \\
+Cell         & $\nb,k$ & none (U-shaped in $k$) \\
+\bottomrule
+\multicolumn{3}{@{}l}{\scriptsize $^\dagger$Held out of training (out-of-distribution).}
+\end{tabular}
+\end{center}
+\end{table}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/v2/f1_examples}
+\caption{[PLACEHOLDER — Example realizations of each family, one strongly structured and one near CSR.]}
+\label{fig:examples}
+\end{figure*}
+
+
+\subsection{Data Generation}
+\label{sec:data}
+
+We train and evaluate on synthetic patterns, simulated with standard algorithms, so that the true family and parameters are known. For each family $f$ we construct a prior $\pi_f$ over its parameters. We then draw parameters $\theta\sim\pi_f$ and simulate two independent replicates on $W = [0, 1]^2$ for each $(f, \theta)$. The first realization, $x_{f, \theta}$, acts as the observed pattern and is the input to the pipeline. The second realization, $y_{f, \theta}$, is held out and used to score the resulting fit (Section~\ref{sec:score}).
+
+\paragraph{Priors.} The priors are designed according to three principles. 
+\begin{enumerate}
+    \item \emph{Random design.} Each $\theta$ is an independent draw from $\pi_f$.
+    \item \emph{Interpretable coordinates.} We specify $\pi_f$ by physically meaningful coordinates rather than raw parameters. For every $f$ we first draw $\nb$ from a shared distribution $\nb\sim\text{log-uniform}[50,950]$ to ensure the point count does not carry information about $f$. A small number of $f$-specific dials set the strength of the resulting structure; for example the overlap $\omega$ (Section~\ref{sec:families}) for clustered families. The remaining parameters then follow from these coordinates and $\nb$.
+    \item \emph{Minimal curation.} We keep constraints to a minimum and do not tailor the priors to make the problem easier. In applications the generating family and the strength of its structure are unknown, so the prior should span strongly structured patterns through to patterns close to CSR, excluding only degenerate settings: we require at least four effective clusters in the window, a single rule shared by every family. Our pipeline is designed for this breadth (Sections~\ref{sec:wall} and~\ref{sec:fidelity}).
+\end{enumerate}
+
+\paragraph{Size and splits.}
+For each family, we draw $50\,000$ parameters and generate two patterns for each $\theta$. We obtain $900\,000$ patterns in total. The data is split by $\theta$ into train, validation and test blocks of $37\,000$, $1\,000$ and $12\,000$ draws, respectively. Both replicates of each $\theta$ fall in the same block, so no parameter setting seen in training appears in the test block. Mat\'ern~I patterns are used only for out-of-distribution evaluation.
+
+
+\subsection{Goodness of Fit}
+\label{sec:score}
+
+For a test cloud $x_{f, \theta}$ with fit $\hat P=(\hat f,\hat\theta)$, write $P^\star=(f,\theta)$ for the oracle and $P^0$ for the CSR fit. Each $P\in\{\hat P,P^\star,P^0\}$ is scored against the held-out replicate $y_{f, \theta}$ (Section~\ref{sec:data}) by comparing $y_{f, \theta}$ to $K=16$ independent simulations $z_1,\dots,z_K\stackrel{\text{iid}}\sim P$ on $W$, using a kernel score on local configurations.
+
+\paragraph{Local configurations.}
+For a pattern $z$ with $n$ points, rescale to unit intensity, $\tilde z=\sqrt n\,z$, and fix a centre set $C(z)\subseteq\tilde z$ of size $m=\min(n,300)$, drawn uniformly at random. Each centre $p\in C(z)$ gives a local configuration
+\begin{align}
+    N_R(p,\tilde z) &= \{q\in\tilde z\setminus\{p\}:\|q-p\|\le R\}, \\
+    \phi(p;z) &= \frac1R\big(N_R(p,\tilde z)-p\big),
+\end{align}
+with $R=1.5$ (mean spacings, since $\tilde z$ has unit intensity). We write $y$'s local configurations as $\phi_1,\dots,\phi_m$.
+
+\paragraph{Kernel score.}
+Local configurations are compared by an RBF kernel between Gaussian-smoothed occupancy measures on a $21\times21$ grid,
+\begin{align}
+    \mu_\phi(u) &= \sum_{p\in\phi}e^{-\frac{|u-p|^2}{2h^2}}, & h&=0.1,\\
+    k(\phi,\psi) &= e^{-\frac{\|\mu_\phi-\mu_\psi\|^2}{2\ell^2}},
+\end{align}
+with bandwidth $\ell$ fixed (before any model is scored) to the median pairwise distance among $\mu_{\phi_1},\dots,\mu_{\phi_m}$.
+
+A model $P$ is scored against $y_{f, \theta}$ by the kernel score
+\begin{equation}
+  S(P,y)=\tfrac12\,\mathbb{E}\,k(\Phi,\Phi')-\frac1m\sum_{i=1}^{m}\mathbb{E}\,k(\phi_i,\Phi),
+  \label{eq:kernel}
+\end{equation}
+where $\Phi,\Phi'$ are local configurations $\phi(p;z_k),\phi(p';z_{k'})$ at centres drawn from two \emph{different} simulations $z_k,z_{k'}$ ($k\ne k'$) of $P$, with expectations estimated by averaging over the $K=16$ simulations above.
+
+\paragraph{Skill.}
+Let $\{x_{f_i, \theta_i}\}_{i=1}^N$ be the test clouds (Section~\ref{sec:data}), with held-out replicates $\{y_{f_i, \theta_i}\}_{i=1}^N$. Write $P^0_i,\hat P_i,P^\star_i$ for $x_{f_i, \theta_i}$'s CSR fit, learned fit and oracle, respectively. Skill sums, over $i=1,\dots,N$, how each fit's kernel score on $y_{f_i, \theta_i}$ compares to CSR and to the oracle (reported only when the denominator is resolved).
+\begin{equation}
+  \mathrm{skill}=\frac{\sum_i\big[S(P^0_i,y_{f_i, \theta_i})-S(\hat P_i,y_{f_i, \theta_i})\big]}{\sum_i\big[S(P^0_i,y_{f_i, \theta_i})-S(P^\star_i,y_{f_i, \theta_i})\big]}
+  \label{eq:skill}
+\end{equation}
+Skill $0$ means no better than CSR and skill $1$ as good as the truth.
+
+%==============================================================================
+
+\section{MODEL}
+\label{sec:model}
+
+Given an input pattern $x_{f, \theta}$, our pipeline produces a fit $\hat P = (\hat f, \hat\theta)$ via a two-step procedure: an 8-way classifier predicts $\hat f$, followed by a per-family estimator of $\log\theta$ that produces $\hat\theta$. A cloud labelled as Poisson automatically receives $\hat\nb=n$: the exact maximum-likelihood estimate, and is not passed to a learned estimator.
+
+Both stages share a single architecture, \emph{ParamNet}, trained once as the classifier and once (per family) as an estimator (Figure~\ref{fig:pipeline}). ParamNet receives two descriptions of $x_{f, \theta}$: the classical summary curves (Section~\ref{sec:inputs}), and persistence diagrams of two complementary filtrations -- alpha and DTM -- vectorized as persistence images. Each description passes through its own convolutional encoder, and the resulting embeddings are concatenated with $\log n$ before a shared FCNN head (Section~\ref{sec:architecture}).
+
+
+\subsection{Features}
+\label{sec:inputs}
+
+\paragraph{Classical features} Write $\alpha(r)$ for a general summary function. We compute each $\alpha(r) \in \{L(r)-r, F(r), G(r), J(r)\}$ at $512$ linearly-spaced radii $r \in (0, 0.25]$ to obtain four feature vectors $[\alpha(r_1), \dots, \alpha(r_{512})] \in \mathbb{R}^{512}$. For $L$ we apply Ripley's isotropic edge correction; for $F$ and $G$ we apply the border (reduced-sample) correction, which $J=(1-G)/(1-F)$ inherits. The four vectors are stacked as channels of a single tensor of shape $(N, 4, 512)$, where each channel is $z$-scored using train-set mean and s.d. The tensor is fed to a 1-D CNN encoder to produce a $64$-dimensional embedding.
+
+\paragraph{Topological features} The topological features are computed for two complementary filtrations: alpha and DTM. For each filtration, we compute the $H_0$ and $H_1$ persistence diagrams, thus obtaining four diagrams per cloud. Each persistence diagram is vectorized into a \emph{persistence image}, fit to the training diagrams of its own (filtration, dimension) pair (resolution, bandwidth and weighting in Appendix~\ref{app:models}). Unlike the curves, the four images are not stacked into a single tensor: each keeps its own birth/persistence axis and is encoded separately -- a $64\times64$ image for alpha-$H_1$, DTM-$H_0$ and DTM-$H_1$, and a length-$64$ vector for alpha-$H_0$, whose births are identically zero. Each image is fed to its own 2-D (resp.\ 1-D) CNN encoder to produce a $64$-dimensional embedding, obtaining four embeddings in total (Section~\ref{sec:architecture}).
+
+
+\subsection{Architecture}
+\label{sec:architecture}
+
+
+\paragraph{Classical encoders} The classical arm's $(N,4,512)$ tensor passes through a 1-D convolutional encoder: three blocks of kernel-$3$, padding-$1$ convolutions with channel widths $32\to64\to128$, each followed by ReLU; between blocks, average pooling (kernel $2$) and channel-wise dropout ($p=0.2$) downsample and regularize. Rather than pooling the final feature map to a single value per channel, we apply an adaptive average pool to a fixed width of $4$: position along $r$ is itself part of the signal, and a global average is translation-invariant, which would leave the encoder unable to distinguish a feature at small $r$ from the same feature at large $r$. The resulting $128\times4$ map is flattened and passed through a linear layer with ReLU to produce a $64$-dimensional embedding.
+
+\paragraph{Topological encoders} Each of the four persistence images -- alpha-$H_1$, DTM-$H_0$ and DTM-$H_1$ (all $64\times64$), and alpha-$H_0$ (length $64$, since its births are identically zero) -- is encoded independently, by its own copy of the same conv-pool-dropout recipe (channels $32\to64\to128$, kernel $3$, dropout $0.2$, adaptive pool to width $4$): 2-D for the three images, 1-D for alpha-$H_0$. Encoders are not shared across filtration or homology dimension, since each persistence image is calibrated on its own birth/persistence box, fit independently (Section~\ref{sec:inputs}) -- the same pixel coordinate means something different in each. The four encoders produce four $64$-dimensional embeddings.
+
+\paragraph{Head} The classical and topological embeddings are concatenated with standardized $\log n$, giving a $321$-dimensional input to the shared head: two fully-connected layers ($64$, $32$) with ReLU and dropout ($p=0.1$), followed by a final linear layer -- $8$ logits for the classifier, a single scalar for each per-family estimator of $\log\theta$. This encoder-and-head architecture, trained separately per task, is \emph{ParamNet}.
+
+
+\subsection{Model Comparison}
+\label{sec:learners}
+
+To attribute what the network architecture contributes over a conventional learner, we train gradient-boosted trees (\texttt{HistGradientBoosting}, $400$ iterations) on feature tables of the same inputs: the classical summaries, persistence summaries of the alpha and DTM diagrams, and both together. Comparing the trees with and without the persistence features attributes what topology contributes. A standardized logistic regression on the classical summaries is the floor among learners. This gives five classifiers (ParamNet, three tree models, logistic) and three estimators per family (ParamNet, trees on classical, trees on classical and topological features); inputs and training cost are in Appendix~\ref{app:models}.
+
+\paragraph{Classical baseline} Minimum contrast on $K$, with penalized-contrast model selection, is the floor; an oracle that routes every cloud to its true family is the reference.
+
+\paragraph{Evaluation} Every model is scored on the same held-out clouds: balanced accuracy over the $8$ families, per-family recall and detection (not called Poisson), and estimator error $\mathrm{RMSE}(\log\theta)/\mathrm{s.d.}$ averaged over a family's targets.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/f2_pipeline}
+\caption{[PLACEHOLDER — The pipeline, from point cloud to fitted model to end-to-end score.]}
+\label{fig:pipeline}
+\end{figure*}
+
+%==============================================================================
+
+\section{THE CSR WALL}
+\label{sec:wall}
+
+The classifier's overall accuracy on the full test set is modest: $0.45$. We show that this is not a failure of the
+model, but an inherent property of the data. Our priors intentionally keep the parameter ranges wide, so every family
+includes parameter draws that produce near-CSR patterns. This mirrors practice: an observed pattern comes with no
+guarantee of clear structure, so a method must handle near-random patterns rather than assume them away.
+
+\paragraph{Detectability} We say that a pattern's structure is \emph{detectable} if a test of size $5\%$ rejects CSR on
+it. Any statistic in this paper can serve as the test once it is calibrated to reject $5\%$ of CSR patterns, including a
+classifier's $P(\text{Poisson}\mid x)$. We use the $L$ function because it is the most canonical choice. The calibration matters: a classifier's most likely family is not a test, and ours call up to half of all CSR patterns structured.
+
+For each family, the detectability of its patterns is governed by one physical coordinate $\eta$: the cluster overlap
+$\omega$ for Thomas ($\sigma\sqrt\kappa$), ring ($\rho\sqrt\kappa$) and the inner level of nested
+($\sigma_2\sqrt{\kappa\mu_1}$); the expected number of missing close pairs for the inhibition families,
+$\zeta=R\nb$ for Mat\'ern~II and $\zeta=qR\nb$ for Strauss; and $\zeta=(e^{\sigma^2}-1)\,s\,\nb$ for LGCP. Cell has no
+monotone coordinate, so we treat it by $k$.
+
+We construct $u=\log \eta+a\log\nb$, with $a$ fitted by logistic regression of detection on $(\log \eta,\log\nb)$, and define
+the \emph{wall} $u^\star(\tau)$ as the point where the detection power reaches $\tau$ (Table~\ref{tab:wall}). One
+coordinate suffices: $u$ alone predicts detection with AUC $0.90$--$0.96$, within $0.02$ of boosted trees on all
+parameters. The fitted exponents are small, $a\in[-0.36,-0.09]$, so each wall is close to a level set of its physical
+coordinate; for Mat\'ern~II, it sits at a fixed $R\nb$.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/v2/f4_regime}
+\caption{Probability that a pattern is called Poisson across each family's parameters, with the fitted wall
+$u^\star(\tau)$ at $\tau=0.5$ and $0.9$. Cell, which has no monotone coordinate, is shown against $k$.}
+\label{fig:regime}
+\end{figure*}
+
+\begin{table*}[t]
+\caption{The CSR wall per family. Detection is a test of size $5\%$; $u=\log\eta+a\log\nb$. AUC: detection predicted
+from $u$ alone and from all parameters (boosted trees, out of fold). $u^\star(0.5)$: the wall, where detection power
+reaches $0.5$, fitted on the reference classifier's out-of-fold training predictions, and recomputed on the test split
+for the $L$ test and for ParamNet (95\% bootstrap intervals over $\theta$). Last column: share of each family's
+patterns beyond the wall. Cell has no monotone coordinate: the $L$ test detects $5\%$ of its patterns at $k\le4$, the
+network $85\%$ at $k=2$.}
+\label{tab:wall}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}llrcrccc@{}}
+\toprule
+& & & AUC & \multicolumn{3}{c}{Wall $u^\star(0.5)$} & In regime \\
+\cmidrule(lr){5-7}
+Family & Coordinate $\eta$ & $a$ & $u$ / all & Fitted & $L$ test & ParamNet & $\tau=0.5$ / $0.9$ \\
+\midrule
+Thomas      & $\sigma\sqrt\kappa$               & $-0.30$ & $0.935$ / $0.940$ & $-1.77$ & $-1.71$ {\scriptsize[$-1.73$, $-1.68$]} & $-1.71$ {\scriptsize[$-1.74$, $-1.61$]} & $0.39$ / $0.26$ \\
+Nested      & $\sigma_2\sqrt{\kappa\mu_1}$      & $-0.35$ & $0.950$ / $0.959$ & $-1.95$ & $-1.95$ {\scriptsize[$-2.02$, $-1.92$]} & $-1.95$ {\scriptsize[$-2.01$, $-1.86$]} & $0.58$ / $0.43$ \\
+Ring        & $\rho\sqrt\kappa$                 & $-0.36$ & $0.928$ / $0.945$ & $-1.70$ & $-1.82$ {\scriptsize[$-1.86$, $-1.77$]} & $-1.65$ {\scriptsize[$-1.79$, $-1.65$]} & $0.50$ / $0.30$ \\
+LGCP        & $(e^{\sigma^2}-1)\,s\,\nb$        & $-0.12$ & $0.927$ / $0.936$ & $+0.91$ & $+0.95$ {\scriptsize[$+0.92$, $+1.17$]} & $+0.70$ {\scriptsize[$+0.69$, $+0.92$]} & $0.31$ / $0.21$ \\
+Mat\'ern II & $R\,\nb$                          & $-0.09$ & $0.957$ / $0.962$ & $-0.05$ & $-0.09$ {\scriptsize[$-0.10$, $-0.05$]} & $+0.02$ {\scriptsize[$+0.00$, $+0.03$]} & $0.42$ / $0.37$ \\
+Strauss     & $q\,R\,\nb$                       & $-0.11$ & $0.904$ / $0.914$ & $+0.14$ & $+0.18$ {\scriptsize[$+0.13$, $+0.22$]} & $+0.16$ {\scriptsize[$+0.13$, $+0.22$]} & $0.21$ / $0.11$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table*}
+
+\paragraph{The wall belongs to the data} At equal size, every detector places the wall in the same location: the $L$
+test, a classifier on topological features alone (which never sees $L$), and our best network agree to within $0.25$
+in $u$, or $30\%$ in the physical coordinate, in all six families, and none is consistently earlier
+(Table~\ref{tab:wall}). Learned models therefore do not detect structure
+earlier than the canonical test; their advantage lies in identifying the family and fitting it
+(Section~\ref{sec:fidelity}). The exception is cell, whose $K$ function is exactly that of CSR: the $L$ test rejects it
+at its nominal $5\%$ for $k\le4$, while our network detects $85\%$ of patterns at $k=2$ (Section~\ref{sec:fidelity}).
+
+\paragraph{In-regime results} When we remove the near-CSR clouds, the classification accuracy improves significantly:
+from $0.45$ on all clouds to $0.70$ beyond the wall at $\tau=0.5$, and $0.75$ at $\tau=0.9$. The price of wide priors is
+that only $21$--$58\%$ of each family's patterns lie beyond the wall at $\tau=0.5$, so we report every result on both
+sides of it.
+
+\paragraph{Before the wall} Below the wall, even the true model reproduces a pattern no better than CSR: its gain over
+CSR is at most $0.8\%$ of its in-regime gain (95\% upper bound, pooled over the six families with a coordinate;
+$|z|\le1.2$ in every family, Appendix~\ref{app:score-power}). Routing these patterns
+to Poisson is therefore free. Near CSR, the right target is not accuracy but fidelity, which we measure next.
+
+
+
+%==============================================================================
+
+\section{RESULTS}
+\label{sec:fidelity}
+
+% Draft. Numbers: v2 bank, evaluation/fidelity (1440 clouds) and compare/ (results/v2/story.md); tables are generated
+% (PAPER_CONFIG=paper/paper_v2.yaml python paper/scripts/make.py m_fidelity m_families m_classification f3).
+
+We evaluate the pipeline on $1\,440$ test clouds: $60$ per regime stratum (below the wall, between $\tau=0.5$ and $0.9$, beyond it) for each family with a coordinate, $60$ per band of $k$ for cell, and $180$ Poisson clouds ($1\,439$ scored: one ring cloud's gain could not be resolved). Intervals are $95\%$ bootstrap intervals over clouds, and every difference is paired: same clouds, same simulations.
+
+\begin{table*}[t]
+\caption{Skill (Eq.~\eqref{eq:skill}) on the $1\,439$ scored test clouds, with $95\%$ bootstrap intervals over
+clouds; differences are paired. Top: each estimator given the predicted and the true family; the difference is also
+split into the families minimum contrast can fit and those it cannot (Table~\ref{tab:families-skill}). Bottom:
+predicted-family fits on the $1\,259$ structured clouds, by the classifier's call. Skill weights clouds by the true
+model's gain over CSR, $92\%$ of which lies beyond the wall ($\tau=0.9$).}
+\label{tab:fidelity}
+\begin{center}
+\footnotesize
+\input{tables/v2/m_fidelity}
+\end{center}
+\end{table*}
+
+\paragraph{ParamNet reproduces observed patterns.} ParamNet reaches skill $0.90$ [$0.85$, $0.95$] (Table~\ref{tab:fidelity}): its fits recover $90\%$ of what the true model gains over CSR. Minimum contrast reaches
+$0.74$ [$0.65$, $0.81$] on the same clouds, and $0.78$ when given the true family; ParamNet, which must infer the
+family, is ahead of it by $+0.11$ [$+0.04$, $+0.22$]. The gap comes from Strauss and cell, which have no closed-form
+$K$, so minimum contrast cannot fit them. On the five families with a $K$, ParamNet matches minimum contrast given the
+true family ($+0.05$ [$-0.03$, $+0.15$]).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figs/v2/f3_confusion}
+\caption{Confusion matrix of ParamNet beyond the wall ($\tau=0.9$), rows normalized: the share of each true family
+assigned to each family.}
+\label{fig:confusion}
+\end{figure}
+
+\paragraph{Wrong family, right fit.} Supplying the true family does not improve ParamNet ($-0.01$
+[$-0.03$, $+0.02$]). Its fits keep skill $0.82$ on the $350$ clouds it assigns to the wrong structured family, against $0.91$ on
+the $638$ it identifies. The reason is visible in where the errors fall (Figure~\ref{fig:confusion}). In-regime the
+classifier separates mechanisms almost perfectly: Mat\'ern~II $0.99$, Strauss $0.92$, cell $0.88$, LGCP $0.84$. Its
+errors are confined to Thomas, nested and ring, which produce the same patterns over part of their parameter spaces
+(Section~\ref{sec:families}), where a wrong-family fit is essentially a different parametrization of a similar pattern. Minimum
+contrast's classification errors aren't recovered as well at inference, with skill $0.57$ on the $647$ clouds it misclassifies, nearly twice as many as ParamNet.
+
+\paragraph{Sending near-CSR patterns to Poisson costs nothing.} ParamNet assigns $271$ of the $1\,259$ structured
+clouds to Poisson. On these, the true model's gain over CSR is indistinguishable from zero ($9\times10^{-6}\pm9\times10^{-5}$). For these patterns for which CSR might as well be the correct answer rather than an error. \WIP{Add L function test on these?}
+
+\paragraph{Per family.} Given the true family, the two estimators are within $0.12$ of each other on the five families
+with a $K$ (Table~\ref{tab:families-skill}): ParamNet is ahead on Thomas ($+0.08$ [$+0.00$, $+0.21$]), minimum
+contrast on Mat\'ern~II ($-0.12$ [$-0.28$, $-0.01$]). The larger point differences with predicted families, on LGCP
+($+0.18$) and ring ($+0.11$), come from selection: minimum contrast identifies $33\%$ of LGCP and $15\%$ of ring
+clouds, ParamNet $46\%$ and $37\%$. On Strauss and cell, ParamNet keeps skill $0.94$ and $0.91$; cell's $K$ is
+exactly that of CSR.
+
+\begin{table}[t]
+\caption{Skill per family ($180$ clouds each, $179$ for ring), with $95\%$ bootstrap intervals over clouds.
+$\Delta$: ParamNet $-$ minimum contrast, given the predicted and the true family; minimum contrast's own skill is
+ParamNet's minus $\Delta$. $^\dagger$No closed-form $K$:
+minimum contrast never selects these families, and given the true family it uses the training median. Skill can
+exceed $1$: on a single replicate, a fit can score better than the true model.}
+\label{tab:families-skill}
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\input{tables/v2/m_families}
+\end{center}
+\end{table}
+
+\begin{table}[t]
+\caption{Balanced accuracy over the eight families on the $192\,000$ test patterns, overall and beyond the wall
+($\tau=0.5$, $0.9$; Section~\ref{sec:wall}); intervals are within $\pm0.003$. Coarse: accuracy over mechanisms (CSR,
+clustered, regular, cell) beyond the wall at $\tau=0.9$. Minimum contrast: penalized-contrast selection.}
+\label{tab:classification}
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{tables/v2/m_classification}
+\end{center}
+\end{table}
+
+\paragraph{The network against conventional learners.} On the same inputs, gradient-boosted trees match ParamNet's
+overall accuracy ($0.452$ against $0.450$; Table~\ref{tab:classification}): every learner meets the same ceiling, set
+by the share of near-CSR patterns (Section~\ref{sec:wall}). Beyond the wall the network is ahead, $0.754$ against
+$0.735$ at $\tau=0.9$ (intervals $\pm0.003$), and $0.90$ against $0.86$ in coarse accuracy over mechanisms.
+\WIP{What topology adds: trees with and without persistence features ($0.735$ vs $0.726$ beyond the wall; cell
+estimation error $-13\%$); the network without topological features is not yet trained on v2.}
+
+\paragraph{Out of distribution.} Mat\'ern~I, never seen in training, is assigned to Poisson near CSR ($54$--$71\%$ of
+the lowest three quintiles of $\zeta$) and to Mat\'ern~II, the nearest mechanism in the library, once its structure is
+visible ($87\%$); cluster families receive at most $5\%$. \WIP{end-to-end skill of these fits}
+
+
+%==============================================================================
+
+\clearpage
+\appendix
+\onecolumn
+\aistatstitle{Supplementary Materials}
+
+%==============================================================================
+\section{SIMULATION DESIGN}
+\label{app:data}
+
+% Bank v2 (configs/v2/simulation.yaml over configs/simulation.yaml; data_v2/). Counts below are from the
+% merged v2 manifests. The first bank (data/, configs/simulation.yaml) is superseded and not described here.
+\paragraph{Minimal curation.}
+\begin{itemize}
+  \item A rule is kept only if it is a mathematical or computational limit, or excludes a degenerate setting.
+        Nothing is tuned for visibility or identifiability: near-CSR patterns and patterns that two families can
+        both produce are left in, because handling them is part of the problem (Sections~4--5).
+  \item No rule refers to departure from CSR or to any classifier; the bank is drawn on physical parameters only.
+\end{itemize}
+
+\paragraph{Sweep coordinates.}
+\begin{itemize}
+  \item Each $\theta$ is an i.i.d.\ draw from a constrained prior on its own seed stream, so the bank is
+        reproducible and can be extended without moving existing draws.
+  \item Every family first draws a count budget $\nb\sim\text{log-uniform}[50,950]$. The last parameter then
+        follows from conservation of the mean count.
+  \item Cluster families (Thomas, nested, ring): two independent dials, richness (points per cluster, $\ge1$) and
+        smearing $\omega\in[0.2,8]$, the cluster scale in units of the parent spacing. Nested adds the scale ratio
+        $\sigma_1/\sigma_2\in[1,10]$; ring adds the jitter $\sigma/\rho\in[0.05,1]$.
+  \item LGCP: field variance $\sigma^2\ge0.005$ and correlation range $s\in[0.03/\sqrt{\nb},\,0.2]$. Mat\'ern~I/II:
+        hard core $R\sqrt{\nb}\ge0.01$ up to the packing limit. Cell: $k\in\{2,\dots,30\}$.
+  \item Strauss: simulated conditional on $n=\nb$, so the count is exact and $K$ is not needed. Inhibition
+        strength $q=1-\gamma\sim U[0.01,1]$ ($q=1$ is the Gibbs hard core) and range $R\sqrt{n}\in[0.01,0.8]$
+        log-uniform, i.e.\ up to packing $0.5$, twice what Mat\'ern~II reaches.
+  \item Every dial reaches down to patterns indistinguishable from CSR, so each family straddles the detection
+        boundary.
+\end{itemize}
+
+\paragraph{Constraints.}
+\begin{itemize}
+  \item One degeneracy rule for every family: at least $4$ effective clusters in the window,
+        $\kappa_{\rm eff}=1/(\mathrm{cv}^2-1/\nb)\ge4$, with $\mathrm{cv}=\mathrm{sd}(n)/\nb$ computed in closed form
+        from $K$. For a cluster process $\mathrm{cv}^2\approx1/\nb+1/\kappa$.
+        Realised cv reaches $0.46$--$0.52$ for the clustered families.
+  \item Realised counts are conditioned on $n\in[20,2000]$ (the DTM filtration with $k=20$ needs at least 20 points). The condition fires
+        for $304$ of $900\,304$ patterns ($0.03\%$), mostly nested at small $\nb$. Parents are simulated on a window
+        buffered by 5 displacement s.d.s, to avoid edge loss.
+  \item Strauss: Metropolis on the torus from a binomial start, $200$--$1000$ sweeps growing with packing;
+        doubling the sweeps leaves the pair counts unchanged.
+\end{itemize}
+
+\paragraph{Data volume.}
+\begin{itemize}
+  \item 9 families $\times$ 50\,000 $\theta$ $\times$ 2 replicates $=$ 900\,000 patterns. Mat\'ern~I is simulated
+        and featurized but held out of training, as an out-of-distribution family (its range lies inside
+        Mat\'ern~II's).
+  \item Split by $\theta$ index, identical for every family: 37\,000 / 1\,000 / 12\,000 $\theta$. Both replicates of
+        a $\theta$ are in the same split.
+\end{itemize}
+
+
+%==============================================================================
+\section{MODELS AND TRAINING COST}
+\label{app:models}
+
+
+%==============================================================================
+\section{VALIDATING THE SCORE}
+\label{app:score}
+
+All checks use the kernel score only, on the test split, with the pipeline's regime strata (\S\ref{sec:wall}):
+\emph{strong} (detection above $0.9$; cell $k\ge5$), \emph{middle} ($0.5$--$0.9$; cell $k=3$--$4$) and \emph{weak}
+(below $0.5$; cell $k=2$).
+
+%------------------------------------------------------------------------------
+\subsection{What the Score Measures}
+\label{app:score-def}
+
+\begin{itemize}
+  \item Proposition: for a characteristic kernel $k$, $\mathbb{E}_{y\sim Q}\,S(P,y)
+        =\tfrac12\|m_P-m_Q\|_{\mathcal H}^2+c(Q)$, with $m_P$ the kernel mean embedding of the law of $P$'s local
+        configurations. Hence $S$ is strictly proper for the law of the \emph{rescaled radius-$R$ configuration},
+        not for the process itself. \TBD{statement and proof sketch; Gneiting \& Raftery 2007, Gretton et al.\ 2012}
+  \item The configuration law is that of the typical point's neighbourhood, averaged over
+        the $m$ centres.
+  \item Invariances by construction:
+  \begin{itemize}
+    \item intensity: patterns are rescaled to unit intensity, so models differing only in $\nb$ score the same
+          (and the CSR reference needs no $\nb$ estimate);
+    \item range: only structure within $R=1.5$ mean spacings enters \TBD{which family parameters this leaves
+          unseen, e.g.\ nested outer scale, large LGCP range; Thomas cluster scale is $\omega\sqrt{\mu}$ spacings};
+    \item embedding: the $21\times21$ rasterization ($h=0.1$, equal to the grid spacing) is not injective, so
+          strictness holds for the law of the embeddings.
+  \end{itemize}
+  \item Kernel width $\ell$: fixed per cloud before any model is scored and shared by every model on that cloud,
+        which is what makes scores of different fits comparable. \TBD{state from which pattern}
+  \item Edges: centres kept at least $R$ from the window edge when this leaves at least a quarter of the window,
+        decided from the cloud's $n$ and applied to every simulation of that cloud.
+  \item Monte Carlo estimator: $K=16$ simulations, configurations pooled across them, cross terms only between
+        different simulations, so both expectations in Eq.~\eqref{eq:kernel} are estimated without bias.
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Sensitivity}
+\label{app:score-ladder}
+
+\begin{itemize}
+  \item Design: \WIP{rerun on the v2 bank; clouds per stratum}. Each scored against the oracle and CSR on the
+        independent replicate. Wrong models, in increasing distance from the truth:
+  \begin{itemize}
+    \item true $\theta$ with independent Gaussian noise on $\log\theta$ of $d$ s.d.\ (the unit of the estimator
+          error in \S\ref{sec:learners}; clipped to the training range), $d\in\{0.1,0.25,0.5,1,2\}$
+          \TBD{confirm grid};
+    \item a constant guess (training median of $\log\theta$);
+    \item a random test $\theta$ of the same family;
+    \item a random test $\theta$ of another structured family.
+  \end{itemize}
+  \item Exclusions: fits the sampler cannot realise. \WIP{share, v2}
+  \item Result: \WIP{v2}. \TBD{Figure: regret vs $d$, per family, one line per stratum, bootstrap bands}.
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Power Below the Wall}
+\label{app:score-power}
+
+\begin{itemize}
+  \item Claim supported: below the wall even the oracle does not beat CSR (\S\ref{sec:wall}), so routing those
+        patterns to Poisson is free.
+  \item Data: the main evaluation set (Section~\ref{sec:fidelity}), $60$ clouds per stratum.
+  \item Weak strata: the truth's gain over CSR is indistinguishable from zero for all six families with a regime
+        coordinate ($|z|\le1.2$), and for cell at $k=2$ and $k=3$--$4$ ($|z|\le1.0$). Pooled, it is at most $0.8\%$ of
+        the strong-stratum gain (95\% upper bound).
+  \item Middle strata: resolved positive gains for Strauss ($z=5.1$), Thomas ($z=2.4$) and LGCP ($z=2.2$), at
+        $25\%$, $14\%$ and $6\%$ of their strong-stratum gain; unresolved for nested, ring and Mat\'ern~II
+        ($z\le1.6$). The middle stratum is where structure starts to pay.
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Monte Carlo Repeatability}
+\label{app:score-repeat}
+
+\begin{itemize}
+  \item Design: the same fits of the four pipelines on the same $1\,440$ clouds, rescored under several simulation
+        seeds. \WIP{rerun on v2}
+  \item These ranges cover simulation noise only; uncertainty from the choice of clouds is the bootstrap over test
+        clouds in the main text.
+\end{itemize}
+
+
+\end{document}

@@ -105,14 +105,16 @@ if selected relabel; then
   submit relabel "merge" $CPU_SBATCH -c 1 --mem 16G -t 4:00:00 -- $py scripts/relabel.py
 fi
 if selected featurize; then
-  submit featurize "merge" $SHORT_SBATCH -c 8 --mem 24G -t 1:00:00 --array=0-$((featurize - 1)) --export=ALL,$single -- \
+  # A (family, filtration) task is every shard of it: about an hour at the paper bank's size, and a task
+  # that times out blocks the chain, so a larger bank names more: FEATURIZE_SBATCH="-p compute" FEATURIZE_TIME=6:00:00
+  submit featurize "merge" ${FEATURIZE_SBATCH:-$SHORT_SBATCH} -c 8 --mem 24G -t ${FEATURIZE_TIME:-1:00:00} --array=0-$((featurize - 1)) --export=ALL,$single -- \
     $py scripts/featurize.py run --task '{task}' --jobs 8
 fi
 if selected diagrams; then
   submit diagrams "featurize" $SHORT_SBATCH -c 1 --mem 32G -t 1:00:00 -- $py scripts/featurize.py merge
 fi
 if selected curves; then
-  submit curves "merge" $CPU_SBATCH -c 1 --mem 16G -t 2:00:00 -- $py scripts/classical.py
+  submit curves "merge" $CPU_SBATCH -c 1 --mem 16G -t 6:00:00 -- $py scripts/classical.py   # ~4h for 9 families
 fi
 if selected tables; then
   submit tables "diagrams curves" $CPU_SBATCH -c 16 --mem 64G -t 6:00:00 --export=ALL,$single -- \

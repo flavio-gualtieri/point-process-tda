@@ -1,0 +1,25 @@
+# Smoke run of the v2 pipeline (CLOUDFORGER_CONFIGS=configs/v2_smoke): configs/smoke/pipeline.yaml and
+# configs/v2/pipeline.yaml in one file, since an override directory is one level deep. Merged over
+# configs/pipeline.yaml, key by key (mappings merge, lists and values replace).
+# The paper's models, regime and evaluation sets, with short training and small cloud sets.
+name: smoke
+classify: [hgb_classical, hgb_classical_ph, linear_classical, nn_curves, perslay_dtm10]
+estimate: [hgb_classical, hgb_classical_ph, nn_curves]
+models:
+  hgb_classical: {params: {max_iter: 50}}
+  hgb_classical_ph: {params: {max_iter: 50}}
+nn: {epochs: 2, patience: 1}
+compare: {bootstrap: 20}
+evaluation:
+  clouds: {per_bin: 2}
+  kernel: {sims: 4, centres: 100, pool: 200}
+  dss: {sims: 30}
+  sets:
+    ph_ablation: {clouds: {per_bin: 2}}
+    ph_cell: {clouds: {per_bin: 2}}
+mincontrast: {chunks: 2, init: 16}
+
+families: [poisson, thomas, nested, lgcp, matern2, ring, cell, strauss]
+
+regime:
+  coordinates: {strauss: zeta}  # q R nbar (pipeline/regime.py); merged into the base coordinates

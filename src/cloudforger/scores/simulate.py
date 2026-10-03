@@ -47,9 +47,11 @@ def observed(chosen: pd.DataFrame) -> dict[str, np.ndarray]:
 
 
 def true_model(row: pd.Series) -> tuple[str, dict]:
-    """(family, sampler kwargs) of a bank row: the model that generated it."""
+    """(family, sampler kwargs) of a bank row: the model that generated it. Arguments with a default
+    (lgcp's root_lam, strauss's sweeps) are the sampler's own, not the model's."""
     family = row["family"]
-    args = [a for a in inspect.signature(SAMPLERS[family]).parameters if a not in ("rng", "root_lam")]
+    args = [a for a, p in inspect.signature(SAMPLERS[family]).parameters.items()
+            if a != "rng" and p.default is inspect.Parameter.empty]
     kw = {a: row[a] for a in args}
     if "M" in kw:
         kw["M"] = int(kw["M"])

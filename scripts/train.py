@@ -142,6 +142,8 @@ def main(argv=None) -> None:
     u = sub.add_parser("unit")
     u.add_argument("--kind", choices=["cpu", "gpu"], required=True)
     u.add_argument("--index", type=int, required=True)
+    pb = sub.add_parser("prebuild", help="build a network model's input once, for every unit to read")
+    pb.add_argument("--model", required=True)
     c = sub.add_parser("classify")
     c.add_argument("--model", required=True)
     e = sub.add_parser("estimate")
@@ -158,6 +160,13 @@ def main(argv=None) -> None:
         for i, (task, model, family, seed) in enumerate(units(cfg, args.kind)):
             if not (args.todo and done(cfg, task, model, family, seed)):
                 print(i, task, model, family or "-", "-" if seed is None else seed)
+        return
+    if args.cmd == "prebuild":
+        from cloudforger.pipeline import nn
+        spec = cfg["models"][args.model]
+        if spec["learner"] != "nn":
+            raise SystemExit(f"{args.model} is a table learner: nothing to prebuild")
+        print(nn.prebuild({**cfg["nn"], **spec}, cfg["families"]))
         return
     if args.cmd == "unit":
         task, model, family, seed = units(cfg, args.kind)[args.index]

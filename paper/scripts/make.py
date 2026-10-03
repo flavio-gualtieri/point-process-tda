@@ -12,18 +12,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))      # the sibling scripts, run as a folder
 
 import f1_examples  # noqa: E402
+import f2_pipeline  # noqa: E402
 import f3_confusion  # noqa: E402
 import f4_regime  # noqa: E402
 import f5_main  # noqa: E402
+import s_regime  # noqa: E402
 import tables  # noqa: E402
 
-DISPLAYS = {"f1": f1_examples.main, "f3": f3_confusion.main, "f4": f4_regime.main, "f5": f5_main.main,
+DISPLAYS = {"f1": f1_examples.main, "f2": f2_pipeline.main, "f3": f3_confusion.main, "f4": f4_regime.main,
+            "f5": f5_main.main, "s_regime": s_regime.main,
             "t3": tables.t3_cost, "t4": tables.t4_classification, "t5": tables.t5_boundary,
-            "t6": tables.t6_poisson_gap, "t8": tables.t8_power, "t9": tables.t9_estimation, "t10": tables.t10_ph}
+            "t6": tables.t6_poisson_gap, "t8": tables.t8_power, "t9": tables.t9_estimation, "t10": tables.t10_ph,
+            "m_main": tables.m_main, "m_fidelity": tables.m_fidelity, "m_families": tables.m_families,
+            "m_classification": tables.m_classification}
+MAIN_BODY = {"m_main", "m_fidelity", "m_families", "m_classification"}     # need a paper config with `names`, `coarse`, ...
 
 
 def main(names: list[str]) -> None:
-    for name in names or DISPLAYS:
+    for name in names or [d for d in DISPLAYS if d not in MAIN_BODY or "coarse" in tables.C.cfg()]:
         DISPLAYS[name]()
 
 

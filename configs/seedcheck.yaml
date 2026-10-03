@@ -1,0 +1,51 @@
+# Training-seed noise on the one contrast the paper makes between two networks: the headline fusion
+# network against the same network and trainer on the summary curves alone. Both are retrained over
+# several seeds so the fusion - curves difference gets a seed s.d. beside its bootstrap interval.
+#
+#   python scripts/train.py --config seedcheck.yaml list
+#   python scripts/compare.py --config seedcheck.yaml
+#
+# Why this exists: `main.tex`'s Section 6 reports the contrast at ONE training seed and says so, and the
+# introduction's TDA contribution claims persistent homology never makes estimates significantly worse.
+# On v2 that claim is contradicted at one seed -- Matern II is resolved worse in all three subsets and
+# Strauss pooled over all patterns -- so either the differences are inside seed noise and the claim stands
+# with an interval, or they are not and the claim has to be reworded. One seed cannot tell the two apart.
+#
+# The two models are copied verbatim from configs/pipeline.yaml so the units are comparable to the paper
+# run's; only `seeds` is added. Scored on the pipeline's own test clouds and frozen regime subsets.
+
+name: seedcheck
+
+families: [poisson, thomas, nested, lgcp, matern2, ring, matern1, cell]
+prior: equal
+seeds: [1, 2, 3]
+
+inputs: {}                    # networks only: their inputs are in the entries below
+
+models:
+  nn_curves: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed"}
+  fusion_curves_alpha_dtm10: {learner: nn, curves: "L@fixed,F@fixed,G@fixed,J@fixed", filtration: "alpha_diameter,dtm_k10", dims: "0,1"}
+
+nn:                           # the pipeline's network defaults; `seeds` replaces `seed`
+  seed: 1
+  epochs: 200
+  patience: 30
+  batch_size: 128
+  lr: 0.001
+
+classify: [nn_curves, fusion_curves_alpha_dtm10]
+estimate: [nn_curves, fusion_curves_alpha_dtm10]
+
+clip_to_train_range: true
+
+regime:
+  from: pipeline              # the pipeline's frozen cutoffs (its compare/cutoffs.json)
+  taus: [0.5, 0.9]
+
+compare:
+  baseline: nn_curves         # paired, seed by seed: the contrast is fusion - curves
+  bootstrap: 200
+  seed: 0
+  classifiers: []             # no pipelines: every unit is compared on its own
+  estimators: []
+  poisson_threshold: null

@@ -35,6 +35,7 @@ TARGETS = {
     "ring": ["kappa", "mu", "rho", "sigma"],
     "matern1": ["R", "lam_p"],
     "cell": ["nbar", "k"],
+    "strauss": ["nbar", "q", "R"],
 }
 
 

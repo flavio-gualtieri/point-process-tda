@@ -17,14 +17,18 @@ to the repo for results/frozen/.
                     kernel skill over 5 simulation seeds, and paired `A - B` skill differences
     score checks    the wrong-model ladder (regret of a perturbed truth) and the oracle's gain over CSR
                     per stratum, with its minimum detectable gain at 100 clouds
+    out of dist.    `called <family>` shares of each classifier on families the run never trained on
     cost            train_seconds per unit
+
+A paper config that lacks an input (paper.yaml `repeat`, `dose`, `ood`; a grid cell) skips what reads it:
+without `repeat`, fidelity is read from the main evaluation set at its one simulation seed.
 
 A unit trained after the last compare has no interval yet: its row comes from its own report.json.
 Nothing is trained or simulated here; like every paper script this only reads finished outputs
 (paper.yaml). The tables are views of summary.csv, each written as LaTeX (paper/tables/) and as
 Markdown into results/story.md, the page to consult.
 
-    python paper/scripts/summary.py          # -> results/summary.csv, results/story.md, paper/tables/s*_*.tex
+    python paper/scripts/summary.py          # -> results/summary.csv, results/story.md, paper/tables/{s*_*,m_topology}.tex
 """
 
 from __future__ import annotations
@@ -40,16 +44,18 @@ import common as C
 sys.path.insert(0, str(C.ROOT / "scripts"))
 from compare import Boot, accuracy, ci as boot_ci, rmse_sd  # noqa: E402
 
+from cloudforger.baselines.mincontrast import FITTABLE  # noqa: E402
 from cloudforger.pipeline.core import TARGETS, family_weights  # noqa: E402
 from cloudforger.pipeline.regime import in_regime  # noqa: E402
 
-RESULTS = C.ROOT / "results"
+RESULTS = C.RESULTS
 SUMMARY, STORY = RESULTS / "summary.csv", RESULTS / "story.md"
 COLUMNS = ["method", "family", "metric", "mean", "std", "n_seeds", "seeds", "lo", "hi", "se", "n", "subset", "source"]
 REG = ["all", "regime 0.5", "regime 0.9"]
 GROUPS = {"overall": "all", "structured": "structured"}                # report key -> subset
 NESTED = {"by_family_stratum": "", "structured_by_end": "ended ", "identified": "identified "}
 FAMS = [f for f in C.FAMILIES if f != "poisson"]
+PAPER_ORDER = ["thomas", "nested", "ring", "lgcp", "matern2", "strauss", "cell"]   # Table 1's order
 B_CLOUDS = 2000                                                        # bootstrap resamples over clouds
 
 
@@ -125,10 +131,11 @@ def estimators() -> list[dict]:
 
 
 def story_pairs() -> list[tuple[str, str]]:
-    """What topology adds (down the grid) and what the learner adds (across it)."""
+    """What topology adds (down the grid) and what the learner adds (across it): the pairs the grid has."""
     g = C.cfg()["story"]["grid"]
-    return [(g["classical + PH"][k], g["classical"][k]) for k in ("network", "trees")] + \
-           [(g[i]["network"], g[i]["trees"]) for i in ("classical + PH", "classical")]
+    pairs = [(g["classical + PH"].get(k), g["classical"].get(k)) for k in ("network", "trees")] + \
+            [(g[i].get("network"), g[i].get("trees")) for i in ("classical + PH", "classical")]
+    return [(a, b) for a, b in pairs if a and b]
 
 
 def contrasts() -> list[dict]:
@@ -193,8 +200,11 @@ def end_to_end() -> list[dict]:
 
 
 def clouds(path) -> pd.DataFrame:
-    """Per-cloud kernel scores; a fit the sampler cannot realise is scored as CSR (regret = gain)."""
+    """Per-cloud kernel scores; a fit the sampler cannot realise is scored as CSR (regret = gain). A cloud the
+    kernel score could not score at all (no gain: its held-out replicate is too small) is dropped for every
+    variant, as endtoend.py's own sums skip it."""
     d = pd.read_csv(path)
+    d = d[d.groupby("scored_case_id").kernel_gain.transform(lambda g: g.notna().all())]
     failed = d.failed.fillna(False).astype(bool) if "failed" in d else np.zeros(len(d), bool)
     return d.assign(reg=d.kernel_regret.where(~failed, d.kernel_gain))
 
@@ -257,23 +267,56 @@ def seeded(d: pd.DataFrame, source: str, pairs: list[tuple[str, str]], min_z: fl
     return out
 
 
+def fidelity_source() -> str:
+    """Where the story's fidelity rows come from: the 5-seed rescoring if the config has one, else the main
+    evaluation set at its one simulation seed. A substring of those rows' `source`."""
+    return "scorecheck/repeat" if C.cfg().get("repeat") else str((C.evaluation("main") / "clouds.csv").relative_to(C.run()))
+
+
 def repeats() -> list[dict]:
-    """The headline clouds over 5 simulation seeds, and the cell clouds (one seed), as the story reads them."""
+    """The headline clouds over 5 simulation seeds (else the main set's one), and the cell clouds (one seed)."""
     min_z, st = C.run_config()["evaluation"]["skill_min_z"], C.cfg()["story"]
-    files = sorted(glob.glob(str(C.ROOT / C.cfg()["repeat"])))
-    d = pd.concat([clouds(p).assign(seed=int(p.rsplit("seed", 1)[1].split(".")[0])) for p in files])
     pairs = [("fusion", "curves"), ("ph", "classical"), ("fusion", "ph"), ("curves", "classical"),
-             ("fusion", "mincontrast"), ("ph", "mincontrast"), ("oracle_ph", "fusion"), ("oracle_ph", "ph")]
-    out = seeded(d, rel(C.ROOT / C.cfg()["repeat"]), [p for p in pairs if set(p) <= set(st["pipelines"])], min_z)
+             ("fusion", "mincontrast"), ("ph", "mincontrast"), ("oracle_ph", "fusion"), ("oracle_ph", "ph"),
+             ("oracle_fusion", "fusion"), ("oracle_mincontrast", "mincontrast"), ("fusion", "oracle_mincontrast")]
+    pairs = [p for p in pairs if set(p) <= set(st["pipelines"])]
+    if C.cfg().get("repeat"):
+        files = sorted(glob.glob(str(C.ROOT / C.cfg()["repeat"])))
+        d = pd.concat([clouds(p).assign(seed=int(p.rsplit("seed", 1)[1].split(".")[0])) for p in files])
+        out = seeded(d, rel(C.ROOT / C.cfg()["repeat"]), pairs, min_z)
+    else:
+        path = C.evaluation("main") / "clouds.csv"
+        out = seeded(clouds(path), str(path.relative_to(C.run())), pairs, min_z)
+    if "networks_cell" not in C.cfg()["evaluation"]:
+        return out
     cell = C.evaluation("networks_cell") / "clouds.csv"
     cp = [("fusion_estimators", "curves_estimators"), ("ph_estimators", "classical"),
           ("fusion_estimators", "ph_estimators"), ("curves_estimators", "classical")]
     return out + [r | {"family": "cell"} for r in seeded(clouds(cell), str(cell.relative_to(C.run())), cp, min_z)]
 
 
+def contrast_sets() -> list[dict]:
+    """Evaluation sets that re-score the main set's clouds under a changed input (story `contrasts`:
+    set -> the pairs to difference). Scored on the same clouds, so the differences are paired and their
+    interval is the bootstrap over clouds; each set carries its own `fusion` rows, identical to the main
+    set's, which is what the pairs are taken against."""
+    min_z, st = C.run_config()["evaluation"]["skill_min_z"], C.cfg()["story"]
+    out = []
+    for name, cps in (st.get("contrasts") or {}).items():
+        if name not in C.cfg()["evaluation"]:
+            continue
+        path = C.evaluation(name) / "clouds.csv"
+        if not path.exists():
+            continue
+        out += seeded(clouds(path), str(path.relative_to(C.run())), [tuple(p) for p in cps], min_z)
+    return out
+
+
 def score_checks() -> list[dict]:
     """Wrong-model ladder: regret of the truth perturbed by d s.d. of log theta (and cruder guesses),
     by stratum tier; and the oracle's gain over CSR per stratum with its minimum detectable gain."""
+    if not C.cfg().get("dose"):
+        return []
     path = C.ROOT / C.cfg()["dose"]
     d, src = clouds(path), rel(path)
     tier = {"above 0.9": "strong", "k 5-30": "strong", "0.5-0.9": "middle", "k 3-4": "middle"}
@@ -291,9 +334,26 @@ def score_checks() -> list[dict]:
     return out
 
 
+def out_of_distribution() -> list[dict]:
+    """What each classifier calls the test clouds of a family the run never trained on (scripts/ood.py)."""
+    if not C.cfg().get("ood"):
+        return []
+    out = []
+    for fam_dir in sorted((C.run() / C.cfg()["ood"]).glob("*/")):
+        for p in sorted(fam_dir.glob("classify/*/predictions.npz")):
+            z = np.load(p)
+            call = np.array(z["classes"])[z["posterior"].argmax(1)]
+            src = str(p.relative_to(C.run()))
+            out += [row(p.parent.name, fam_dir.name, f"called {f}", float(np.mean(call == f)), src, n=len(call))
+                    for f in z["classes"]]
+    return out
+
+
 def build() -> pd.DataFrame:
-    rows_ = classifiers() + estimators() + contrasts() + end_to_end() + repeats() + score_checks()
+    rows_ = (classifiers() + estimators() + contrasts() + end_to_end() + repeats() + contrast_sets()
+             + score_checks() + out_of_distribution())
     df = pd.DataFrame(rows_).reindex(columns=COLUMNS)
+    SUMMARY.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(SUMMARY, index=False, float_format="%.6g")
     print(f"-> {SUMMARY.relative_to(C.ROOT)}  ({len(df)} rows)")
     return df
@@ -329,7 +389,9 @@ def seeds_pm(r, d=3) -> str:
 
 def tex_cell(s: str) -> str:
     """Markdown cell -> LaTeX: intervals in small type, ± as math."""
-    s = s.replace("±", "$\\pm$").replace("≥", "$\\ge$").replace("τ", "$\\tau$").replace("_", "\\_")
+    s = s.replace("±", "$\\pm$").replace("≥", "$\\ge$").replace("τ", "$\\tau$").replace("_", "\\_").replace("%", "\\%")
+    s = s.replace("−", "$-$")
+    s = s.replace("é", "\\'e")                                  # the .tex files carry no inputenc
     if " [" in s:
         head, _, tail = s.partition(" [")
         s = f"{head} {{\\scriptsize [{tail}}}"
@@ -341,9 +403,10 @@ class Page:
 
     def __init__(self):
         self.lines = ["# The story in numbers", "",
-                      "Generated by `paper/scripts/summary.py` from `results/summary.csv`; do not edit. "
-                      "Each table is also in `paper/tables/<name>.tex`. Intervals are 95% bootstrap; "
-                      "`±` is the s.d. over 5 simulation seeds.", ""]
+                      "Generated by `paper/scripts/summary.py`" + ("" if C.CONFIG.name == "paper.yaml" else f" ({C.CONFIG.name})")
+                      + f" from `{SUMMARY.relative_to(C.ROOT)}`; "
+                      f"do not edit. Each table is also in `{C.TABLES.relative_to(C.ROOT)}/<name>.tex`. Intervals are "
+                      "95% bootstrap" + ("; `±` is the s.d. over 5 simulation seeds." if C.cfg().get("repeat") else "."), ""]
 
     def section(self, title: str, notes: list[str]):
         self.lines += [f"## {title}", ""] + [f"- {n}" for n in notes] + [""]
@@ -405,29 +468,34 @@ def s4_ceiling(df: pd.DataFrame, page: Page) -> None:
 
 
 def s5_fidelity(df: pd.DataFrame, page: Page) -> None:
-    st, src = C.cfg()["story"], "scorecheck/repeat"
+    st, src = C.cfg()["story"], fidelity_source()
+    seeds = bool(C.cfg().get("repeat"))
     body = []
     for v, label in st["pipelines"].items():
         g = lambda subset: pick(df, f"pipeline:{v}", "kernel_skill", subset=subset, source=src)
         sent = pick(df, f"pipeline:{v}", "kernel_gain", subset="ended poisson", source=src)
         body.append([label, f"`{v}`", seeds_pm(g("all")), f"[{g('all').lo:.3f}, {g('all').hi:.3f}]",
                      seeds_pm(g("identified True")), seeds_pm(g("wrong family")), "0" if sent is None else str(int(sent.n))])
-    pairs = df[df.method.str.contains(" - pipeline:") & df.source.str.contains(src, regex=False)]
-    pbody = [[f"`{r.method.replace('pipeline:', '')}`", f"{r['mean']:+.3f} ± {r['std']:.3f}", f"[{r.lo:+.3f}, {r.hi:+.3f}]"]
-             for _, r in pairs.iterrows()]
+    pairs = df[df.method.str.contains(" - pipeline:") & df.source.str.contains(src, regex=False) & (df.family == "all")]
+    pbody = [[f"`{r.method.replace('pipeline:', '')}`", f"{r['mean']:+.3f}" + (f" ± {r['std']:.3f}" if seeds else ""),
+              f"[{r.lo:+.3f}, {r.hi:+.3f}]"] for _, r in pairs.iterrows()]
     sent = {v: pick(df, f"pipeline:{v}", "kernel_gain", subset="ended poisson", source=src) for v in st["pipelines"]}
     sent = {v: s for v, s in sent.items() if s is not None}
     hit = {v: pick(df, f"pipeline:{v}", "kernel_gain", subset="identified True", source=src) for v in sent}
     share = [sent[v]["mean"] / hit[v]["mean"] for v in sent]
     z = [s["mean"] / s["se"] for s in sent.values()]
-    page.section("Section 5. Fidelity (480 headline clouds, 5 simulation seeds)", [
-        "Skill: 1 = as good as the true model, 0 = no better than a Poisson fit. Mean ± s.d. over 5 simulation seeds "
-        "(same fits); interval: bootstrap over clouds, seeds pooled.",
+    n_clouds = int(pick(df, f"pipeline:{next(iter(st['pipelines']))}", "kernel_gain", subset="all", source=src).n)
+    page.section(f"Section 5. Fidelity ({n_clouds} headline clouds, " + ("5 simulation seeds)" if seeds else "one simulation seed)"), [
+        "Skill: 1 = as good as the true model, 0 = no better than a Poisson fit. "
+        + ("Mean ± s.d. over 5 simulation seeds (same fits); interval: bootstrap over clouds, seeds pooled."
+           if seeds else "One simulation seed; interval: bootstrap over clouds."),
         "Identified / wrong family: structured clouds the classifier called correctly / called another structured family.",
         "Sent to Poisson: structured clouds the classifier called Poisson. What the true model would have gained over "
         f"the Poisson fit there is {min(share):.1%}–{max(share):.1%} of its gain on identified clouds "
-        f"(z {min(z):.1f}–{max(z):.1f} with the seeds pooled; unresolved at one seed).",
-        "Per-family skill is not reported here: over seeds it moves by 0.15–0.7 for Matérn I, Matérn II and cell (60 clouds each)."])
+        f"(z {min(z):.1f}–{max(z):.1f}" + (" with the seeds pooled; unresolved at one seed)." if seeds else ")."),
+        *(["Per-family skill is not reported here: over seeds it moves by 0.15–0.7 for Matérn I, Matérn II and cell "
+           "(60 clouds each)."] if seeds else
+          ["Per-family skill is not reported here: 60 clouds per family at one seed cannot rank pipelines within a family."])])
     page.table("s5_fidelity", ["Pipeline", "Variant", "Skill", "95% CI", "Identified", "Wrong family", "Sent to Poisson (n)"], body)
     page.lines += ["Paired differences, same clouds and simulations (mean ± s.d. over seeds; 95% CI over clouds):", ""]
     page.table("s5_pairs", ["Difference", "Δ skill", "95% CI"], pbody)
@@ -435,25 +503,95 @@ def s5_fidelity(df: pd.DataFrame, page: Page) -> None:
 
 def s6_topology(df: pd.DataFrame, page: Page) -> None:
     g = C.cfg()["story"]["grid"]
+    if not all(k in g["classical + PH"] and k in g["classical"] for k in ("network", "trees")):
+        page.section("Section 6. What topology adds", ["Skipped: the grid has no network without PH to pair the headline "
+                                                       "with (story.grid `classical`). Trees + PH − trees: `sA_models`, T10."])
+        return
     net, trees = (f"{g['classical + PH'][k]} - {g['classical'][k]}" for k in ("network", "trees"))
     body = [[C.NAMES[f], interval(pick(df, net, "rmse_over_sd", f)), interval(pick(df, trees, "rmse_over_sd", f))] for f in FAMS]
     body.append(["accuracy, all", interval(pick(df, net, "accuracy")), interval(pick(df, trees, "accuracy"))])
     body.append(["accuracy, τ=0.9", interval(pick(df, net, "accuracy", subset="regime 0.9")),
                  interval(pick(df, trees, "accuracy", subset="regime 0.9"))])
     rep = lambda a, b, fam="all": pick(df, f"pipeline:{a} - pipeline:{b}", "kernel_skill", fam)
-    body.append(["skill, 480 clouds", interval(rep("fusion", "curves")), interval(rep("ph", "classical"))])
-    body.append(["skill, cell k ≥ 5 (1000)", interval(rep("fusion_estimators", "curves_estimators", "cell")),
-                 interval(rep("ph_estimators", "classical", "cell"))])
+    e2e = [rep("fusion", "curves"), rep("ph", "classical")]
+    n_e2e = next((int(r.n) for r in e2e if r is not None), None)
+    body.append([f"skill, {n_e2e} clouds" if n_e2e else "skill, end to end", *(interval(r) for r in e2e)])
+    cell = [rep("fusion_estimators", "curves_estimators", "cell"), rep("ph_estimators", "classical", "cell")]
+    body.append(["skill, cell k ≥ 5 (1000)", *(interval(r) for r in cell)])
+    seeds = "mean over 5 simulation seeds" if C.cfg().get("repeat") else "one simulation seed"
     page.section("Section 6. What topology adds (paired: with PH − without, same learner)", [
         f"Network: `{net}`. Trees: `{trees}`.",
         "Error rows: RMSE(log θ)/s.d., negative = PH helps; 95% interval over test θ (compare's resamples). "
         "One training seed: between two networks, differences under about 0.005 are within seed noise.",
-        "Skill rows: positive = PH helps. 480 clouds: mean over 5 simulation seeds. Cell: one seed, classifier fixed "
+        f"Skill rows: positive = PH helps; paired on the same clouds, {seeds}. Cell: one seed, classifier fixed "
         "(`hgb_classical`), only the estimator changes."])
     page.table("s6_topology", ["", "Network + PH − network", "Trees + PH − trees"], body, rules_after=(len(FAMS) - 1, len(FAMS) + 1))
 
 
+def s6_filtrations(df: pd.DataFrame, page: Page) -> None:
+    """Which of the two filtrations carries what topology adds: the same network and trainer on both images,
+    on each alone, and on neither (story `filtrations`: label -> model)."""
+    st = C.cfg()["story"]
+    cols = st.get("filtrations") or {}
+    if len(cols) < 3:
+        page.section("Section 6b. Which filtration carries it",
+                     ["Skipped: story `filtrations` names fewer than three models to contrast."])
+        return
+    labels, models = list(cols), list(cols.values())
+    err = lambda m, f: interval(pick(df, m, "rmse_over_sd", f, subset="regime 0.9"), sign=False)
+    body = [[C.NAMES[f], *[err(m, f) for m in models]] for f in FAMS]
+    body.append(["accuracy, τ=0.9", *[interval(pick(df, m, "accuracy", subset="regime 0.9"), sign=False)
+                                      for m in models]])
+    src, pipes = "fidelity_filtrations", st.get("filtration_pipelines") or {}
+    if pipes:                                       # paired, the first column minus each other, on the same clouds
+        first = pipes[labels[0]]
+        paired = {l: pick(df, f"pipeline:{first} - pipeline:{pipes[l]}", "kernel_skill", source=src)
+                  for l in labels[1:] if l in pipes}
+        neither = next((l for l in labels if l not in pipes), None)          # the network without PH: its own set
+        if neither is not None:
+            paired[neither] = pick(df, f"pipeline:{first} - pipeline:curves", "kernel_skill")
+        body.append([f"skill, {labels[0]} − column", "---", *[interval(paired.get(l)) for l in labels[1:]]])
+    page.section("Section 6b. Which filtration carries it (same network and trainer, inputs removed)", [
+        "Columns: " + ", ".join(f"{l} = `{m}`" for l, m in cols.items()) + ".",
+        "Error rows: RMSE(log θ)/s.d. in the structured regime (τ = 0.9), lower is better; 95% interval over "
+        "test θ (compare's resamples). One training seed: differences under about 0.005 are within seed noise.",
+        f"Skill row: the first column's end-to-end skill minus each column's, paired on the same clouds "
+        f"(positive = {labels[0]} is better); 95% interval over clouds."])
+    page.table("s6_filtrations", ["", *labels], body, rules_after=(len(FAMS) - 1,))
+    pairs = df[df.method.str.contains(" - pipeline:") & df.source.str.contains(src, regex=False) & (df.family == "all")]
+    if pairs.empty:
+        return
+    page.lines += [f"Paired end-to-end differences, same {int(pairs.n.iloc[0])} clouds:", ""]
+    page.table("s6_filtration_pairs", ["Difference", "Δ skill", "95% CI"],
+               [[f"`{r.method.replace('pipeline:', '')}`", f"{r['mean']:+.3f}", f"[{r.lo:+.3f}, {r.hi:+.3f}]"]
+                for _, r in pairs.iterrows()])
+
+
+def m_topology(df: pd.DataFrame, page: Page) -> None:
+    """Main body: what the persistence images add to the same network and trainer, as the relative change in
+    estimation error (structured regime, tau = 0.9) against the network on the summary curves alone (story
+    `filtrations`: `neither` is the baseline, every other label one input set). The families minimum contrast
+    cannot fit come first. Absolute errors with intervals: s6_filtrations (appendix)."""
+    cols = C.cfg()["story"].get("filtrations") or {}
+    if "neither" not in cols or len(cols) < 2:
+        page.section("Main body. What topology adds", ["Skipped: story `filtrations` has no `neither` baseline."])
+        return
+    base, rest = cols["neither"], {l: m for l, m in cols.items() if l != "neither"}
+    err = lambda m, f: pick(df, m, "rmse_over_sd", f, subset="regime 0.9")["mean"]
+    fams = [f for f in PAPER_ORDER if f not in FITTABLE] + [f for f in PAPER_ORDER if f in FITTABLE]
+    pct = lambda x: "0%" if round(100 * x) == 0 else f"{round(100 * x):+d}%".replace("-", "−")
+    body = [[C.NAMES[f], num(err(base, f)), *[pct(err(m, f) / err(base, f) - 1) for m in rest.values()]] for f in fams]
+    page.section("Main body. What topology adds (relative change in error against the curves alone)", [
+        f"Baseline: `{base}`, error RMSE(log θ)/s.d. in the structured regime (τ = 0.9). Columns: "
+        + ", ".join(f"+ {l} = `{m}`" for l, m in rest.items()) + "; negative = the images help.",
+        "One training seed: differences under about 0.005 in absolute error are within seed noise."])
+    page.table("m_topology", ["", "Curves alone", *[f"+ {l}" for l in rest]], body,
+               rules_after=(sum(f not in FITTABLE for f in fams) - 1,))
+
+
 def sA_score(df: pd.DataFrame, page: Page) -> None:
+    if not C.cfg().get("dose"):
+        return
     ladder = df[df.method.str.startswith("wrong model:") & (df.metric == "kernel_regret")]
     order = ["noise_0.1", "noise_0.25", "noise_0.5", "noise_1.0", "noise_2.0", "median", "prior_draw", "wrong_family"]
     body = []
@@ -484,14 +622,28 @@ def sA_models(df: pd.DataFrame, page: Page) -> None:
     cell = lambda t, m, c: "---" if m not in t.index or c not in t or pd.isna(t.loc[m, c]) else f"{t.loc[m, c]:.3f}"
     order = list(acc.sort_values("all", ascending=False).index) + [m for m in err.index if m not in acc.index]
     body = [[model_name(m), *[cell(acc, m, s) for s in REG], *[cell(err, m, f) for f in FAMS]] for m in order]
-    page.section("Appendix. Every model", ["Accuracy (balanced, 8 families) and RMSE(log θ)/s.d. per family, test split."])
+    page.section("Appendix. Every model", [f"Accuracy (balanced, {len(C.FAMILIES)} families) and RMSE(log θ)/s.d. per family, test split."])
     page.table("sA_models", ["Model", "Acc. all", "τ=0.5", "τ=0.9", *[C.NAMES[f] for f in FAMS]], body)
+
+
+def sB_ood(df: pd.DataFrame, page: Page) -> None:
+    rows_ = df[df.metric.str.startswith("called ")]
+    if rows_.empty:
+        return
+    for fam, d in rows_.groupby("family"):
+        t = d.assign(call=d.metric.str.removeprefix("called ")).pivot_table(index="method", columns="call", values="mean")
+        t = t.reindex(columns=C.FAMILIES).sort_values("poisson")
+        body = [[model_name(m), *[num(t.loc[m, f], 2) for f in C.FAMILIES]] for m in t.index]
+        page.section(f"Appendix. Out of distribution: {C.NAMES.get(fam, fam)}", [
+            f"Share of {C.NAMES.get(fam, fam)}'s {int(d.n.iloc[0])} test clouds each classifier calls each family; "
+            f"the run never trained on {C.NAMES.get(fam, fam)}. Along its regime coordinate: <run>/ood/{fam}/summary.md."])
+        page.table(f"sB_ood_{fam}", ["Classifier", *[C.NAMES[f] for f in C.FAMILIES]], body)
 
 
 def main() -> None:
     df = build()
     page = Page()
-    for view in (s3_grid, s4_ceiling, s5_fidelity, s6_topology, sA_score, sA_models):
+    for view in (s3_grid, s4_ceiling, s5_fidelity, s6_topology, s6_filtrations, m_topology, sA_score, sA_models, sB_ood):
         view(df, page)
     page.write()
 

@@ -1,0 +1,107 @@
+# The v2 run: CLOUDFORGER_CONFIGS=configs/v2, merged over configs/pipeline.yaml key by key (mappings
+# merge, lists and values replace). The library it trains on: Strauss in, Matern I out -- Matern I is
+# still in the v2 bank (generated and featurized) as a family the pipeline never saw, for the
+# out-of-distribution evaluation.
+families: [poisson, thomas, nested, lgcp, matern2, ring, cell, strauss]
+
+regime:
+  coordinates: {strauss: zeta}  # q R nbar (pipeline/regime.py); merged into the base coordinates
+  # "Detected" = a 5% test: P(poisson | x) below its 5% quantile on Poisson clouds, not an argmax call.
+  # At that size every classifier and the classical L test share one boundary (compare/regime_size0.05.md);
+  # hgb_classical stays the reference because only a table learner has out-of-fold train predictions
+  # (74,000 clouds per family to fit on, against 2,000 val clouds for a network).
+  size: 0.05
+
+# Headline first: the fusion network (L, F, G, J curves + alpha and DTM_10 persistence images) as
+# classifier and estimator -- the v1 headline (evaluation/networks: skill 0.96) -- with the tree
+# models on CPU beside it: hgb_classical is the regime's reference classifier, and the rest are the
+# controls (classical only, PH only, both; linear). New names go at the END of a list: a unit's array
+# index is its position, so inserting one would move units already submitted.
+# nn_curves is the headline network minus the persistence images -- the same curves, the same trainer:
+# what topology adds to the NETWORK (Section 6, "The network against conventional learners").
+# fusion_curves_alpha and fusion_curves_dtm10 are the same network on ONE filtration each: with
+# fusion_curves_alpha_dtm10 they are the three-point contrast behind "two complementary filtrations"
+# (Section 4). Appended, so no existing unit's array index moves.
+classify: [fusion_curves_alpha_dtm10, hgb_classical, hgb_classical_ph, hgb_ph, linear_classical, nn_curves,
+           fusion_curves_alpha, fusion_curves_dtm10]
+estimate: [fusion_curves_alpha_dtm10, hgb_classical, hgb_classical_ph, nn_curves,
+           fusion_curves_alpha, fusion_curves_dtm10]
+
+compare:
+  estimators: [fusion_curves_alpha_dtm10, hgb_classical_ph, hgb_classical, nn_curves,
+               fusion_curves_alpha, fusion_curves_dtm10]
+
+evaluation:
+  sets:
+    headline:                   # scripts/endtoend.py --set headline
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+    headline_mc:                # the same clouds, against minimum contrast; waits for its fits
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        mincontrast: {classifier: mincontrast, estimators: mincontrast}
+        oracle_fusion: {classifier: oracle, estimators: fusion_curves_alpha_dtm10}
+        oracle_mincontrast: {classifier: oracle, estimators: mincontrast}
+    # The paper's end-to-end set: the regime under `size` (above), 60 clouds per stratum -- 20 left the
+    # pooled skill resting on three clouds. headline / headline_mc above were picked under the earlier
+    # argmax regime: kept as run, not used for stratified claims.
+    fidelity:                   # scripts/endtoend.py --set fidelity --shard i/k, then --merge
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        mincontrast: {classifier: mincontrast, estimators: mincontrast}
+        oracle_fusion: {classifier: oracle, estimators: fusion_curves_alpha_dtm10}
+        oracle_mincontrast: {classifier: oracle, estimators: mincontrast}
+      clouds: {per_bin: 60}
+    # Re-simulation noise on skill: `fidelity` at four more simulation seeds. Same pipelines and the same
+    # `clouds` (per_bin and clouds.seed unchanged), so pick() returns the identical 1440 clouds and the five
+    # sets are paired cloud by cloud; only `seed` moves, which reseeds every oracle, CSV and fit simulation.
+    # `fidelity` itself is seed 0 (evaluation.seed), so these four complete the five. -> paper.yaml `repeat`.
+    fidelity_seed1:
+      seed: 1
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        mincontrast: {classifier: mincontrast, estimators: mincontrast}
+        oracle_fusion: {classifier: oracle, estimators: fusion_curves_alpha_dtm10}
+        oracle_mincontrast: {classifier: oracle, estimators: mincontrast}
+      clouds: {per_bin: 60}
+    fidelity_seed2:
+      seed: 2
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        mincontrast: {classifier: mincontrast, estimators: mincontrast}
+        oracle_fusion: {classifier: oracle, estimators: fusion_curves_alpha_dtm10}
+        oracle_mincontrast: {classifier: oracle, estimators: mincontrast}
+      clouds: {per_bin: 60}
+    fidelity_seed3:
+      seed: 3
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        mincontrast: {classifier: mincontrast, estimators: mincontrast}
+        oracle_fusion: {classifier: oracle, estimators: fusion_curves_alpha_dtm10}
+        oracle_mincontrast: {classifier: oracle, estimators: mincontrast}
+      clouds: {per_bin: 60}
+    fidelity_seed4:
+      seed: 4
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        mincontrast: {classifier: mincontrast, estimators: mincontrast}
+        oracle_fusion: {classifier: oracle, estimators: fusion_curves_alpha_dtm10}
+        oracle_mincontrast: {classifier: oracle, estimators: mincontrast}
+      clouds: {per_bin: 60}
+    # The headline network with and against itself without the persistence images, on the SAME clouds as
+    # `fidelity` (same per_bin and seed, so pick() returns the same 1440): simulations are seeded by
+    # (seed, case_id, fit_key), so fusion's rows reproduce fidelity's exactly and the difference is paired.
+    fidelity_curves:            # scripts/endtoend.py --set fidelity_curves --shard i/k, then --merge
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        curves: {classifier: nn_curves, estimators: nn_curves}
+      clouds: {per_bin: 60}
+    # The filtration contrast end to end, on the SAME 1440 clouds as `fidelity` and `fidelity_curves`
+    # (same per_bin and seed): both images, alpha alone, DTM_10 alone. `fusion`'s rows reproduce the
+    # frozen ones exactly, so every difference is paired.
+    fidelity_filtrations:       # scripts/endtoend.py --set fidelity_filtrations --shard i/k, then --merge
+      pipelines:
+        fusion: {classifier: fusion_curves_alpha_dtm10, estimators: fusion_curves_alpha_dtm10}
+        alpha: {classifier: fusion_curves_alpha, estimators: fusion_curves_alpha}
+        dtm10: {classifier: fusion_curves_dtm10, estimators: fusion_curves_dtm10}
+      clouds: {per_bin: 60}

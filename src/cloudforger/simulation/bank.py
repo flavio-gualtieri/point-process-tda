@@ -35,13 +35,14 @@ class Config:
     shard_size: int
     families: tuple[str, ...]
     stride: int = 1                 # draw every stride-th theta index: a subset of the full bank
+    set: str = "bank"               # the stream set (seeding.SET_ID): a bank drawn on other rules names its own
 
     @classmethod
     def load(cls, path: str | Path = "simulation.yaml") -> Config:
         c = read_config(path)
         pair = lambda d: (d["low"], d["high"])
         return cls(int(c["root"]), pair(c["nbar"]), int(c["thetas"]), int(c["reps"]),
-                   pair(c["n"]), int(c["shard_size"]), tuple(c["families"]), int(c.get("stride", 1)))
+                   pair(c["n"]), int(c["shard_size"]), tuple(c["families"]), int(c.get("stride", 1)), c.get("set", "bank"))
 
     def indices(self) -> range:
         """The theta indices drawn. Theta i always comes from its own streams, so a strided bank is
@@ -61,7 +62,7 @@ def draw_theta(fam: Family, tables: Tables, cfg: Config, index: int, max_tries: 
     for tries in range(1, max_tries + 1):
         nbar = log_uniform(rng, *cfg.nbar)
         model = fam.draw(rng, nbar)
-        if model is None or cv(fam, model) > fam.rules.cv_max:
+        if model is None or cv(fam, model) > fam.rules.cv_limit(nbar):
             continue
         if fam.name == "lgcp":
             model["M"] = grid_size(model["sigma2"], model["s"], nbar, tables)
@@ -96,8 +97,8 @@ def run_shard(fam_name: str, shard: int, cfg: Config) -> Path:
     fam = FAMILIES[fam_name](Rules.load())
     points, rows = [], []
     for index in cfg.indices()[shard * cfg.shard_size:(shard + 1) * cfg.shard_size]:
-        theta = draw_theta(fam, tables, cfg, index)
-        for rep, pts, tries in sample_patterns(fam_name, theta, cfg, index):
+        theta = draw_theta(fam, tables, cfg, index, set_=cfg.set)
+        for rep, pts, tries in sample_patterns(fam_name, theta, cfg, index, set_=cfg.set):
             points.append(pts)
             rows.append({"family": fam_name, "theta": index, "rep": rep, "nbar": theta["nbar"],
                          "cv": theta["cv"], "draw_tries": theta["draw_tries"], **theta["model"],

@@ -1,0 +1,36 @@
+# Smoke run of the v2 bank (every 250th theta): CLOUDFORGER_CONFIGS=configs/v2_smoke. A copy of
+# configs/v2/simulation.yaml plus the three keys at the end -- an override directory is one level deep.
+# The v2 bank: CLOUDFORGER_CONFIGS=configs/v2, merged over configs/simulation.yaml key by key
+# (mappings merge, lists and values replace), written to its own data root (data_v2).
+#
+# Minimal curation: a rule stays only if it is a mathematical or computational limit, or excludes a
+# degenerate setting. What changed from the first bank, and why:
+#   kappa_eff_min   ONE degeneracy rule for every family: at least 4 effective clusters in the
+#                   window, kappa_eff = 1 / (cv^2 - 1/nbar). It replaces cv_max (a labelling
+#                   convenience for delta-tilde) and is what kappa_min already meant for Thomas.
+#   sigma_max       raised so the smeared end (omega = 8) stays reachable at 4 clusters
+#   rho, meta_min, ring_mu_min   visibility / identifiability thresholds, dropped to their trivial values
+#   core_min, lgcp_var_min, lgcp_s_min   near-CSR floors, lowered until the family is
+#                   indistinguishable from CSR at the low end
+#   nbar            down to 50: small patterns are common in data and genuinely close to CSR
+families: [poisson, thomas, nested, matern2, lgcp, ring, matern1, cell, strauss]
+set: bank_v2                  # its own seed streams: independent of the first bank
+
+nbar: {low: 50, high: 950}
+
+rules:
+  kappa_eff_min: 4      # cv_max (configs/simulation.yaml) is unused once this is set
+  kappa_min: 4
+  sigma_max: 4.0
+  rho: [1.0, 10.0]
+  meta_min: 1.0
+  ring_mu_min: 1.0
+  core_min: 0.01
+  lgcp_var_min: 0.005
+  lgcp_s_min: 0.03
+  strauss_q: [0.01, 1.0]      # strauss: inhibition strength q = 1 - gamma, uniform; 1 = hard core
+  strauss_core_max: 0.8       # strauss: R sqrt(n), log-uniform from core_min; 0.8 = packing 0.5
+
+thetas: 20000
+stride: 250
+shard_size: 20

@@ -21,9 +21,9 @@ import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
-from cloudforger.pipeline.core import TARGETS
+import common as C  # first: it sets the bank (paper config `data`) before cloudforger reads it
 
-import common as C
+from cloudforger.pipeline.core import TARGETS  # noqa: E402
 
 BINS, GAIN_BINS = 12, 6
 

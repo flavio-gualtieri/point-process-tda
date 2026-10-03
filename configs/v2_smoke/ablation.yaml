@@ -1,0 +1,9 @@
+# Smoke run of the v2 ablation: configs/smoke/ablation.yaml and configs/v2/ablation.yaml in one file.
+name: smoke_ablation
+seeds: [1, 2]
+classify: [pi_rips_h01, perslay_dtm10_h01, curves_L_fixed]
+estimate: [pi_rips_h01, perslay_dtm10_h01, curves_L_fixed]
+nn: {epochs: 2, patience: 1}
+regime: {from: smoke}
+compare: {bootstrap: 20}
+families: [poisson, thomas, nested, lgcp, matern2, ring, cell, strauss]

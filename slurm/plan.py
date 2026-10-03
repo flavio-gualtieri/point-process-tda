@@ -11,7 +11,8 @@ import sys
 from cloudforger.paths import read_config
 from cloudforger.pipeline.units import done, units
 
-MINCONTRAST_MODELS = 6          # baselines.mincontrast.MODELS: every family with a closed-form K but poisson and cell
+# baselines.mincontrast.FITTABLE, without its imports: the minimum-contrast array fits the run's families among these
+MINCONTRAST_FITTABLE = ("thomas", "nested", "lgcp", "matern2", "ring", "matern1")
 
 
 def main(runs: list[str]) -> None:
@@ -19,7 +20,7 @@ def main(runs: list[str]) -> None:
     thetas = len(range(0, sim["thetas"], sim.get("stride", 1)))
     print(f"simulate={len(sim['families']) * -(-thetas // sim['shard_size'])}")
     print(f"featurize={len(sim['families']) * len(feat['filtrations'])}")
-    print(f"mincontrast={MINCONTRAST_MODELS * cfg['mincontrast']['chunks']}")
+    print(f"mincontrast={sum(f in cfg['families'] for f in MINCONTRAST_FITTABLE) * cfg['mincontrast']['chunks']}")
     for run in runs:
         rc = read_config(f"{run}.yaml")
         for kind in ("cpu", "gpu"):

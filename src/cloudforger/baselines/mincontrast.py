@@ -13,7 +13,9 @@ them independently breaks the fit's intensity = n and leaves a theta the sampler
 
 Selection (the classical classifier): every cloud is fitted under every family's model; the call is
     argmin_f  log D_f + lambda * p_f          (poisson: D of pi r^2, p = 0)
-Cell has K = pi r^2 exactly, so K carries nothing about k and cell is never called.
+over the run's families that have a K to fit (`models`). Cell has K = pi r^2 exactly and Strauss has
+no closed form, so neither is ever called; when one is the true family (oracle routing) its estimate
+is FALLBACK: intensity n and the train-prior median of the rest.
 """
 
 from __future__ import annotations
@@ -31,8 +33,23 @@ from ..classical.lfunction import RADII
 from ..pipeline.core import TARGETS
 from ..simulation.families import FAMILIES, Rules, ring_step
 
-MODELS = ("thomas", "nested", "lgcp", "matern2", "ring", "matern1")    # families with a K to fit
+FITTABLE = ("thomas", "nested", "lgcp", "matern2", "ring", "matern1")    # families with a K to fit
 N_FREE = {"thomas": 2, "nested": 4, "lgcp": 2, "matern2": 1, "ring": 3, "matern1": 1}
+
+
+def models(families) -> list[str]:
+    """The families the baseline fits: the run's families with a K to fit, in FITTABLE order."""
+    return [f for f in FITTABLE if f in families]
+
+
+# Families K cannot fit, as (family's train rows, n per cloud) -> theta in TARGETS order. A length is
+# taken at its median in mean-spacing units (R sqrt(nbar)), so it scales with the cloud's n.
+_median = lambda x: float(np.exp(np.median(np.log(x))))
+FALLBACK = {
+    "cell": lambda train, n: np.column_stack([n, np.full(len(n), _median(train.k))]),
+    "strauss": lambda train, n: np.column_stack([n, np.full(len(n), _median(train.q)),
+                                                 _median(train.R * np.sqrt(train.nbar)) / np.sqrt(n)]),
+}
 
 
 # ---------------------------------------------------------------------------------------- models
@@ -78,7 +95,7 @@ class Excess:
 
     def __init__(self, ring_table_path: Path):
         rules = Rules.load()
-        self.fam = {f: FAMILIES[f](rules) for f in MODELS}
+        self.fam = {f: FAMILIES[f](rules) for f in FITTABLE}
         z = np.load(ring_table_path)
         self.ring = RegularGridInterpolator((z["log_t"], z["u"]), z["G"], bounds_error=False, fill_value=None)
         self.u_max = z["u"][-1]

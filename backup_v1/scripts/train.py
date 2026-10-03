@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Train one unit: a classifier (one model over every family) or an estimator (one model, one family).
+
+    python scripts/train.py list [--kind cpu|gpu] [--todo]   # the config's units, in array order
+    python scripts/train.py unit --kind cpu --index 3         # unit no. 3 of that kind (a SLURM array task)
+    python scripts/train.py classify --model hgb_classical
+    python scripts/train.py estimate --model nn_curves --family ring [--seed 2]
+    python scripts/train.py --config ablation.yaml list      # another run's units (configs/ablation.yaml)
+
+Units come from the config: every `classify` model, and every `estimate` model x every family but
+poisson (pipeline.units), once per seed if the config lists `seeds`. A unit is CPU or GPU by its
+learner. A unit whose report.json exists is skipped unless --force, so adding a model to the config
+and resubmitting trains only the new units.
+
+Training rows are the train split; networks early-stop on val. Classifiers weight rows by the prior
+(config `prior`). The regime's reference classifier also writes out-of-fold train predictions
+(`crossfit_folds`, folds grouped by theta) when its learner supports it.
+
+Scores (report.json), test split:
+  classifier  accuracy under the prior, recall per family, NLL, and the detection rate per family
+              (share NOT called poisson -- the CSR filter)
+  estimator   RMSE of log(target) and that over the target's s.d. (1 = no better than the mean), on
+              the family's test clouds
+
+Output  <results>/<run>/classify/<model>[/seed_<s>]/  or  .../estimate/<family>/<model>[/seed_<s>]/
+            predictions.npz (pipeline.core's contract), report.json (with the git commit),
+            config.yaml, model.joblib | model.pt
+"""
+
+from __future__ import annotations
+
+import argparse
+import time
+
+import numpy as np
+
+from cloudforger.pipeline import learners
+from cloudforger.pipeline.core import (TARGETS, config_arg, load_config, rows as load_rows, sample_weights,
+                                       save_config, save_predictions, unit_dir, write_json)
+from cloudforger.pipeline.units import done, units
+from cloudforger.provenance import provenance_stamp
+
+
+def classify(cfg: dict, model: str, seed: int | None) -> None:
+    t0 = time.time()
+    r = load_rows(cfg)
+    fam, split = r.family.to_numpy(), r.split.to_numpy()
+    classes = cfg["families"]
+    y = np.array([classes.index(f) for f in fam])
+    w = sample_weights(fam, cfg)
+    train, val = np.flatnonzero(split == "train"), np.flatnonzero(split == "val")
+    held = np.flatnonzero(split != "train")
+    learner = learners.make(cfg, model, r, seed)
+    print(f"classify {model}: {len(train)} train rows, input ready ({time.time() - t0:.0f}s)", flush=True)
+    post = learner.classify(y, w, train, val, held)
+    idx, post_all = held, post
+    if model == cfg["regime"].get("classifier"):
+        oof = learner.crossfit(y, w, train, r.family.to_numpy()[train] + ":" + r.theta.to_numpy()[train].astype(str),
+                               cfg["crossfit_folds"])
+        if oof is not None:
+            idx, post_all = np.concatenate([train, held]), np.vstack([oof, post])
+            print(f"classify {model}: out-of-fold train predictions ({time.time() - t0:.0f}s)", flush=True)
+    out = unit_dir(cfg, "classify", model, seed=seed)
+    save_predictions(out / "predictions.npz", case_id=r.index.to_numpy(str)[idx], split=split[idx],
+                     posterior=post_all.astype(np.float32), classes=np.array(classes))
+    test = split[held] == "test"
+    report = {"task": "classify", "model": model, "seed": seed, "spec": cfg["models"][model], "n_train": int(len(train)),
+              "seconds": round(time.time() - t0), **score_classifier(post[test], fam[held][test], classes, cfg)}
+    finish(cfg, out, learner, report)
+
+
+def score_classifier(post: np.ndarray, fam: np.ndarray, classes: list[str], cfg: dict) -> dict:
+    call = np.array(classes)[post.argmax(1)]
+    y = np.array([classes.index(f) for f in fam])
+    w = sample_weights(fam, cfg)
+    p_true = np.clip(post[np.arange(len(y)), y], 1e-12, None)
+    return {"accuracy": float(np.average(call == fam, weights=w)),
+            "nll": float(np.average(-np.log(p_true), weights=w)),
+            "recall": {f: float((call[fam == f] == f).mean()) for f in classes},
+            "detected": {f: float((call[fam == f] != "poisson").mean()) for f in classes}}
+
+
+def estimate(cfg: dict, model: str, family: str, seed: int | None) -> None:
+    t0 = time.time()
+    r = load_rows(cfg)
+    split, fam = r.split.to_numpy(), r.family.to_numpy()
+    targets = TARGETS[family]
+    train, val = (np.flatnonzero((split == s) & (fam == family)) for s in ("train", "val"))
+    held = np.flatnonzero(split != "train")                      # every family: the pipeline may route here
+    learner = learners.make(cfg, model, r, seed)
+    print(f"estimate {family} {model}: {len(train)} train rows, input ready ({time.time() - t0:.0f}s)", flush=True)
+    logs = learner.regress(targets, train, val, held)
+    if cfg["clip_to_train_range"]:
+        Y = np.log(r[targets].to_numpy(float)[train])
+        logs = np.clip(logs, Y.min(0), Y.max(0))
+    out = unit_dir(cfg, "estimate", model, family, seed)
+    save_predictions(out / "predictions.npz", case_id=r.index.to_numpy(str)[held], split=split[held],
+                     theta_hat=np.exp(logs), targets=np.array(targets), family=np.array(family))
+    mine = (split[held] == "test") & (fam[held] == family)
+    y = np.log(r[targets].to_numpy(float)[held][mine])
+    rmse = np.sqrt(((logs[mine] - y) ** 2).mean(0))
+    report = {"task": "estimate", "model": model, "family": family, "seed": seed, "spec": cfg["models"][model],
+              "n_train": int(len(train)), "seconds": round(time.time() - t0), "n_test": int(mine.sum()),
+              "rmse_log": dict(zip(targets, rmse.round(4).tolist())),
+              "rmse_over_sd": dict(zip(targets, (rmse / y.std(0)).round(4).tolist())),
+              "mean_rmse_over_sd": float((rmse / y.std(0)).mean())}
+    finish(cfg, out, learner, report)
+
+
+def finish(cfg, out, learner, report) -> None:
+    for fname, obj in learner.artifacts().items():
+        if fname.endswith(".pt"):
+            import torch
+            torch.save(obj, out / fname)
+        else:
+            import joblib
+            joblib.dump(obj, out / fname, compress=3)
+    save_config(cfg, out)
+    report["provenance"] = provenance_stamp()
+    write_json(out / "report.json", report)                     # last: its existence marks the unit done
+    head = report.get("accuracy", report.get("mean_rmse_over_sd"))
+    print(f"-> {out}  ({report['seconds']}s, {'accuracy' if 'accuracy' in report else 'mean RMSE/sd'} {head:.4f})", flush=True)
+
+
+def run(cfg, task, model, family, seed, force) -> None:
+    if not force and done(cfg, task, model, family, seed):
+        print(f"{task} {model} {family or ''} {'' if seed is None else f'seed {seed}'}: done (--force to retrain)")
+        return
+    if task == "classify":
+        classify(cfg, model, seed)
+    else:
+        estimate(cfg, model, family, seed)
+
+
+def main(argv=None) -> None:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    config_arg(p)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    ls = sub.add_parser("list")
+    ls.add_argument("--kind", choices=["cpu", "gpu"])
+    ls.add_argument("--todo", action="store_true", help="only units without a report.json")
+    u = sub.add_parser("unit")
+    u.add_argument("--kind", choices=["cpu", "gpu"], required=True)
+    u.add_argument("--index", type=int, required=True)
+    c = sub.add_parser("classify")
+    c.add_argument("--model", required=True)
+    e = sub.add_parser("estimate")
+    e.add_argument("--model", required=True)
+    e.add_argument("--family", required=True)
+    for s in (c, e):
+        s.add_argument("--seed", type=int, help="one of the config's seeds (default: its only one)")
+    for s in (u, c, e):
+        s.add_argument("--force", action="store_true")
+    args = p.parse_args(argv)
+    cfg = load_config(args.config)
+
+    if args.cmd == "list":
+        for i, (task, model, family, seed) in enumerate(units(cfg, args.kind)):
+            if not (args.todo and done(cfg, task, model, family, seed)):
+                print(i, task, model, family or "-", "-" if seed is None else seed)
+        return
+    if args.cmd == "unit":
+        task, model, family, seed = units(cfg, args.kind)[args.index]
+    else:
+        task, model, family, seed = args.cmd, args.model, getattr(args, "family", None), args.seed
+        if model not in cfg["models"]:
+            raise SystemExit(f"unknown model `{model}` (config models: {', '.join(cfg['models'])})")
+        if seed is None and cfg.get("seeds"):
+            seed = cfg["seeds"][0]
+    run(cfg, task, model, family, seed, args.force)
+
+
+if __name__ == "__main__":
+    main()

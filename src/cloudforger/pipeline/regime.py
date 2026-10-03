@@ -6,6 +6,13 @@ Per family, with a physical coordinate x (config regime.coordinates) and expecte
     P(event | u)                          isotonic in u (direction fitted)
     in regime at tau  <=>  P(event | u) >= tau, i.e. u past the boundary u*(tau)
 
+With regime.size = alpha, `detected` is a test of size alpha instead of an argmax call: P(poisson | x)
+below its alpha quantile over the fitting clouds' Poisson rows, so the event has a false-alarm rate
+of alpha on CSR whatever the classifier and prior. An equal-prior argmax call has none to speak of
+(a large share of true Poisson clouds is called something else), so its boundary sits at a power
+that differs between classifiers; at equal size every classifier and the classical L test put the
+boundary in the same place (scripts/regime.py).
+
 The event is the reference classifier's call (config regime.classifier) on its out-of-fold train
 predictions, else on val: `detected` = not called poisson, `identified` = called its own family. A
 logistic model's 50% contour is a straight line in (log x, log nbar), so this is the 2-D (x, nbar)
@@ -26,7 +33,9 @@ import pandas as pd
 from .core import load_classifier, log, run_dir
 
 # Physical coordinates from the manifest's parameter columns. omega = cluster (or ring) overlap,
-# zeta = a back-of-envelope pair-count signal-to-noise ratio.
+# zeta = a back-of-envelope pair-count signal-to-noise ratio: a hard core of radius R removes
+# ~ n^2 pi R^2 / 2 close pairs against a binomial s.d. ~ n R, so zeta ~ R n; a soft core of strength q
+# removes a fraction q of them.
 COORDINATES = {
     "thomas": {"omega": lambda r: r.sigma * np.sqrt(r.kappa)},
     "nested": {"omega_inner": lambda r: r.sigma2 * np.sqrt(r.kappa * r.mu1)},
@@ -34,6 +43,7 @@ COORDINATES = {
     "matern2": {"zeta": lambda r: r.R * r.nbar},
     "ring": {"omega": lambda r: r.rho * np.sqrt(r.kappa)},
     "matern1": {"zeta": lambda r: r.R * r.nbar},
+    "strauss": {"zeta": lambda r: r.q * r.R * r.nbar},
 }
 
 
@@ -80,18 +90,26 @@ def fit_cutoffs(cfg: dict, r: pd.DataFrame) -> dict:
     pred = pred[pred.split == fit_split]
     classes = [c for c in pred.columns if c != "split"]
     call = np.array(classes)[pred[classes].to_numpy().argmax(1)]
+    size, threshold = reg.get("size"), None
+    if size is not None:                                         # detected = a test of this size
+        p0 = pred["poisson"].to_numpy()
+        threshold = float(np.quantile(p0[r.loc[pred.index].family.to_numpy() == "poisson"], size))
+        detected = p0 < threshold
+    else:
+        detected = call != "poisson"
     rows = r.loc[pred.index]
     out = {}
     for f, coord in reg["coordinates"].items():
         if coord is None or f not in cfg["families"]:
             continue
         m = (rows.family == f).to_numpy()
-        y = call[m] != "poisson" if reg["event"] == "detected" else call[m] == f
+        y = detected[m] if reg["event"] == "detected" else call[m] == f
         if y.all() or not y.any():                               # one outcome: no boundary to fit
             c = {"constant": bool(y.all()), "nbar_exponent": 0.0, "direction": None, "u_boundary": {}}
         else:
             c = fit_cutoff(coordinate(rows[m], f, coord), rows.nbar.to_numpy(float)[m], y, reg["taus"])
         out[f] = {**c, "coordinate": coord, "event_rate": float(y.mean()), "fitted_on": fit_split,
+                  "size": size, "poisson_threshold": threshold,
                   "n": int(m.sum())}
     return out
 

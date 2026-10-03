@@ -114,7 +114,8 @@ def _check(args):
 
 
 def cmd_check(cfg, args):
-    tasks = [(f, i, args.patterns, cfg) for f in cfg.families for i in range(args.thetas)]
+    closed = [f for f in cfg.families if FAMILIES[f].closed_form]       # the rest have no K to check against
+    tasks = [(f, i, args.patterns, cfg) for f in closed for i in range(args.thetas)]
     rows = sorted(_pool(_check, tasks, args.jobs), key=lambda r: (cfg.families.index(r["family"]), r["theta"]))
     print(pd.DataFrame(rows).to_string(index=False))
 
