@@ -11,7 +11,9 @@ coordinate share one axis (cell has none: s_regime). Families are pooled with eq
         true model's mean gain beyond tau = 0.9 in the same family; plotted at the stratum's median x.
         95% bootstrap over clouds, resampled within (family, stratum) and shared by the three series.
 
-    python paper/scripts/f4_regime.py        # -> paper/figs/f4_regime.pdf
+f4_detection is (a) alone at column width, for the main body.
+
+    python paper/scripts/f4_regime.py        # -> paper/figs/f4_regime.pdf, f4_detection.pdf
 """
 
 from __future__ import annotations
@@ -147,19 +149,32 @@ def gains(ax) -> None:
     C.legend_below(ax, names, GAIN_COLOURS)
 
 
+def boundaries(ax) -> None:
+    ax.set(xlim=(EDGES[0], EDGES[-1]))
+    ax.set_xlabel(XLABEL, labelpad=1)
+    for v, ls in ((0, "-"), (1, "--")):
+        ax.axvline(v, color=C.INK2, lw=0.6, ls=ls, zorder=5)
+
+
+def detection_only(t: pd.DataFrame) -> None:
+    fig, ax = plt.subplots(figsize=(C.COLUMN_WIDTH, 1.75), layout="constrained")
+    detection(ax, t)
+    ax.set_ylabel("Detection power", labelpad=2)
+    boundaries(ax)
+    C.save(fig, "f4_detection")
+
+
 def main() -> None:
     C.style()
     t = test_rows()
+    detection_only(t)
     fig, axes = plt.subplots(1, 3, figsize=(C.TEXT_WIDTH, 2.2), layout="constrained")
     detection(axes[0], t)
     calls(axes[1], t)
     gains(axes[2])
     for ax, title in zip(axes, ["(a) Detection power", "(b) ParamNet's call", "(c) Relative gain over CSR"]):
         ax.set_title(title, loc="left")
-        ax.set(xlim=(EDGES[0], EDGES[-1]))
-        ax.set_xlabel(XLABEL, labelpad=1)
-        for v, ls in ((0, "-"), (1, "--")):
-            ax.axvline(v, color=C.INK2, lw=0.6, ls=ls, zorder=5)
+        boundaries(ax)
     C.save(fig, "f4_regime")
 
 

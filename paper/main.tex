@@ -343,37 +343,42 @@ Table~\ref{tab:families-skill}).
 
 ParamNet's advantage is also visible in the estimators' loss: given the true family, every learned estimator has lower $\mathrm{RMSE}(\log\theta)/\mathrm{s.d.}$ than minimum contrast on every family. On the Neyman--Scott families minimum contrast does worse than predicting the training mean ($1.48$- $2.25$; Appendix~\ref{app:estimation}).
 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/v2/s_regime_map}
+\caption{The regime boundary in the physical parameters: share of test patterns the reference detector (trees on the
+summary curves, size $5\%$) does not detect, over $\nb$ and each family's regime coordinate $\eta$
+(Table~\ref{tab:families}). Each boundary is a line $u=\log\eta+a\log\nb=u^\star(\tau)$: $\tau=0.5$ solid, $0.9$
+dashed. Patterns approach CSR as $\omega$ grows or $\zeta$ shrinks.}
+\label{fig:regime-map}
+\end{figure*}
+
 \paragraph{Classification difficulty is inherent.}
 The deliberately wide priors admit many near-CSR patterns, on which every method struggles to identify the family.
 We call a pattern \emph{detectable} if a test of CSR rejects it. Every test we use is calibrated to falsely reject
 only $5\%$ of truly Poisson patterns, so rejection is real evidence of structure. For each family, the share of
 patterns detected is governed by one physical coordinate (Table~\ref{tab:families}), so the undetectable region is
-bounded by a single curve in parameter space. The \emph{$\tau$-boundary} is the curve along which a fraction $\tau$
+bounded by a single curve in parameter space (Figure~\ref{fig:regime-map}). The \emph{$\tau$-boundary} is the curve along which a fraction $\tau$
 of a family's patterns are detected; patterns beyond it are detected more often. We fit it on a reference detector,
 trees on the summary curves (Appendix~\ref{app:regime}). Detectability is a property of the patterns, not of the test.
 The $L$ test, trees on persistence summaries alone and ParamNet, thresholded to the same false-positive rate, detect
 the same share of every family's patterns to within three points, and meet the same boundary
-(Figure~\ref{fig:regime}a; Table~\ref{tab:regime}). Restricting to patterns beyond the $\tau=0.5$ boundary raises
+(Figure~\ref{fig:regime}; Table~\ref{tab:regime}). Restricting to patterns beyond the $\tau=0.5$ boundary raises
 ParamNet's accuracy from $0.45$ to $0.70$, and beyond $\tau=0.9$ to $0.75$ (per learner:
 Table~\ref{tab:classification}). Below the $\tau=0.5$ boundary ParamNet
-calls $61\%$ of patterns Poisson, and even the true model gains nothing over CSR (Figure~\ref{fig:regime}b, c).
+calls $61\%$ of patterns Poisson, and even the true model gains nothing over CSR (Figure~\ref{fig:regime-detect}).
 
 
-\begin{figure*}[t]
+\begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{figs/v2/f4_regime}
-\caption{Regime boundary: each family's
-coordinate $u=\log\eta+a\log\nb$ (Appendix~\ref{app:regime}) is rescaled to
-$\tilde u=(u-u^\star_{0.5})/(u^\star_{0.9}-u^\star_{0.5})$, so that the $\tau=0.5$ boundary is at $\tilde u=0$ (solid), the
-$\tau=0.9$ boundary at $\tilde u=1$ (dashed); families are averaged with equal weight.
-\textbf{(a)}~Detection power on the test patterns of three tests of size $5\%$ (dotted line); faint: the $L$ test per family. The
-boundaries are fitted on a fourth detector, trees on the summary curves, so the agreement is not by construction.
-\textbf{(b)}~ParamNet's label. \textbf{(c)}~Gain over CSR of the true model, ParamNet and minimum contrast on the three strata of the
-evaluation set, as a share of the true model's gain beyond $\tau=0.9$; $95\%$ bootstrap intervals over patterns.
-Every detector meets the same boundary; below it ParamNet mostly calls Poisson, and no model, not even the true one,
-gains over CSR. Cell has no coordinate (Figure~\ref{fig:regime-detect}).}
+% Panel (a) of f4_regime, cropped; f4_regime.py now also writes it alone as f4_detection.pdf.
+\includegraphics[width=0.8\columnwidth,trim=0 0 331 11,clip]{figs/v2/f4_regime}
+\caption{Detection power of three tests of size $5\%$ (dotted) against the rescaled regime coordinate $\tilde u$
+(Figure~\ref{fig:regime-detect}),
+families averaged; faint: the $L$ test per family. Solid: the $\tau=0.5$ boundary; dashed: $\tau=0.9$. The
+boundaries are fitted on a fourth detector, so the agreement is not by construction.}
 \label{fig:regime}
-\end{figure*}
+\end{figure}
 
 \paragraph{Errors cost almost no fidelity.}
 ParamNet makes two kinds of error, and we show that neither result in significant loss of fidelity. Supplying ParamNet with the true family changes its skill by $-0.01$ [$-0.03$, $+0.02$], implying that patterns that get misclassified in the end-to-end pipeline still receive a high-fidelity fit. In fact, wrong-family fits keep $82\%$ of the true model's gain (against $91\%$ when the family is identified), because the confusions occur between look-alikes: in the structured regime $96\%$ stay within one mechanism (clustered, regular, cell; Figure~\ref{fig:confusion}), and three quarters are among Thomas, nested and ring, which produce the same patterns over part of their parameter spaces (Appendix~\ref{app:families-limits}). Calling a pattern Poisson costs nothing: on the $271$ patterns ParamNet sends to Poisson, the true model does no better than CSR, and the $L$ test rejects CSR on only $2.2\%$ [$1.0$, $4.7$] of them, no more often than on Poisson patterns. For these patterns, CSR is essentially the correct fit.
@@ -510,7 +515,9 @@ cost of the persistence images alone. Lower is cheaper; cost is not the point of
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{figs/v2/s_regime_detect}
-\caption{Figure~\ref{fig:regime} per family; $\tilde u$ as there, cell against $k$. Top: detection power on the test
+\caption{Figure~\ref{fig:regime} per family, cell against $k$. Each family's coordinate $u=\log\eta+a\log\nb$ is
+rescaled to $\tilde u=(u-u^\star_{0.5})/(u^\star_{0.9}-u^\star_{0.5})$, so that the $\tau=0.5$ boundary is at
+$\tilde u=0$ (solid) and the $\tau=0.9$ boundary at $\tilde u=1$ (dashed). Top: detection power on the test
 patterns of the $L$ test, trees on persistence summaries alone and ParamNet, and in grey every other classifier, all
 tests of size $5\%$. Bottom: gain over CSR of the true model, ParamNet and minimum contrast on each stratum of the
 evaluation set, as a share of the true model's gain in the family's strongest stratum (cell: $k\ge5$); $95\%$
@@ -518,16 +525,6 @@ bootstrap intervals over patterns. The $L$ test detects cell at its nominal $5\%
 patterns at $k=5$--$9$, where the learned detectors already detect almost all. Minimum contrast never selects cell,
 and its fits to cell patterns at $k\ge5$ do worse than CSR.}
 \label{fig:regime-detect}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\textwidth]{figs/v2/s_regime_map}
-\caption{The boundary in the physical parameters: the share of test patterns the reference detector (trees on the
-summary curves, a test of size $5\%$) does not detect, over $\nb$ and the regime coordinate $\eta$
-(Table~\ref{tab:families}), with the boundary at $\tau=0.5$ (solid) and $0.9$ (dashed). Patterns approach CSR as
-$\omega$ grows or $\zeta$ shrinks. Each boundary is a line $u=\log\eta+a\log\nb=u^\star(\tau)$, with slope $-a$.}
-\label{fig:regime-map}
 \end{figure}
 
 \begin{table*}[t]
